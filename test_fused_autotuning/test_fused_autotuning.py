@@ -99,6 +99,7 @@ for dbarrier in barriers:
 # Strip off the dependencies on global barriers and other phases
 def strip_unused_dependencies(instructions):
     phase_instruction_ids = [instruction.id for instruction in instructions]
+
     new_instructions = []
     #print(phase_instruction_ids)
     barrier_dep_count = {}
@@ -114,7 +115,7 @@ def strip_unused_dependencies(instructions):
             if dependency in phase_instruction_ids:
                 new_dependencies.append(dependency)
             if dependency in barrier_dep_count:
-                barrier_dep_count += 1
+                barrier_dep_count[dependency] += 1
 
         #print(new_dependencies, instruction.depends_on)
         new_instruction = instruction.copy()
@@ -141,7 +142,7 @@ for cur_phase in range(len(barriers[0:3])):
         domains += phases[barriers[i]]["domains"]
         #print(domains)
         instructions += phases[barriers[i]]["instructions"]
-        instructions = strip_unused_dependencies(instructions)
+    instructions = strip_unused_dependencies(instructions)
 
     active_vars = frozenset()
     for instruction in instructions:
