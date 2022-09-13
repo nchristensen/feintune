@@ -276,6 +276,11 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
 
     # Create the list of parameter values to try
 
+    # Does not account for local memory usage due to register spilling
+    # Need to reserve some amount for that
+    # Count number of constants and private memory objects 
+    # and subtract that from available local memory?
+    # Would need to multiply that number by the number of concurrent threads, including ilp
     local_mem_size = queue.device.local_mem_size
     max_work_group_size = queue.device.max_work_group_size
 

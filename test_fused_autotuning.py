@@ -227,11 +227,14 @@ def dump_subkernels_from_pickled(arg):
     directory="./pickled_programs"
     files = os.listdir(directory)
     for num, filename in list(enumerate(sorted(files))):
+        print(num, filename)
         f = os.path.join(directory, filename)
         # Skip the massive kernel for now
-        if os.path.isfile(f) and (filename.endswith(".pickle") or filename.endswith(".pkl")) and num != 9:
+        if os.path.isfile(f) and filename.startswith("prefeinsum") and (filename.endswith(".pickle") or filename.endswith(".pkl")):
             f = open(f, "rb")
-            tunit, args = pickle.load(f)
+            tunit = pickle.load(f)
+            args = []
+            #tunit, args = pickle.load(f)
             f.close()
             sks = get_subkernels(tunit, args)
             if len(sks) == 1:
@@ -246,6 +249,51 @@ def dump_subkernels_from_pickled(arg):
                     print(get_einsum_types(sk))
                 """
     #exit()
+
+# Copied from Meshmode
+def apply_feinsum_transformations(t_unit, queue):
+    from loopy.match import ObjTagged
+    import feinsum as fnsm
+    from functools import reduce
+    from meshmode.feinsum_transformations import FEINSUM_TO_TRANSFORMS
+
+    assert all(insn.tags_of_type(EinsumTag)
+           for insn in t_unit.default_entrypoint.instructions
+           if isinstance(insn, lp.MultiAssignmentBase)
+           )
+
+    einsum_tags = reduce(
+        frozenset.union,
+        (insn.tags_of_type(EinsumTag)
+         for insn in t_unit.default_entrypoint.instructions),
+        frozenset())
+    for ensm_tag in sorted(einsum_tags,
+       	    key=lambda x: sorted(x.orig_loop_nest)):
+        if reduce(frozenset.union,
+            (insn.reduction_inames()
+                   for insn in (t_unit.default_entrypoint.instructions)
+                   if ensm_tag in insn.tags),
+             frozenset()):
+            fused_einsum = fnsm.match_einsum(t_unit, ObjTagged(ensm_tag))
+        else:
+            # elementwise loop
+            fused_einsum = _get_elementwise_einsum(t_unit, ensm_tag)
+        #print(fused_einsum)
+        #print(fnsm.normalize_einsum(fused_einsum))
+        #exit()
+        try:
+            fnsm_transform = FEINSUM_TO_TRANSFORMS[
+                fnsm.normalize_einsum(fused_einsum)]
+        except KeyError:
+            query_result = fnsm.query(fused_einsum,
+                queue.context,
+                err_if_no_results=True)
+            print(query_result)
+            exit()
+            #1/0
+
+        t_unit = fnsm_transform(t_unit, insn_match=ObjTagged(ensm_tag))
+        return t_unit
 
 
 def autotune_parts(parts, queue):
@@ -305,7 +353,13 @@ def autotune_parts(parts, queue):
         #exit()
         #print(transformations)
         #exit()
-        tdict = parallel_autotune(csk, 0, trans_list_list)
+        #tdict = parallel_autotune(csk, 0, trans_list_list)
+        #print("Mine")
+        #print(tdict)
+        feinsum_tdict = run_single_param_set_v2(queue, apply_feinsum_transformations(csk, queue), [], generic_test)
+        print("Feinsum")
+        print(feinsum_tdict)
+        exit()
         transformations = tdict["transformations"]
         # Chop off redundant add_inames_for_unused_hw_axes
         #cum_transformations += trans_list_list[0] # Just use the first one for now
