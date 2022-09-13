@@ -358,7 +358,7 @@ def analyze_knl_bandwidth(knl, avg_time):
     # Would probably be better to use the memory footprint
     # if can get it to work.
     global_memory_args_and_temporaries = []
-    args_and_temps = knl.default_entrypoint.args + knl.temporary_variables.values()
+    args_and_temps = knl.default_entrypoint.args + knl.default_entrypoint.temporary_variables.values()
     for arg in args_and_temps:
         if arg.address_space == lp.AddressSpace.GLOBAL:
             print(arg.name)
