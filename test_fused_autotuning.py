@@ -237,7 +237,6 @@ def dump_subkernels_from_pickled(arg):
                 print(sks[0][0].default_entrypoint)
                 if len(get_einsum_types(sks[0][0])) > 0:
                     autotune_parts(sks, queue)
-                    exit()
                 """
                 for sk,csk in sks:
                     print(sk.default_entrypoint())

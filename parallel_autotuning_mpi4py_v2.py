@@ -13,7 +13,7 @@ import os
 import loopy as lp
 from os.path import exists
 from run_tests import run_single_param_set_v2, generic_test
-#from grudge.grudge_array_context import convert
+from utils import convert
 #from grudge.execution import diff_prg, elwise_linear
 import mpi4py.MPI as MPI
 from mpi4py.futures import MPIPoolExecutor, MPICommExecutor
@@ -162,9 +162,10 @@ def parallel_autotune(knl, platform_id, trans_list_list):
 
     knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
     #knl = gac.set_memory_layout(knl)
-    #pid = gac.unique_program_id(knl)
-    #os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
-    #hjson_file_str = f"hjson/{knl.default_entrypoint.name}_{pid}.hjson"
+    from utils import unique_program_id
+    pid = unique_program_id(knl)
+    os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
+    hjson_file_str = f"hjson/{knl.default_entrypoint.name}_{pid}.hjson"
 
     #assert comm.Get_size() > 1
     #assert charm.numPes() > 1
@@ -199,8 +200,8 @@ def parallel_autotune(knl, platform_id, trans_list_list):
 
     #pool_proxy = Chare(PoolScheduler, onPE=0)
 
-    sort_key = lambda entry: entry[0]
-    transformations = {}
+    sort_key = lambda entry: entry["data"]["avg_time"]
+    result = {"transformations": {}, "data": {}}
     comm = MPI.COMM_WORLD
     #nranks = comm.Get_size()
     if len(trans_list_list) > 0: # Guard against empty list
@@ -212,30 +213,27 @@ def parallel_autotune(knl, platform_id, trans_list_list):
         #"""
         with MPICommExecutor(comm, root=0) as mypool:
             if mypool is not None:
-                results = list(mypool.map(test, args, chunksize=1))
-                #print(results)
+                results = list(mypool.map(test, list(args)[:10], chunksize=1))
                 results.sort(key=sort_key)
         
-                #for r in results:
-                #    print(r)
                 # Workaround for pocl CUDA bug
                 # whereby times are imprecise
                 ret_index = 0
                 for i, result in enumerate(results):
-                    if result[0] > 1e-7:
+                    if result["data"]["avg_time"] > 1e-7:
                         ret_index = i
                         break
 
-                avg_time, transformations, data = results[ret_index]
-        #"""
+                result = results[ret_index]
+    
+    #od = {"transformations": transformations, "data": data}
+    if comm.Get_rank() == 0:
+        print(result)
+        out_file = open(hjson_file_str, "wt+")
+        hjson.dump(result, out_file, default=convert)
+        out_file.close()
 
-    #od = {"transformations": transformations}
-    #out_file = open(hjson_file_str, "wt+")
-    #hjson.dump(od, out_file,default=convert)
-    #out_file.close()
-
-    print(avg_time, data, transformations)
-    return transformations
+    return result
 
 """
 def main(args):

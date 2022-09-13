@@ -581,7 +581,7 @@ def run_single_param_set(queue, knl_base, tlist_generator, params, test_fn, max_
     bw = analyze_knl_bandwidth(knl, avg_time)
 
     if device_memory_bandwidth is not None:  # noqa
-        bw = analyze_knl_bandwidth(knl, avg_time)
+        #bw = analyze_knl_bandwidth(knl, avg_time)
         frac_peak_GBps = bw / device_memory_bandwidth
         if frac_peak_GBps  >= bandwidth_cutoff:  # noqa
             # Should validate result here
@@ -596,14 +596,16 @@ def run_single_param_set(queue, knl_base, tlist_generator, params, test_fn, max_
             print("Performance is within tolerance of peak bandwith or flop rate. Terminating search")  # noqa
             return choices
 
-    data = None
+    data = {"avg_time": avg_time, "observed_GBps": bw, "observed_gflop_rate": gflops}
     if device_memory_bandwidth is not None and max_gflops is not None:
-        data = (frac_peak_GBps*device_memory_bandwidth, 
-                frac_peak_gflops*max_gflops, 
-                frac_peak_GBps, 
-                frac_peak_gflops)
+        data.update({"max_gflops": max_gflops,
+                "device_memory_GBps": device_memory_bandwidth,
+                "frac_peak_GBps": frac_peak_GBps, 
+                "frac_peak_gflops": frac_peak_gflops
+                })
 
-    return (avg_time, trans_list, data)
+    retval = {"transformations": trans_list, "data": data}
+    return retval
 
 def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_gflops=None, device_memory_bandwidth=None):
     #trans_list = tlist_generator(params, knl=knl_base)
@@ -615,7 +617,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_gflops=Non
     bw = analyze_knl_bandwidth(knl, avg_time)
 
     if device_memory_bandwidth is not None:  # noqa
-        bw = analyze_knl_bandwidth(knl, avg_time)
+        #bw = analyze_knl_bandwidth(knl, avg_time)
         frac_peak_GBps = bw / device_memory_bandwidth
         if frac_peak_GBps  >= bandwidth_cutoff:  # noqa
             # Should validate result here
@@ -630,6 +632,19 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_gflops=Non
             print("Performance is within tolerance of peak bandwith or flop rate. Terminating search")  # noqa
             return choices
 
+    data = {"avg_time": avg_time, "observed_GBps": bw, "observed_gflop_rate": gflops}
+    if device_memory_bandwidth is not None and max_gflops is not None:
+        data.update({"max_gflops": max_gflops,
+                "device_memory_GBps": device_memory_bandwidth,
+                "frac_peak_GBps": frac_peak_GBps, 
+                "frac_peak_gflops": frac_peak_gflops
+                })
+
+    from frozendict import frozendict
+    retval = frozendict({"transformations": trans_list, "data": data})
+    return retval
+
+    """
     data = None
     if device_memory_bandwidth is not None and max_gflops is not None:
         data = (frac_peak_GBps*device_memory_bandwidth, 
@@ -638,7 +653,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_gflops=Non
                 frac_peak_gflops)
 
     return (avg_time, trans_list, data)
-
+    """
 
 
 
