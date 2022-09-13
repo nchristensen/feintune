@@ -299,22 +299,24 @@ def autotune_parts(parts, queue):
             #exit()
 
         #if counter != 2: # Avoid tuning the second part for the moment
-        #    autotune_result = run_single_param_set_v2(queue, csk, cur_trans, generic_test)
+        #autotune_result = run_single_param_set_v2(queue, csk, trans_list_list[1], generic_test)
         #    cum_transformations += list(autotune_result[1][:-1])
-
+        
+        #exit()
         #print(transformations)
         #exit()
-        transformations = parallel_autotune(csk, 0, trans_list_list)
+        tdict = parallel_autotune(csk, 0, trans_list_list)
+        transformations = tdict["transformations"]
         # Chop off redundant add_inames_for_unused_hw_axes
         #cum_transformations += trans_list_list[0] # Just use the first one for now
 
     # Save transformations to file (should probably also save the metadata)
 
-    print(cum_transformations)
+    #print(cum_transformations)
     #exit()
 
-    return cum_transformations
-
+    #return cum_transformations
+    return transformations
 
 def get_subkernels(tunit, args):
 

@@ -357,8 +357,7 @@ def analyze_knl_bandwidth(knl, avg_time):
     #print(knl.default_entrypoint.args)
     # Would probably be better to use the memory footprint
     # if can get it to work.
-    global_memory_args_and_temporaries = []
-    args_and_temps = knl.default_entrypoint.args + knl.default_entrypoint.temporary_variables.values()
+    args_and_temps = knl.default_entrypoint.args + list(knl.default_entrypoint.temporary_variables.values())
     for arg in args_and_temps:
         if arg.address_space == lp.AddressSpace.GLOBAL:
             print(arg.name)
@@ -618,6 +617,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_gflops=Non
     #trans_list = tlist_generator(params, knl=knl_base)
     print(trans_list)
     knl = apply_transformation_list(knl_base, trans_list)
+
     dev_arrays, avg_time = test_fn(queue, knl)
 
     # Should this return the fraction of peak of should that be calculated in this function?
@@ -644,17 +644,18 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_gflops=Non
             return choices
 
     data = {"avg_time": avg_time}
-    data.update(bw_dict)
-    data.update(gflops_dict)
-    if device_memory_bandwidth is not None and max_gflops is not None:
-        data.update({"max_gflops": max_gflops,
-                "device_memory_GBps": device_memory_bandwidth,
-                "frac_peak_GBps": frac_peak_GBps, 
-                "frac_peak_gflops": frac_peak_gflops
-                })
+    data.update(bw_dict.items())
+    data.update(gflops_dict.items())
+    if device_memory_bandwidth is not None:
+        data.update({"frac_peak_gflops": frac_peak_GBps,
+                     "device_memory_GBps": device_memory_bandwidth})
+    if max_gflops is not None:
+        data.update({"frac_peak_gflops": frac_peak_gflops,
+                "max_gflops": max_gflops})
 
     from frozendict import frozendict
     retval = frozendict({"transformations": trans_list, "data": data})
+    print(retval)
     return retval
 
     """

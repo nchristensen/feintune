@@ -415,7 +415,7 @@ def apply_transformation_list(knl, transformations):
     print(knl.default_entrypoint)
     print(transformations)
     #exit()
-    for t in transformations:
+    for t in list(transformations):
         print(t)
         func = function_mapping[t[0]]
         args = [knl]
