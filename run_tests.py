@@ -7,6 +7,7 @@ import pyopencl.clrandom
 import loopy as lp
 from loopy.version import LOOPY_USE_LANGUAGE_VERSION_2018_2
 from pyopencl.tools import ImmediateAllocator, MemoryPool
+from frozendict import frozendict
 #from loopy.kernel.data import AddressSpace
 
 """
@@ -356,14 +357,20 @@ def analyze_knl_bandwidth(knl, avg_time):
     #print(knl.default_entrypoint.args)
     # Would probably be better to use the memory footprint
     # if can get it to work.
-    for arg in knl.default_entrypoint.args:
-        print(arg.name)
-        print(arg.shape)
-        print(type(arg.dtype))
-        entries = np.prod((arg.shape))
-        fp_bytes = arg.dtype.dtype.itemsize
-        nbytes += fp_bytes * entries
-    bw = nbytes / avg_time / 1e9
+    global_memory_args_and_temporaries = []
+    args_and_temps = knl.default_entrypoint.args + knl.temporary_variables.values()
+    for arg in args_and_temps:
+        if arg.address_space == lp.AddressSpace.GLOBAL:
+            print(arg.name)
+            print(arg.shape)
+            print(type(arg.dtype))
+            entries = np.prod((arg.shape))
+            fp_bytes = arg.dtype.dtype.itemsize
+            nbytes += fp_bytes * entries
+        # This bandwidth calculation assumes data in global memory need only be accessed once
+        # from global memory and is otherwise served from a cache or local memory that is
+        # fast enough to be considered free
+        bw = nbytes / avg_time / 1e9
 
     # Seems lp.gather_access_footprint_bytes breaks
     #footprint = lp.gather_access_footprint_bytes(knl)
@@ -374,7 +381,7 @@ def analyze_knl_bandwidth(knl, avg_time):
     #print(f"Time: {avg_time}, Bytes: {nbytes}, Bandwidth: {bw} GB/s Footprint BW: {footprint_bw} GB/s")
 
     print(f"Time: {avg_time}, Bytes: {nbytes}, Bandwidth: {bw} GB/s")
-    return bw
+    return frozendict({"observed_GBps": bw, "nbytes_global": nbytes})
 
 
 def analyze_FLOPS(knl, avg_time, max_gflops=None):
@@ -408,13 +415,13 @@ def analyze_FLOPS(knl, avg_time, max_gflops=None):
     #print("Map GFLOP/s: " + str(map_gflop_rate))
     #print(flops)
     #print(map_flops)
-
+    """
     frac_peak_gflops = None
     if max_gflops is not None:
         print("Peak GFLOP/s: " + str(max_gflops))
         frac_peak_gflops = gflop_rate / max_gflops
         print("Percent peak: " + str(100*(frac_peak_gflops)))
-    
+    """
     print()
 
     # Calculate bandwidth
@@ -428,7 +435,7 @@ def analyze_FLOPS(knl, avg_time, max_gflops=None):
     #print("Percent peak: " + str(100*(frac_peak_GBps)))
     #print()
 
-    return gflop_rate, frac_peak_gflops
+    return frozendict({"observed_gflop_rate": gflop_rate, "flops": map_flops})#gflop_rate, frac_peak_gflops
 
 
 def verifyResult(B_dev1, B_dev2, B_dev3, A_dev1, A_dev2, A_dev3, X_dev):
@@ -590,7 +597,7 @@ def run_single_param_set(queue, knl_base, tlist_generator, params, test_fn, max_
 
     # This is incorrect for general einsum kernels
     if max_gflops is not None:
-        frac_peak_gflops = analyze_FLOPS(knl, max_gflops, avg_time)
+        frac_peak_gflops = gflops / max_gflops#analyze_FLOPS(knl, max_gflops, avg_time)
         if frac_peak_gflops >= gflops_cutoff:
             # Should validate result here
             print("Performance is within tolerance of peak bandwith or flop rate. Terminating search")  # noqa
@@ -609,12 +616,16 @@ def run_single_param_set(queue, knl_base, tlist_generator, params, test_fn, max_
 
 def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_gflops=None, device_memory_bandwidth=None):
     #trans_list = tlist_generator(params, knl=knl_base)
+    print(trans_list)
     knl = apply_transformation_list(knl_base, trans_list)
     dev_arrays, avg_time = test_fn(queue, knl)
 
     # Should this return the fraction of peak of should that be calculated in this function?
-    gflops, frac_peak_gflops = analyze_FLOPS(knl, avg_time, max_gflops=max_gflops)
-    bw = analyze_knl_bandwidth(knl, avg_time)
+    gflops_dict = analyze_FLOPS(knl, avg_time, max_gflops=max_gflops)
+    bw_dict = analyze_knl_bandwidth(knl, avg_time)
+
+    bw = bw_dict["observed_GBps"]
+    gflops = gflops_dict["observed_gflop_rate"]
 
     if device_memory_bandwidth is not None:  # noqa
         #bw = analyze_knl_bandwidth(knl, avg_time)
@@ -626,13 +637,15 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_gflops=Non
 
     # This is incorrect for general einsum kernels
     if max_gflops is not None:
-        frac_peak_gflops = analyze_FLOPS(knl, max_gflops, avg_time)
+        frac_peak_gflops = gflops/ max_gflops#analyze_FLOPS(knl, max_gflops, avg_time)
         if frac_peak_gflops >= gflops_cutoff:
             # Should validate result here
             print("Performance is within tolerance of peak bandwith or flop rate. Terminating search")  # noqa
             return choices
 
-    data = {"avg_time": avg_time, "observed_GBps": bw, "observed_gflop_rate": gflops}
+    data = {"avg_time": avg_time}
+    data.update(bw_dict)
+    data.update(gflops_dict)
     if device_memory_bandwidth is not None and max_gflops is not None:
         data.update({"max_gflops": max_gflops,
                 "device_memory_GBps": device_memory_bandwidth,
