@@ -213,7 +213,7 @@ def parallel_autotune(knl, platform_id, trans_list_list):
         #"""
         with MPICommExecutor(comm, root=0) as mypool:
             if mypool is not None:
-                results = list(mypool.map(test, list(args)[:10], chunksize=1))
+                results = list(mypool.map(test, args, chunksize=1))
                 results.sort(key=sort_key)
         
                 # Workaround for pocl CUDA bug

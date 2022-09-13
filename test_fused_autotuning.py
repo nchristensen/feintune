@@ -226,15 +226,17 @@ def dump_subkernels_from_pickled(arg):
 
     directory="./pickled_programs"
     files = os.listdir(directory)
-    for filename in files:
+    for num, filename in enumerate(files):
         f = os.path.join(directory, filename)
-        if os.path.isfile(f) and (filename.endswith(".pickle") or filename.endswith(".pkl")):
+        # Skip the massive kernel for now
+        if os.path.isfile(f) and (filename.endswith(".pickle") or filename.endswith(".pkl")) and num != 3:
             f = open(f, "rb")
             tunit, args = pickle.load(f)
             f.close()
             sks = get_subkernels(tunit, args)
             if len(sks) == 1:
                 print(sks[0][0].default_entrypoint)
+                
                 if len(get_einsum_types(sks[0][0])) > 0:
                     autotune_parts(sks, queue)
                 """
