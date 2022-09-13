@@ -212,10 +212,9 @@ def parallel_autotune(knl, platform_id, trans_list_list):
         #"""
         with MPICommExecutor(comm, root=0) as mypool:
             if mypool is not None:
-                results = list(mypool.map(test, args[:1], chunksize=1))
-                print(results)
-                exit()
-                #results.sort(key=sort_key)
+                results = list(mypool.map(test, args, chunksize=1))
+                #print(results)
+                results.sort(key=sort_key)
         
                 #for r in results:
                 #    print(r)
@@ -235,6 +234,7 @@ def parallel_autotune(knl, platform_id, trans_list_list):
     #hjson.dump(od, out_file,default=convert)
     #out_file.close()
 
+    print(avg_time, data, transformations)
     return transformations
 
 """

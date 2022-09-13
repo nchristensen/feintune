@@ -234,16 +234,17 @@ def dump_subkernels_from_pickled(arg):
             f.close()
             sks = get_subkernels(tunit, args)
             if len(sks) == 1:
-                print(sks[0])
-                #exit()
-                #autotune_parts(sks, queue)
+                print(sks[0][0].default_entrypoint)
+                if len(get_einsum_types(sks[0][0])) > 0:
+                    autotune_parts(sks, queue)
+                    exit()
                 """
                 for sk,csk in sks:
-                    print(sk)
+                    print(sk.default_entrypoint())
                 for sk,sk in sks:
                     print(get_einsum_types(sk))
                 """
-    exit()
+    #exit()
 
 
 def autotune_parts(parts, queue):
@@ -269,6 +270,7 @@ def autotune_parts(parts, queue):
                 print(instr.dependency_names())
                 #print(instr.assignee, type(instr.assignee))
 
+        print("Einsum types", einsum_types)
         est = einsum_types[0]
         # Is a 3to2 einsum kernel
         if len(est[0]) == 2 and len(est[1]) == 1:
@@ -295,13 +297,13 @@ def autotune_parts(parts, queue):
             #    print(entry)
             #exit()
 
-        if counter != 2: # Avoid tuning the second part for the moment
-            autotune_result = run_single_param_set_v2(queue, csk, cur_trans, generic_test)
-            cum_transformations += list(autotune_result[1][:-1])
+        #if counter != 2: # Avoid tuning the second part for the moment
+        #    autotune_result = run_single_param_set_v2(queue, csk, cur_trans, generic_test)
+        #    cum_transformations += list(autotune_result[1][:-1])
 
         #print(transformations)
         #exit()
-        #transformations = parallel_autotune(csk, 0, trans_list_list)
+        transformations = parallel_autotune(csk, 0, trans_list_list)
         # Chop off redundant add_inames_for_unused_hw_axes
         #cum_transformations += trans_list_list[0] # Just use the first one for now
 
@@ -398,9 +400,9 @@ def get_subkernels(tunit, args):
     """
 
 if __name__ == "__main__":
-    #dump_subkernels_from_pickled()
-    charm.start(dump_subkernels_from_pickled)
+    dump_subkernels_from_pickled(None)
+    #charm.start(dump_subkernels_from_pickled)
     #print(result)
-    charm.exit()
+    #charm.exit()
 
 

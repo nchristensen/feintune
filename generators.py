@@ -291,18 +291,34 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
     arg_dict = dict([(arg.name, arg) for arg in knl.default_entrypoint.args])
     arg_dict.update(knl.default_entrypoint.temporary_variables)
 
-    #print(write_deps)
-    #print(read_deps)
+    print(write_deps)
+    print(read_deps)
+    n_elem = None
+    sizes = frozenset()
     for arg in list(arg_dict.values()):
-        print(arg)
-        if FirstAxisIsElementsTag() in arg.tags and len(arg.shape) == 2:
+        if arg.name in write_deps:
+            n_elem, n_out = arg.shape
+            fp_bytes = arg.dtype.dtype.itemsize
+            break
+    for arg in list(arg_dict.values()):
+        if arg.name in read_deps and arg.shape[0] == n_elem:
+            n_in = arg.shape[1]
             dof_arrays.append(arg.name)
-            if arg.name in read_deps:
-                n_elem, n_in = arg.shape
-                fp_bytes = arg.dtype.dtype.itemsize
-        elif len(arg.shape) == 2: # Not super robust
-            n_out, n_in = arg.shape
-    #exit()
+
+    print(n_elem, n_out, n_in)
+
+    """
+    if FirstAxisIsElementsTag() in arg.tags and len(arg.shape) == 2:
+        print("HERE")
+        dof_arrays.append(arg.name)
+        print(arg.name, read_deps)
+        if arg.name in read_deps:
+            print("HERE2")
+            n_elem, n_in = arg.shape
+            fp_bytes = arg.dtype.dtype.itemsize
+    elif len(arg.shape) == 2: # Not super robust
+        n_out, n_in = arg.shape
+    """
 
     read_dof_arrays = read_deps & frozenset(dof_arrays)
     n_dof_arrays = len(read_dof_arrays)
@@ -437,10 +453,9 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
         trans_list.append(("add_inames_for_unused_hw_axes",))
         trans_list_list.append(tuple(trans_list))
 
-    #print(trans_list_list)
+    print("Num trans to try: ", len(trans_list_list))
 
     return trans_list_list
-
 
 
 # Is there any real reason to separate this from the tspace kernel. Why not
