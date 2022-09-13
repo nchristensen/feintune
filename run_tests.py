@@ -6,7 +6,6 @@ import pyopencl.clrandom
 
 import loopy as lp
 from loopy.version import LOOPY_USE_LANGUAGE_VERSION_2018_2
-from grudge.loopy_dg_kernels import apply_transformation_list
 from pyopencl.tools import ImmediateAllocator, MemoryPool
 #from loopy.kernel.data import AddressSpace
 
@@ -33,11 +32,11 @@ lp.set_caching_enabled(False)
 import loopy.options
 loopy.options.ALLOW_TERMINAL_COLORS = False
 
-from grudge.loopy_dg_kernels import (gen_diff_knl, gen_diff_knl_fortran2,
+from __init__ import (gen_diff_knl, gen_diff_knl_fortran2,
     apply_transformation_list, gen_elwise_linear_knl, gen_face_mass_knl, gen_face_mass_knl_merged)
-from grudge.grudge_tags import (IsDOFArray, IsSepVecDOFArray, IsOpArray,
+from grudge_tags import (IsDOFArray, IsSepVecDOFArray, IsOpArray,
     IsSepVecOpArray, IsFaceDOFArray, IsFaceMassOpArray, IsVecDOFArray, IsVecOpArray, IsFourAxisDOFArray)
-import  grudge.grudge_array_context as gac#import set_memory_layout
+#import  grudge.grudge_array_context as gac#import set_memory_layout
 
 def testBandwidth(fp_format=np.float32, nruns=100):
 
@@ -477,7 +476,7 @@ def apply_transformations_and_run_test(queue, knl, test_fn, params, tgenerator, 
     kio, kii, iio, iii, ji = params
 
     # Transform and run
-    knl = gac.set_memory_layout(knl)
+    #knl = gac.set_memory_layout(knl)
     if applicator is not None:
         trans_list = tgenerator(params)
     else:
@@ -606,6 +605,42 @@ def run_single_param_set(queue, knl_base, tlist_generator, params, test_fn, max_
 
     return (avg_time, trans_list, data)
 
+def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_gflops=None, device_memory_bandwidth=None):
+    #trans_list = tlist_generator(params, knl=knl_base)
+    knl = apply_transformation_list(knl_base, trans_list)
+    dev_arrays, avg_time = test_fn(queue, knl)
+
+    # Should this return the fraction of peak of should that be calculated in this function?
+    gflops, frac_peak_gflops = analyze_FLOPS(knl, avg_time, max_gflops=max_gflops)
+    bw = analyze_knl_bandwidth(knl, avg_time)
+
+    if device_memory_bandwidth is not None:  # noqa
+        bw = analyze_knl_bandwidth(knl, avg_time)
+        frac_peak_GBps = bw / device_memory_bandwidth
+        if frac_peak_GBps  >= bandwidth_cutoff:  # noqa
+            # Should validate result here
+            print("Performance is within tolerance of peak bandwith. Terminating search")  # noqa
+            return choices
+
+    # This is incorrect for general einsum kernels
+    if max_gflops is not None:
+        frac_peak_gflops = analyze_FLOPS(knl, max_gflops, avg_time)
+        if frac_peak_gflops >= gflops_cutoff:
+            # Should validate result here
+            print("Performance is within tolerance of peak bandwith or flop rate. Terminating search")  # noqa
+            return choices
+
+    data = None
+    if device_memory_bandwidth is not None and max_gflops is not None:
+        data = (frac_peak_GBps*device_memory_bandwidth, 
+                frac_peak_gflops*max_gflops, 
+                frac_peak_GBps, 
+                frac_peak_gflops)
+
+    return (avg_time, trans_list, data)
+
+
+
 
 def exhaustive_search_v2(queue, knl, test_fn, pspace_generator, tlist_generator, time_limit=float("inf"), max_gflops=None, 
         device_memory_bandwidth=None, gflops_cutoff=0.95, bandwidth_cutoff=0.95, start_param=None):
@@ -620,7 +655,7 @@ def exhaustive_search_v2(queue, knl, test_fn, pspace_generator, tlist_generator,
     # Should probably obtain device_memory_bandwidth from empirical tests
 
     # Also fixes the parameters. Maybe that should be a separate function   
-    knl = gac.set_memory_layout(knl)
+    #knl = gac.set_memory_layout(knl)
 
     knl_base = knl.copy()
 
@@ -750,7 +785,7 @@ def exhaustive_search(queue, knl, test_fn, time_limit=float("inf"), max_gflops=N
                 fp_bytes = arg.dtype.dtype.itemsize
 
     # Also fixes the parameters    
-    knl = gac.set_memory_layout(knl)
+    #knl = gac.set_memory_layout(knl)
 
     tested = []
 

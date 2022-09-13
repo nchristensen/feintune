@@ -6,7 +6,7 @@ from pytools import memoize_in
 #import pyopencl.clrandom
 
 import loopy as lp
-from grudge.grudge_tags import IsDOFArray, ParameterValue
+from grudge_tags import IsDOFArray, ParameterValue
 #from loopy.version import LOOPY_USE_LANGUAGE_VERSION_2018_2
 #from loopy.kernel.data import AddressSpace
 
@@ -412,14 +412,15 @@ def apply_transformation_list(knl, transformations):
     # Maybe add some logic to add slabs=(0,0) if n_elem % k_inner_outer == 0
     # Maybe can do this based on tranformation name, loop variable, and loop variable
     # bounds
-    #print(knl)
+    print(knl.default_entrypoint)
+    print(transformations)
+    #exit()
     for t in transformations:
         print(t)
         func = function_mapping[t[0]]
         args = [knl]
         if len(t) > 1:
-            args = args + t[1]
-        kwargs = t[2] if len(t) > 2 else {}
+            args = args + list(t[1])
+        kwargs = dict(t[2]) if len(t) > 2 else {}
         knl = func(*args, **kwargs)
-
     return knl

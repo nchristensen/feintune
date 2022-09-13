@@ -8,25 +8,24 @@
 import hjson
 import pyopencl as cl
 import numpy as np
-import grudge.loopy_dg_kernels as dgk
 import os
-import grudge.grudge_array_context as gac
+#import grudge.grudge_array_context as gac
 import loopy as lp
 from os.path import exists
-from grudge.loopy_dg_kernels.run_tests import run_single_param_set, generic_test
-from grudge.grudge_array_context import convert
+from run_tests import run_single_param_set_v2, generic_test
+#from grudge.grudge_array_context import convert
 #from grudge.execution import diff_prg, elwise_linear
 import mpi4py.MPI as MPI
 from mpi4py.futures import MPIPoolExecutor, MPICommExecutor
 #from mpipool import MPIPool
 
-from guppy import hpy
+#from guppy import hpy
 import gc
 import linecache
 import os
 import tracemalloc
-from mem_top import mem_top
-import matplotlib.pyplot as plt
+#from mem_top import mem_top
+#import matplotlib.pyplot as plt
 
 data_dict = {}
 
@@ -88,11 +87,11 @@ def get_queue(pe_num, platform_num):
 
 def test(args):
     #print(args)
-    platform_id, knl, tlist_generator, params, test_fn = args
+    platform_id, knl, tlist, test_fn = args
     comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
     # From MPI.PoolExecutor the communicator for the tasks is not COMM_WORLD
     queue = get_queue(comm.Get_rank(), platform_id)
-    result = run_single_param_set(queue, knl, tlist_generator, params, test_fn)
+    result = run_single_param_set_v2(queue, knl, tlist, test_fn)
     #print(mem_top())
     #h = hpy()
     #print(h.heap())
@@ -143,9 +142,10 @@ def autotune_pickled_kernels(path, platform_id, actx_class, comm):
             #del knl
 
 
-def parallel_autotune(knl, platform_id, actx_class, comm):
+def parallel_autotune(knl, platform_id, trans_list_list):
 
     # Create queue, assume all GPUs on the machine are the same
+    comm = MPI.COMM_WORLD
     platforms = cl.get_platforms()
     gpu_devices = platforms[platform_id].get_devices(device_type=cl.device_type.GPU)
     n_gpus = len(gpu_devices)
@@ -154,17 +154,17 @@ def parallel_autotune(knl, platform_id, actx_class, comm):
     queue = cl.CommandQueue(ctx, properties=profiling)    
 
 
-    import pyopencl.tools as cl_tools
-    actx = actx_class(
-        comm,
-        queue,
-        allocator=cl_tools.MemoryPool(cl_tools.ImmediateAllocator(queue)))
+    #import pyopencl.tools as cl_tools
+    #actx = actx_class(
+    #    comm,
+    #    queue,
+    #    allocator=cl_tools.MemoryPool(cl_tools.ImmediateAllocator(queue)))
 
     knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
-    knl = gac.set_memory_layout(knl)
-    pid = gac.unique_program_id(knl)
-    os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
-    hjson_file_str = f"hjson/{knl.default_entrypoint.name}_{pid}.hjson"
+    #knl = gac.set_memory_layout(knl)
+    #pid = gac.unique_program_id(knl)
+    #os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
+    #hjson_file_str = f"hjson/{knl.default_entrypoint.name}_{pid}.hjson"
 
     #assert comm.Get_size() > 1
     #assert charm.numPes() > 1
@@ -174,13 +174,15 @@ def parallel_autotune(knl, platform_id, actx_class, comm):
     # The first PE is used for scheduling
     # Not certain how this will work with multiple nodes
 
-    from run_tests import run_single_param_set
-    
-    tlist_generator, pspace_generator = actx.get_generators(knl)
-    params_list = pspace_generator(actx.queue, knl)
+    #if trans_list_list is None:
+    #    tlist_generator = actx.get_generators(knl)
+    #    trans_list_list = tlist_generator(actx.queue, knl)
 
     # Could make a massive list with all kernels and parameters
-    args = ((platform_id, knl, tlist_generator, p, generic_test,) for p in params_list)
+    args = ((platform_id, knl, tlist, generic_test,) for tlist in trans_list_list)
+
+    #print(args)
+    #exit()
 
     # May help to balance workload
     # Should test if shuffling matters
@@ -201,7 +203,7 @@ def parallel_autotune(knl, platform_id, actx_class, comm):
     transformations = {}
     comm = MPI.COMM_WORLD
     #nranks = comm.Get_size()
-    if len(params_list) > 0: # Guard against empty list
+    if len(trans_list_list) > 0: # Guard against empty list
         #executor = MPIPoolExecutor(max_workers=1)
         #results = executor.map(test, args)
         #for entry in results:
@@ -211,7 +213,9 @@ def parallel_autotune(knl, platform_id, actx_class, comm):
         with MPICommExecutor(comm, root=0) as mypool:
             if mypool is not None:
                 results = list(mypool.map(test, args[:1], chunksize=1))
-                results.sort(key=sort_key)
+                print(results)
+                exit()
+                #results.sort(key=sort_key)
         
                 #for r in results:
                 #    print(r)
@@ -226,7 +230,7 @@ def parallel_autotune(knl, platform_id, actx_class, comm):
                 avg_time, transformations, data = results[ret_index]
         #"""
 
-    od = {"transformations": transformations}
+    #od = {"transformations": transformations}
     #out_file = open(hjson_file_str, "wt+")
     #hjson.dump(od, out_file,default=convert)
     #out_file.close()

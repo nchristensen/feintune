@@ -1,6 +1,6 @@
-#from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
-#from charm4py.pool import PoolScheduler, Pool
-#from charm4py.charm import Charm, CharmRemote
+from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
+from charm4py.pool import PoolScheduler, Pool
+from charm4py.charm import Charm, CharmRemote
 #from charm4py.chare import GROUP, MAINCHARE, ARRAY, CHARM_TYPES, Mainchare, Group, ArrayMap
 #from charm4py.sections import SectionManager
 #import inspect
@@ -8,74 +8,42 @@
 import hjson
 import pyopencl as cl
 import numpy as np
-import grudge.loopy_dg_kernels as dgk
+#import grudge.loopy_dg_kernels as dgk
 import os
-import grudge.grudge_array_context as gac
+#import grudge.grudge_array_context as gac
 import loopy as lp
 from os.path import exists
-from grudge.loopy_dg_kernels.run_tests import run_single_param_set, generic_test
-from grudge.grudge_array_context import convert
+from run_tests import run_single_param_set_v2, generic_test
+#from grudge.grudge_array_context import convert
 #from grudge.execution import diff_prg, elwise_linear
-import mpi4py.MPI as MPI
-from mpi4py.futures import MPIPoolExecutor, MPICommExecutor
-#from mpipool import MPIPool
 
-from guppy import hpy
-import gc
-import linecache
-import os
-import tracemalloc
-from mem_top import mem_top
-import matplotlib.pyplot as plt
+# Makes one PE inactive on each host so the number of workers is the same on all hosts as
+# opposed to the basic PoolScheduler which has one fewer worker on the host with PE 0.
+# This can be useful for running tasks on a GPU cluster for example.
+class BalancedPoolScheduler(PoolScheduler):
 
-data_dict = {}
+    def __init__(self):
+       super().__init__()
+       n_pes = charm.numPes()
+       n_hosts = charm.numHosts()
+       pes_per_host = n_pes // n_hosts
 
-def display_top(snapshot, key_type='lineno', limit=10):
-    snapshot = snapshot.filter_traces((
-        tracemalloc.Filter(False, "<frozen importlib._bootstrap>"),
-        tracemalloc.Filter(False, "<frozen importlib._bootstrap_external>"),
-        tracemalloc.Filter(False, "<unknown>"),
-    ))
-    top_stats = snapshot.statistics(key_type)
+       assert n_pes % n_hosts == 0 # Enforce constant number of pes per host
+       assert pes_per_host > 1 # We're letting one pe on each host be unused
 
-    print("Top %s lines" % limit)
-    for index, stat in enumerate(top_stats[:limit], 1):
-        frame = stat.traceback[0]
-        # replace "/path/to/module/file.py" with "module/file.py"
-        filename = os.sep.join(frame.filename.split(os.sep)[-2:])
-        print("#%s: %s:%s: %.1f KiB"
-              % (index, filename, frame.lineno, stat.size / 1024))
-        line = linecache.getline(frame.filename, frame.lineno).strip()
-        d_str = filename + ":" + str(frame.lineno) + ": " + line
-        if d_str not in data_dict:
-            data_dict[d_str] = [stat.size]
-        else:
-            data_dict[d_str].append(stat.size)
+       self.idle_workers = set([i for i in range(n_pes) if not i % pes_per_host == 0 ])
+       self.num_workers = len(self.idle_workers)
 
-        if line:
-            print('    %s' % line)
+# Use all PEs including PE 0 
+class AllPEsPoolScheduler(PoolScheduler):
 
-    fig = plt.figure(0)
-    fig.clear()
-    plt.ion()
-    plt.show()
-    dlist = sorted(data_dict.items(), key=lambda a: a[1][-1], reverse=True)[:10]
-    #print(dlist)
-    #exit()
-    for key, vals in dlist:
-        plt.plot(vals, label=key + " " + str(vals[-1]) + " bytes")
-    plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), shadow=False, ncol=1)
-    plt.draw()
-    #plt.pause(1)
-    plt.savefig("memory_usage.png", bbox_inches="tight")
+    def __init__(self):
+       super().__init__()
+       n_pes = charm.numPes()
+       n_hosts = charm.numHosts()
 
-    other = top_stats[limit:]
-    if other:
-        size = sum(stat.size for stat in other)
-        print("%s other: %.1f KiB" % (len(other), size / 1024))
-    total = sum(stat.size for stat in top_stats)
-    print("Total allocated size: %.1f KiB" % (total / 1024))
-
+       self.idle_workers = set(range(n_pes))
+       self.num_workers = len(self.idle_workers)
 
 
 def get_queue(pe_num, platform_num):
@@ -85,24 +53,23 @@ def get_queue(pe_num, platform_num):
     queue = cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
     return queue
 
+"""
+def do_work(args):
+    params = args[0]
+    knl = args[1]
+    queue = get_queue(charm.myPe())
+    print("PE: ", charm.myPe())
+    avg_time, transform_list = dgk.run_tests.apply_transformations_and_run_test(queue, knl, dgk.run_tests.generic_test, params)
+    return avg_time, params
+"""
 
 def test(args):
-    #print(args)
-    platform_id, knl, tlist_generator, params, test_fn = args
-    comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
-    # From MPI.PoolExecutor the communicator for the tasks is not COMM_WORLD
-    queue = get_queue(comm.Get_rank(), platform_id)
-    result = run_single_param_set(queue, knl, tlist_generator, params, test_fn)
-    #print(mem_top())
-    #h = hpy()
-    #print(h.heap())
-    #snapshot = tracemalloc.take_snapshot()
-    #display_top(snapshot)
-    #del knl
-    #del args
-
-    #result = [10,10,10]
+    platform_id, knl, tlist, test_fn = args
+    queue = get_queue(charm.myPe(), platform_id)
+    result = run_single_param_set_v2(queue, knl, tlist, test_fn) 
     return result
+
+
 
 def unpickle_kernel(fname):
     from pickle import load
@@ -110,7 +77,6 @@ def unpickle_kernel(fname):
     program = load(f)
     f.close()
     return program
-
 
 def autotune_pickled_kernels(path, platform_id, actx_class, comm):
     from os import listdir
@@ -135,52 +101,50 @@ def autotune_pickled_kernels(path, platform_id, actx_class, comm):
             pid = gac.unique_program_id(knl)
             hjson_file_str = f"hjson/{knl.default_entrypoint.name}_{pid}.hjson"
             if not exists(hjson_file_str):
-
                 parallel_autotune(knl, platform_id, actx_class, comm)
             else:
                 print("hjson file exists, skipping")
 
-            #del knl
-
-
-def parallel_autotune(knl, platform_id, actx_class, comm):
+def parallel_autotune(knl, platform_id, tlist_list):
 
     # Create queue, assume all GPUs on the machine are the same
     platforms = cl.get_platforms()
     gpu_devices = platforms[platform_id].get_devices(device_type=cl.device_type.GPU)
     n_gpus = len(gpu_devices)
-    ctx = cl.Context(devices=[gpu_devices[comm.Get_rank() % n_gpus]])
+    ctx = cl.Context(devices=[gpu_devices[charm.myPe() % n_gpus]])
     profiling = cl.command_queue_properties.PROFILING_ENABLE
     queue = cl.CommandQueue(ctx, properties=profiling)    
 
-
+    """
     import pyopencl.tools as cl_tools
     actx = actx_class(
         comm,
         queue,
         allocator=cl_tools.MemoryPool(cl_tools.ImmediateAllocator(queue)))
 
-    knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
+    #knl = gac.fix_program_parameters(knl)
+    #knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
     knl = gac.set_memory_layout(knl)
     pid = gac.unique_program_id(knl)
     os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
     hjson_file_str = f"hjson/{knl.default_entrypoint.name}_{pid}.hjson"
+    """
 
-    #assert comm.Get_size() > 1
-    #assert charm.numPes() > 1
+    assert charm.numPes() > 1
     #assert charm.numPes() - 1 <= charm.numHosts()*len(gpu_devices)
     #assert charm.numPes() <= charm.numHosts()*(len(gpu_devices) + 1)
     # Check that it can assign one PE to each GPU
     # The first PE is used for scheduling
     # Not certain how this will work with multiple nodes
 
-    from run_tests import run_single_param_set
+    #from run_tests import run_single_param_set
     
-    tlist_generator, pspace_generator = actx.get_generators(knl)
-    params_list = pspace_generator(actx.queue, knl)
+    #tlist_generator, pspace_generator = actx.get_generators(knl)
+    #params_list = pspace_generator(actx.queue, knl)
 
     # Could make a massive list with all kernels and parameters
-    args = ((platform_id, knl, tlist_generator, p, generic_test,) for p in params_list)
+    args = [(platform_id, knl, tlist, generic_test,) for tlist in tlist_list]
+
 
     # May help to balance workload
     # Should test if shuffling matters
@@ -195,38 +159,29 @@ def parallel_autotune(knl, platform_id, actx_class, comm):
 
     #pool_proxy = Chare(BalancedPoolScheduler, onPE=0) # Need to use own charm++ branch to make work
 
-    #pool_proxy = Chare(PoolScheduler, onPE=0)
+    pool_proxy = Chare(PoolScheduler, onPE=0)
+    mypool = Pool(pool_proxy)
+    if len(args) > 0: # Guard against empty list
+        results = mypool.map(test, args[:5])
 
-    sort_key = lambda entry: entry[0]
-    transformations = {}
-    comm = MPI.COMM_WORLD
-    #nranks = comm.Get_size()
-    if len(params_list) > 0: # Guard against empty list
-        #executor = MPIPoolExecutor(max_workers=1)
-        #results = executor.map(test, args)
-        #for entry in results:
-        #    print(entry)
-        #exit()
-        #"""
-        with MPICommExecutor(comm, root=0) as mypool:
-            if mypool is not None:
-                results = list(mypool.map(test, args[:1], chunksize=1))
-                results.sort(key=sort_key)
+        sort_key = lambda entry: entry[0]
+        results.sort(key=sort_key)
         
-                #for r in results:
-                #    print(r)
-                # Workaround for pocl CUDA bug
-                # whereby times are imprecise
-                ret_index = 0
-                for i, result in enumerate(results):
-                    if result[0] > 1e-7:
-                        ret_index = i
-                        break
+        #for r in results:
+        #    print(r)
+        # Workaround for pocl CUDA bug
+        # whereby times are imprecise
+        ret_index = 0
+        for i, result in enumerate(results):
+            if result[0] > 1e-7:
+                ret_index = i
+                break
 
-                avg_time, transformations, data = results[ret_index]
-        #"""
-
-    od = {"transformations": transformations}
+        avg_time, transformations, data = results[ret_index]
+    else:
+        transformations = {}
+    
+    #od = {"transformations": transformations}
     #out_file = open(hjson_file_str, "wt+")
     #hjson.dump(od, out_file,default=convert)
     #out_file.close()
@@ -279,24 +234,21 @@ def main(args):
         print(r)
 """
 
-def main():
+def main(args):
+    import mpi4py.MPI as MPI
     from mirgecom.array_context import MirgecomAutotuningArrayContext as Maac
     comm = MPI.COMM_WORLD
     
-    tracemalloc.start()
-    #gc.set_debug(gc.DEBUG_UNCOLLECTABLE)
     autotune_pickled_kernels("./pickled_programs", 0, Maac, comm)
-
     print("DONE!")
     exit()
 
+def charm_autotune():
+    charm.start(main)
+    print(result)
+    charm.exit()
+ 
 if __name__ == "__main__":
-    import sys
-    main()
-
-    #pool = MPIPool()
-
-    #if not pool.is_master():
-    #    pool.wait()
-    #    sys.exit(0)
-
+    charm.start(main)
+    print(result)
+    charm.exit()

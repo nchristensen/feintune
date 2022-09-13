@@ -1,5 +1,9 @@
 import numpy as np
-from grudge.grudge_tags import (IsDOFArray, IsSepVecDOFArray,
+import loopy as lp
+#from frozendict import frozendict
+from meshmode.array_context import EinsumTag
+from meshmode.transform_metadata import FirstAxisIsElementsTag
+from grudge_tags import (IsDOFArray, IsSepVecDOFArray,
     IsOpArray, IsSepVecOpArray, IsFaceDOFArray, IsFaceMassOpArray,
     IsVecDOFArray, IsVecOpArray, IsFourAxisDOFArray)
 
@@ -41,7 +45,7 @@ def i_inner_outer_options(n_out, i_inner_inner, start_val=None):
     
     # Loopy confused about the number of dimensions when 
     # i_outer, i_inner_outer, and i_inner_inner are all 1
-    inline = [1] if n_out == 1 else np.arange(2, (n_out // i_inner_inner) + 1)
+    inline = np.array([1]) if n_out == 1 else np.arange(2, (n_out // i_inner_inner) + 1)
     options = list(i_inner_inner*inline[n_out % (inline*i_inner_inner) == 0])
     start_ind = 0 if start_val is None else options.index(start_val)
     options = options[start_ind:]
@@ -268,19 +272,205 @@ def einsum3to2_kernel_tlist_generator(params, **kwargs):
     trans_list.append(["add_inames_for_unused_hw_axes"]) 
     return trans_list 
 
+def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
+
+    # Create the list of parameter values to try
+
+    local_mem_size = queue.device.local_mem_size
+    max_work_group_size = queue.device.max_work_group_size
+
+    # Find read dof arrays. These are the ones that will be prefetched
+    read_deps = frozenset()
+    write_deps = frozenset()
+    for instr in knl.default_entrypoint.instructions:
+        if isinstance(instr, lp.Assignment):
+            read_deps |= instr.read_dependency_names()
+            write_deps |= instr.write_dependency_names()
+
+    dof_arrays = []
+    arg_dict = dict([(arg.name, arg) for arg in knl.default_entrypoint.args])
+    arg_dict.update(knl.default_entrypoint.temporary_variables)
+
+    #print(write_deps)
+    #print(read_deps)
+    for arg in list(arg_dict.values()):
+        print(arg)
+        if FirstAxisIsElementsTag() in arg.tags and len(arg.shape) == 2:
+            dof_arrays.append(arg.name)
+            if arg.name in read_deps:
+                n_elem, n_in = arg.shape
+                fp_bytes = arg.dtype.dtype.itemsize
+        elif len(arg.shape) == 2: # Not super robust
+            n_out, n_in = arg.shape
+    #exit()
+
+    read_dof_arrays = read_deps & frozenset(dof_arrays)
+    n_dof_arrays = len(read_dof_arrays)
+
+    start_param = (None, None, None, None, None)
+    if start_param is not None:
+        kio_s, kii_s, iio_s, iii_s, ji_s = start_param
+    else:
+        kio_s, kii_s, iio_s, iii_s, ji_s = (None, None, None, None, None)
+
+    # Iterate over five search dimensions
+    parameter_list = []
+
+    if n_elem*n_out <= 1024:
+        choices = (n_elem, n_elem, n_out, n_out, n_in)
+        parameter_list.append(choices)
+    else:
+        for kii in k_inner_inner_options(start_val=kii_s):
+            for kio in k_inner_outer_options(n_in, kii, local_mem_size // n_dof_arrays,
+                        fp_bytes=fp_bytes,start_val=kio_s,nelem=n_elem):
+                kio_s = None # Set to None so will form the full set the next time around
+                for iii in i_inner_inner_options(n_out, kii,
+                        max_work_group_size=max_work_group_size, start_val=iii_s):
+                    iii_s = None
+                    for iio in i_inner_outer_options(n_out, iii, start_val=iio_s):
+                        iio_s = None
+                        for ji in j_inner_options(n_in, start_val=ji_s):
+                            ji_s = None
+                            choices = (kio, kii, iio, iii, ji)
+                            parameter_list.append(choices)
+
+    # Figure out the reduction iname, the element iname, and the dof iname
+    def get_einsum_types(knl):
+        einsums = []
+        for instr in knl.default_entrypoint.instructions:
+            if isinstance(instr, lp.Assignment):
+                for tag in instr.tags:
+                    if isinstance(tag, EinsumTag):
+                        if isinstance(instr.expression, lp.symbolic.Reduction):
+                            einsums.append((instr.within_inames, instr.expression.inames,))
+                        else:
+                            einsums.append((instr.within_inames, (),))
+                        
+        
+        return frozenset(einsums)
+
+    within_inames, r_inames = list(get_einsum_types(knl))[0]
+    #print(r_inames)
+    j = r_inames[0]
+    for iname in within_inames:
+        # Hacky, is there a better way to get this?
+        if "iel" in iname:
+            e = iname
+        else:
+            i = iname
+
+    # Now create the list of transformations instructions with those parameters
+
+    #print(parameter_list)
+
+    #exit()
+
+
+    trans_list_list = []
+    for params in parameter_list:
+
+        trans_list = []
+        kio, kii, iio, iii, ji = params
+
+
+        if 0 not in params: # If there is a zero length dimension then don't transform
+
+            if kio != kii:
+                trans_list.append(("split_iname", (f"{e}", kio,),
+                    (("outer_tag", "g.0",), ("slabs",(0,1,),),),))
+                trans_list.append(("split_iname", (f"{e}_inner", kii,), 
+                    (("outer_tag", "ilp",), ("inner_tag", "l.0",), ("slabs", (0,1,),),),))
+                prefetch_str = f"{j},{e}_inner_outer,{e}_inner_inner"
+            else:
+                trans_list.append(("split_iname", (f"{e}", kio,),
+                    (("outer_tag", "g.0",), ("inner_tag", "l.0",), ("slabs",(0,0,),),),))
+                prefetch_str = f"{j},{e}_inner"    
+            if iio != iii:
+                trans_list.append(("split_iname", (f"{i}", iio,),
+                    (("outer_tag", "g.1",), ("slabs",(0,0,),),),))
+                trans_list.append(("split_iname", (f"{i}_inner", iii,), 
+                    (("outer_tag", "ilp",), ("inner_tag","l.1",), ("slabs",(0,1,),),),))
+            else:
+                trans_list.append(("split_iname", (f"{i}", iio,), 
+                    (("outer_tag", "g.1",), ("inner_tag", "l.1",), ("slabs",(0,0,),),),))
+            # Should the i loop have (0,1) slabs for both?
+
+            #knl = kwargs["knl"]
+
+
+            for arg in read_dof_arrays:
+                # Should only prefetch if there are no indirection arrays
+                strides = [dim_tag.stride for dim_tag in arg_dict[arg].dim_tags if isinstance(dim_tag, lp.kernel.array.FixedStrideArrayDimTag)]
+                order_str = "f,f" if strides[0] < strides[1] else "c,c"
+                trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
+                    (("temporary_name", f"{arg}f",), ("default_tag","l.auto",),),))
+                trans_list.append(("tag_array_axes", (f"{arg}f", order_str,),))
+
+                """
+                if "vec" == arg.name:
+                    trans_list.append(["add_prefetch", ["vec", prefetch_str],
+                        {"temporary_name":"vecf", "default_tag":"l.auto"}])
+                    trans_list.append(["tag_array_axes", ["vecf", "f,f"]])
+                elif "jac" == arg.name:
+                    trans_list.append(["add_prefetch", ["jac", prefetch_str],
+                        {"temporary_name":"jacf", "default_tag":"l.auto"}])
+                    trans_list.append(["tag_array_axes", ["jacf", "f,f"]])
+                elif "arg2" == arg.name and IsDOFArray() in arg.tags:
+                    trans_list.append(["add_prefetch", ["arg2", prefetch_str],
+                        {"temporary_name":"arg2f", "default_tag":"l.auto"}])
+                    trans_list.append(["tag_array_axes", ["arg2f", "f,f"]])
+                elif "arg1" == arg.name and IsDOFArray() in arg.tags:
+                    trans_list.append(["add_prefetch", ["arg1", prefetch_str],
+                        {"temporary_name":"arg1f", "default_tag":"l.auto"}])
+                    trans_list.append(["tag_array_axes", ["arg1f", "f,f"]])
+                elif "arg0" == arg.name and IsDOFArray() in arg.tags:
+                    arg0_prefetch_str = "i_inner," if iio == iii else "i_inner_outer,i_inner_inner,"
+                    arg0_prefetch_str += "e_inner" if kio == kii else "e_inner_outer,e_inner_inner"
+                    trans_list.append(["add_prefetch",
+                        ["arg0", arg0_prefetch_str],
+                        {"temporary_name":"arg0f", "default_tag":"l.auto"}])
+                    trans_list.append(["tag_array_axes", ["arg0f", "f,f"]])
+                """
+
+            trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag","for",),),))
+
+        trans_list.append(("add_inames_for_unused_hw_axes",))
+        trans_list_list.append(tuple(trans_list))
+
+    #print(trans_list_list)
+
+    return trans_list_list
+
+
+
+# Is there any real reason to separate this from the tspace kernel. Why not
+# just call this from within that function?
+# Because the pspace is created from a subkernel, but the transformed
+# kernel is the cumulative kernel.
 def einsum3to2_kernel_pspace_generator(queue, knl, start_param=None):
 
     local_mem_size = queue.device.local_mem_size
-    max_work_group_size = queue.device.max_work_group_size    
+    max_work_group_size = queue.device.max_work_group_size
 
-    n_dof_arrays = 0
-    for arg in knl.default_entrypoint.args:
-        if IsDOFArray() in arg.tags:
+    # Find read dof arrays. These are the ones that will be prefetched
+    read_deps = frozenset()
+    for instr in knl.default_entrypoint.instructions:
+        if isinstance(instr, lp.Assignment):
+            read_deps |= instr.dependency_names()
+
+    dof_arrays = []
+    from meshmode.transform_metadata import FirstAxisIsElementsTag
+    for arg in knl.default_entrypoint.args + list(knl.default_entrypoint.temporary_variables.values()):
+        if FirstAxisIsElementsTag() in arg.tags:
+            dof_arrays.append(arg.name)
             n_elem, n_out = arg.shape
             fp_bytes = arg.dtype.dtype.itemsize
-            n_dof_arrays += 1
-        elif IsOpArray() in arg.tags:
+        elif len(arg.shape) == 2: # The argument is (probably) an operator array
             n_out, n_in = arg.shape
+
+    read_dof_arrays = read_deps & frozenset(dof_arrays)
+
+    n_dof_arrays = len(read_dof_arrays)
 
     if start_param is not None:
         kio_s, kii_s, iio_s, iii_s, ji_s = start_param
@@ -295,8 +485,6 @@ def einsum3to2_kernel_pspace_generator(queue, knl, start_param=None):
         parameter_list.append(choices)
     else:
         for kii in k_inner_inner_options(start_val=kii_s):
-            # Both jac and vec are prefetched so the available local_memory per prefetched array is halved
-            # Should check if jac is present
             for kio in k_inner_outer_options(n_in, kii, local_mem_size // n_dof_arrays,
                         fp_bytes=fp_bytes,start_val=kio_s,nelem=n_elem):
                 kio_s = None # Set to None so will form the full set the next time around
@@ -311,6 +499,114 @@ def einsum3to2_kernel_pspace_generator(queue, knl, start_param=None):
                             parameter_list.append(choices)
 
     return parameter_list
+
+
+def einsum2to2_kernel_tlist_generator_v2(queue, knl, start_param=None):
+
+    # This type of einsum has no data reuse so could probably just
+    # return a single set of transformations
+
+    local_mem_size = queue.device.local_mem_size
+    max_work_group_size = queue.device.max_work_group_size    
+
+    # Find read dof arrays. These are the ones that will be prefetched
+    read_deps = frozenset()
+    for instr in knl.default_entrypoint.instructions:
+        if isinstance(instr, lp.Assignment):
+            read_deps |= instr.read_dependency_names()
+
+    dof_arrays = []
+    arg_dict = dict([(arg.name, arg) for arg in knl.default_entrypoint.args])
+    arg_dict.update(knl.default_entrypoint.temporary_variables)
+    print(knl)
+    for arg in list(arg_dict.values()):
+        if len(arg.shape) == 2 and arg.name in read_deps:
+            n_elem, n_in = arg.shape
+            n_out = n_in
+            fp_bytes = arg.dtype.dtype.itemsize
+
+    if start_param is not None:
+        kio_s, kii_s, iio_s, iii_s = start_param
+    else:
+        kio_s, kii_s, iio_s, iii_s = (None, None, None, None)
+
+    # Iterate over search dimensions
+    parameter_list = []
+    for kii in k_inner_inner_options(start_val=kii_s):
+        for kio in k_inner_outer_options(n_in, kii, local_mem_size, fp_bytes=fp_bytes,start_val=kio_s):
+            kio_s = None # Set to None so will form the full set the next time around
+            for iii in i_inner_inner_options(n_out, kii,
+                    max_work_group_size=max_work_group_size, start_val=iii_s):
+                iii_s = None
+                for iio in i_inner_outer_options(n_out, iii, start_val=iio_s):
+                    iio_s = None
+                    #for ji in j_inner_options(n_in, start_val=ji_s):
+                    #    ji_s = None
+                    choices = (kio, kii, iio, iii)
+                    parameter_list.append(choices)
+    
+    # Get the element and dof inames
+    for iname in knl.default_entrypoint.inames.keys():
+        # Hacky, is there a better way to get this?
+        if "iel" in iname:
+            e = iname
+        else:
+            i = iname
+
+    tlist_list = []
+    for params in parameter_list:
+
+        trans_list = []
+        kio, kii, iio, iii = params
+        #knl = kwargs["knl"]
+
+        if 0 not in params: # If there is a zero length dimension then don't transform
+
+            if kio != kii:
+                trans_list.append(("split_iname", (f"{e}", kio,),
+                    (("outer_tag", "g.0",), ("slabs",(0,1,),),),))
+                trans_list.append(("split_iname", (f"{e}_inner", kii,),
+                    (("outer_tag", "ilp",), ("inner_tag", "l.0",), ("slabs", (0,1,),),),))
+            else:
+                trans_list.append(("split_iname", (f"{e}", kio,),
+                    (("outer_tag", "g.0",), ("inner_tag", "l.0",), ("slabs",(0,0,),),),))
+            if iio != iii:
+                trans_list.append(("split_iname", (f"{i}", iio,),
+                    (("outer_tag", "g.1",), ("slabs",(0,0,),),),))
+                trans_list.append(("split_iname", (f"{i}_inner", iii,),
+                    (("outer_tag", "ilp",), ("inner_tag","l.1",), ("slabs",(0,1,),),),))
+            else:
+                trans_list.append(("split_iname", (f"{i}", iio,),
+                    (("outer_tag", "g.1",), ("inner_tag", "l.1",), ("slabs",(0,0,),),),))
+
+        """
+        if knl.default_entrypoint.name == "resample_by_picking_group":
+            trans_list.append(["split_iname", ["iel", kio], {"outer_tag": "g.0", "slabs":(0,1)}])
+            trans_list.append(["split_iname", ["iel_inner", kii], 
+                {"outer_tag": "ilp", "inner_tag":"l.0", "slabs":(0,1)}])
+            trans_list.append(["split_iname", ["idof", iio], {"outer_tag": "g.1", "slabs":(0,0)}])
+            trans_list.append(["split_iname", ["idof_inner", iii], 
+                {"outer_tag": "ilp", "inner_tag":"l.1", "slabs":(0,1)}])
+        else:
+            trans_list.append(["split_iname", ["e", kio], {"outer_tag": "g.0", "slabs":(0,1)}])
+            trans_list.append(["split_iname", ["e_inner", kii], 
+                {"outer_tag": "ilp", "inner_tag":"l.0", "slabs":(0,1)}])
+            trans_list.append(["split_iname", ["i", iio], {"outer_tag": "g.1", "slabs":(0,0)}])
+            trans_list.append(["split_iname", ["i_inner", iii], 
+                {"outer_tag": "ilp", "inner_tag":"l.1", "slabs":(0,1)}])
+        """
+        # Should the i loop have (0,1) slabs for both?
+
+        # Prefetching probably matters not for this kernel
+        #trans_list.append(["add_prefetch", ["arg1", "e_inner_outer,e_inner_inner,i_inner_outer,i_inner_inner"],
+        #    {"temporary_name":"arg1f", "default_tag":"l.auto"}])
+        #trans_list.append(["tag_array_axes", ["arg1f", "f,f"]])
+
+        trans_list.append(["add_inames_for_unused_hw_axes"])
+        tlist_list.append(tuple(trans_list))
+
+    return tlist_list
+
 
 
 def einsum2to2_kernel_tlist_generator(params, **kwargs):
