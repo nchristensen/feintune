@@ -40,6 +40,7 @@ class BandwidthTestResult():
     @property
     def min_bandwidth(self):
         return self.bytes_transferred/self.tmax
+
     
 def enqueue_copy_bandwidth_test_with_queues_like(queue, dtype=None, fill_on_device=True, max_used_bytes=None):
 
@@ -49,18 +50,25 @@ def enqueue_copy_bandwidth_test_with_queues_like(queue, dtype=None, fill_on_devi
                     fill_on_device=fill_on_device,
                     max_used_bytes=max_used_bytes) for q in queues])
 
-def get_buffers(queue, dtype, fill_on_device, max_shape_dtype):
 
-    max_shape_bytes = max_shape_dtype*dtype().itemsize
+def get_buffers(queue, dtype_in, n_dtype_in, dtype_out=None, n_dtype_out=None, fill_on_device=True):
+
+    if n_dtype_out is None:
+        n_dtype_out = n_dtype_in
+    if dtype_out is None:
+        dtype_out = dtype_in
+
+    n_bytes_in = n_dtype_in*dtype_in().itemsize
+    n_bytes_out = n_dtype_out*dtype_out().itemsize
     context = queue.context
 
-    d_out_buf = cl.Buffer(context, cl.mem_flags.WRITE_ONLY | cl.mem_flags.HOST_NO_ACCESS, size=max_shape_bytes)
+    d_out_buf = cl.Buffer(context, cl.mem_flags.WRITE_ONLY | cl.mem_flags.HOST_NO_ACCESS, size=n_bytes_out)
 
     if fill_on_device: # Requires making a READ_WRITE buffer instead of a READ_ONLY buffer
-        if dtype in {np.float64, np.float32, np.int32, np.int64}:
+        if dtype_in in {np.float64, np.float32, np.int32, np.int64}:
             allocator = ImmediateAllocator(queue)
-            d_in_buf = cl.Buffer(context, cl.mem_flags.READ_WRITE | cl.mem_flags.HOST_NO_ACCESS, size=max_shape_bytes)
-            d_in_buf_arr = cl.array.Array(queue, (max_shape_dtype,), dtype, allocator=allocator, data=d_in_buf)
+            d_in_buf = cl.Buffer(context, cl.mem_flags.READ_WRITE | cl.mem_flags.HOST_NO_ACCESS, size=n_bytes_in)
+            d_in_buf_arr = cl.array.Array(queue, (n_dtype_in,), dtype_in, allocator=allocator, data=d_in_buf)
             clrandom.fill_rand(d_in_buf_arr, queue=queue)
         else:
             raise ValueError(f"Cannot fill array with {dtype} on the device")
@@ -69,25 +77,23 @@ def get_buffers(queue, dtype, fill_on_device, max_shape_dtype):
         from psutil import virtual_memory
         
         if np.issubdtype(dtype, np.integer):
-            if virtual_memory().available < max_shape_bytes:
+            if virtual_memory().available < n_bytes_in:
                 raise ValueError("Not enough host memory to fill the buffer from the host")
 
             max_val = np.iinfo(dtype).max
             min_val = np.iinfo(dtype).min
-
-            # Does the randint do any internal conversions?
-            h_in_buf = np.random.randint(min_val, high=max_val + 1, size=max_shape_dtype, dtype=dtype)
+            h_in_buf = np.random.randint(min_val, high=max_val + 1, size=max_shape_dtype, dtype=dtype_in)
         elif np.issubdtype(dtype, np.float):
             # The host array is formed as a float64 before being copied and converted
-            if virtual_memory().available < max_shape_dtype*(np.float64().itemsize + word_size):
+            if virtual_memory().available < n_dtype_in*(np.float64().itemsize + dtype_in().itemsize):
                 raise ValueError("Not enough host memory to fill the buffer from the host")
-            h_in_buf = np.random.rand(max_shape_dtype).astype(dtype)
+            h_in_buf = np.random.rand(n_dtype_in).astype(dtype_in)
         else:
             raise ValueError(f"Unsupported dtype: {dtype}")
 
         d_in_buf = cl.Buffer(context,
             cl.mem_flags.READ_ONLY | cl.mem_flags.HOST_NO_ACCESS | cl.mem_flags.COPY_HOST_PTR,
-            size=max_shape_bytes, hostbuf=h_in_buf)
+            size=n_bytes_in, hostbuf=h_in_buf)
 
         
         #TODO: Copy small chunks at a time if the array size is large.
@@ -116,6 +122,91 @@ def get_word_counts(max_shape_dtype):
     word_count_list = sorted(list(set(word_count_list)))
     return word_count_list
 
+
+def loopy_bandwidth_test(queue, dtype=None, n_in=None, n_out=None,
+                        fill_on_device=True, ntrials=1000):
+
+    #knl = lp.make_copy_kernel("c,c", old_dim_tags="c,c")
+    n = max(n_in, n_out)
+    knl = lp.make_knl(
+        "{ [i]: 0<=i<n}",
+        """
+        out[i % n_out] = in[i % n_in]
+        """,
+        assumptions="n>=0",
+        
+    )
+    knl = lp.add_dtypes(knl, {"input": fp_format, "output": fp_format})
+    knl = knl.copy(target=lp.PyOpenCLTarget(my_gpu_devices[0]))
+    n0 = 2
+    #knl = lp.split_iname(knl, "i1", 1024//2, inner_tag="l.0", outer_tag="g.0", slabs=(0,1))
+    knl = lp.split_iname(knl, "i1", 256, inner_tag="l.0", outer_tag="g.0", slabs=(0,1))
+    #knl = lp.split_iname(knl, "i1", 6*16, outer_tag="g.0") 
+    #knl = lp.split_iname(knl, "i1_inner", 16, outer_tag="ilp", inner_tag="l.0", slabs=(0,1)) 
+    #knl = lp.split_iname(knl, "i0", n0, inner_tag="l.1", outer_tag="g.1", slabs=(0,0))
+
+    fp_bytes = 8 if fp_format == np.float64 else 4
+
+    # This assumes fp32
+    len_list = []
+    float_count = 1
+    max_floats = 2**28
+    while float_count <= max_floats:
+        len_list.append(float_count)
+        float_count = int(np.ceil(float_count*1.5))
+    for i in range(29):
+        len_list.append(2**i)
+    len_list = sorted(list(set(len_list)))
+
+    #data = np.random.randint(-127, 128, (1,max_bytes), dtype=np.int8)
+    #inpt = cl.array.to_device(queue, data, allocator=mem_pool)
+    from pyopencl.array import sum as clsum
+
+    from pyopencl.tools import ImmediateAllocator, MemoryPool
+    allocator = ImmediateAllocator(queue)
+    mem_pool = MemoryPool(allocator) 
+
+
+    print(len_list)
+
+    for n in len_list:
+    #for i in range(29):
+
+        #n = 2**i
+        kern = lp.fix_parameters(knl, n0=n0, n1=n)
+        #data = np.random.randint(-127, 128, (1,n), dtype=np.int8)
+        #inpt = cl.array.to_device(queue, data, allocator=mem_pool)
+        inpt = cl.clrandom.rand(queue, (n0, n), dtype=fp_format)
+        outpt = cl.array.Array(queue, (n0, n), dtype=fp_format, allocator=mem_pool)
+     
+        #kern = lp.set_options(kern, "write_code")  # Output code before editing it
+
+        for j in range(2):
+            kern(queue, input=inpt, output=outpt)
+        dt = 0
+        events = []
+        for j in range(nruns):
+            evt, _ = kern(queue, input=inpt, output=outpt)
+            events.append(evt)
+
+        cl.wait_for_events(events)
+        for evt in events:
+            dt += evt.profile.end - evt.profile.start 
+        #queue.finish()
+        dt = dt / nruns / 1e9
+
+        nbytes_transferred = 2*fp_bytes*n*n0
+        bandwidth = nbytes_transferred / dt / 1e9
+        print("{} {}".format(nbytes_transferred, bandwidth))
+
+        #print((inpt - outpt)) 
+        diff = (inpt - outpt)
+        if  clsum(inpt - outpt) != 0:
+            print("INCORRECT COPY")
+
+
+
+
 def enqueue_copy_bandwidth_test(queue, dtype=None, fill_on_device=True, max_used_bytes=None, ntrials=1000):
 
     if dtype is None:
@@ -136,7 +227,7 @@ def enqueue_copy_bandwidth_test(queue, dtype=None, fill_on_device=True, max_used
     if max_shape_bytes > queue.device.max_mem_alloc_size:
         raise ValueError("max_shape_bytes is larger than can be allocated")
 
-    d_in_buf, d_out_buf = get_buffers(queue, dtype, fill_on_device, max_shape_dtype)
+    d_in_buf, d_out_buf = get_buffers(queue, dtype, max_shape_dtype, fill_on_device=fill_on_device)
 
     word_count_list = get_word_counts(max_shape_dtype)
     results_list = []
