@@ -32,15 +32,15 @@ class BandwidthTestResult():
 
     @property
     def avg_bandwidth(self):
-        return bytes_transferred/tavg
+        return self.bytes_transferred/self.tavg
 
     @property
     def max_bandwidth(self):
-        return bytes_transferred/tmin
+        return self.bytes_transferred/self.tmin
 
     @property
     def min_bandwidth(self):
-        return bytes_transferred/tmax
+        return self.bytes_transferred/self.tmax
     
 def enqueue_copy_bandwidth_test_with_queues_like(queue, dtype=None, fill_on_device=True, max_used_bytes=None):
 
@@ -50,27 +50,9 @@ def enqueue_copy_bandwidth_test_with_queues_like(queue, dtype=None, fill_on_devi
                     fill_on_device=fill_on_device,
                     max_used_bytes=max_used_bytes) for q in queues])
 
+def get_buffers(queue, dtype, fill_on_device, max_shape_dtype):
 
-def enqueue_copy_bandwidth_test(queue, dtype=None, fill_on_device=True, max_used_bytes=None, ntrials=1000):
-
-    if dtype is None:
-        dtype = np.int32 if fill_on_device else np.int8
-
-    word_size = dtype().itemsize
-
-    if max_used_bytes is None:
-        max_shape_bytes = queue.device.max_mem_alloc_size
-    else:
-        if max_used_bytes <= queue.device.max_mem_alloc_size:
-            max_shape_bytes = max_used_bytes // 2
-        else:
-            raise ValueError("max_used_bytes is greater than the available device memory")
-
-    max_shape_dtype = max_shape_bytes // word_size
-    # Redefine max_shape_bytes in case there is a remainder in the division
-    max_shape_bytes = max_shape_dtype*word_size
-    max_used_bytes = 2*max_shape_bytes
-
+    max_shape_bytes = max_shape_dtype*dtype().itemsize
     context = queue.context
 
     d_out_buf = cl.Buffer(context, cl.mem_flags.WRITE_ONLY | cl.mem_flags.HOST_NO_ACCESS, size=max_shape_bytes)
@@ -118,6 +100,29 @@ def enqueue_copy_bandwidth_test(queue, dtype=None, fill_on_device=True, max_used
            
         #evt = cl.enqueue_copy(queue, d_in_buf, h_in_buf)
 
+    return d_in_buf, d_out_buf
+
+def enqueue_copy_bandwidth_test(queue, dtype=None, fill_on_device=True, max_used_bytes=None, ntrials=1000):
+
+    if dtype is None:
+        dtype = np.int32 if fill_on_device else np.int8
+
+    word_size = dtype().itemsize
+
+    if max_used_bytes is None:
+        max_shape_bytes = queue.device.max_mem_alloc_size
+    else:
+        if max_used_bytes <= queue.device.max_mem_alloc_size:
+            max_shape_bytes = max_used_bytes // 2
+        else:
+            raise ValueError("max_used_bytes is greater than the available device memory")
+
+    max_shape_dtype = max_shape_bytes // word_size
+    # Redefine max_shape_bytes in case there is a remainder in the division
+    max_shape_bytes = max_shape_dtype*word_size
+    max_used_bytes = 2*max_shape_bytes
+
+    d_in_buf, d_out_buf = get_buffers(queue, dtype, fill_on_device, max_shape_dtype)
 
     len_list = []
 
@@ -140,6 +145,7 @@ def enqueue_copy_bandwidth_test(queue, dtype=None, fill_on_device=True, max_used
 
         events = []
         byte_count = word_size*word_count
+
         # Warmup
         for i in range(5):
             evt = cl.enqueue_copy(queue, d_out_buf, d_in_buf, byte_count=byte_count)
@@ -192,6 +198,16 @@ def get_alpha_beta_model(results_list, total_least_squares=True):
     # Latency and bandwidth
     return (coeffs[0], 1/(coeffs[1]*1e9),)
 
+def plot_bandwidth(results_list):
+    import matplotlib.pyplot as plt
+
+    M = np.array([(result.bytes_transferred, result.avg_bandwidth) for result in results_list])
+    
+    fig = plt.figure()
+    plt.semilogx(M[:,0], M[:,1]/1e9)
+    plt.xlabel("Bytes read + bytes written")
+    plt.ylabel("Bandwidth (GBps)")
+    plt.show()
 
 if __name__ == "__main__":
     
@@ -210,4 +226,6 @@ if __name__ == "__main__":
         print(coeffs)
 
     print(get_alpha_beta_model(combined_list))
+
+    plot_bandwidth(combined_list)
 
