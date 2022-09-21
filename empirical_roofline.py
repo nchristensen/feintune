@@ -1,5 +1,6 @@
 import pyopencl as cl
 import numpy as np
+import loopy as lp
 import pyopencl.array as clarray
 import pyopencl.clrandom as clrandom
 from pyopencl.tools import ImmediateAllocator
@@ -26,8 +27,8 @@ class BandwidthTestResult():
     tmin: float
     tmax: float
     bytes_transferred: int
-    #nbytes_read: int = None
-    #nbytes_written: int = None
+    test_type: str
+    test_parameters: tuple = None
 
     @property
     def avg_bandwidth(self):
@@ -42,14 +43,6 @@ class BandwidthTestResult():
         return self.bytes_transferred/self.tmax
 
     
-def enqueue_copy_bandwidth_test_with_queues_like(queue, dtype=None, fill_on_device=True, max_used_bytes=None):
-
-    queues = get_queues_like(queue)
-
-    return tuple([enqueue_copy_bandwidth_test(q, dtype=dtype,
-                    fill_on_device=fill_on_device,
-                    max_used_bytes=max_used_bytes) for q in queues])
-
 
 def get_buffers(queue, dtype_in, n_dtype_in, dtype_out=None, n_dtype_out=None, fill_on_device=True):
 
@@ -108,103 +101,176 @@ def get_buffers(queue, dtype_in, n_dtype_in, dtype_out=None, n_dtype_out=None, f
 
     return d_in_buf, d_out_buf
 
-def get_word_counts(max_shape_dtype):
+def get_word_counts(max_shape_dtype,minimum=1):
     word_count_list = []
 
-    word_count = 1
+    word_count = minimum
     # Get some non-multiples of two
     while word_count <= max_shape_dtype:
         word_count_list.append(int(np.floor(word_count)))
         word_count = word_count*1.5
     # Get multiples of two
     for i in range(0,int(np.floor(np.log2(max_shape_dtype)) + 1)):
-        word_count_list.append(2**i)
+        if 2**i >= minimum:
+            word_count_list.append(2**i)
     word_count_list = sorted(list(set(word_count_list)))
     return word_count_list
 
+def loopy_bandwidth_test_with_queues_like(queue, dtype_in=None, fill_on_device=True, fast=True):
 
-def loopy_bandwidth_test(queue, dtype=None, n_in=None, n_out=None,
-                        fill_on_device=True, ntrials=1000):
+    queues = get_queues_like(queue)
 
-    #knl = lp.make_copy_kernel("c,c", old_dim_tags="c,c")
-    n = max(n_in, n_out)
-    knl = lp.make_knl(
-        "{ [i]: 0<=i<n}",
-        """
-        out[i % n_out] = in[i % n_in]
+    return tuple([loopy_bandwidth_test(q, dtype_in=dtype_in,
+                    fill_on_device=fill_on_device, fast=fast) for q in queues])
+
+
+def loopy_bandwidth_test(queue, n_in_max=None, dtype_in=None, n_out_max=None,
+                        dtype_out=None, fill_on_device=True,
+                        ntrials=100, fast=True):
+
+
+    if dtype_in is None:
+        dtype_in = np.int32
+    if dtype_out is None:
+        dtype_out = dtype_in
+
+    if n_in_max is None:
+        n_in_max = queue.device.max_mem_alloc_size // dtype_in().itemsize
+    if n_out_max is None:
+        n_out_max = n_in_max
+
+    n_in_max_bytes = n_in_max*dtype_in().itemsize
+    n_out_max_bytes = n_out_max*dtype_out().itemsize
+
+    if n_in_max_bytes > queue.device.max_mem_alloc_size:
+        raise ValueError("Maximum input length exceeds maximum allocation size")
+    if n_out_max_bytes > queue.device.max_mem_alloc_size:
+        raise ValueError("Maximum output length exceeds maximum allocation size")
+
+    ogti = n_out_max > n_in_max
+    igto = n_in_max > n_out_max
+    out_in_ratio = n_out_max / n_in_max
+    in_out_ratio = n_in_max / n_out_max
+
+    n_max = max(n_in_max, n_out_max)
+    read_index = "j,i % n_in" if ogti else "j,i"
+    write_index = "j,i % n_out" if igto else "j,i"
+
+    knl = lp.make_kernel(
+        "{[i,j]: 0<=i<ni and 0<=j<nj}",
+        f"""
+        output[{read_index}] = input[{write_index}]
         """,
-        assumptions="n>=0",
-        
+        assumptions="ni>=0 and nj>=0",   
     )
-    knl = lp.add_dtypes(knl, {"input": fp_format, "output": fp_format})
-    knl = knl.copy(target=lp.PyOpenCLTarget(my_gpu_devices[0]))
-    n0 = 2
-    #knl = lp.split_iname(knl, "i1", 1024//2, inner_tag="l.0", outer_tag="g.0", slabs=(0,1))
-    knl = lp.split_iname(knl, "i1", 256, inner_tag="l.0", outer_tag="g.0", slabs=(0,1))
-    #knl = lp.split_iname(knl, "i1", 6*16, outer_tag="g.0") 
-    #knl = lp.split_iname(knl, "i1_inner", 16, outer_tag="ilp", inner_tag="l.0", slabs=(0,1)) 
-    #knl = lp.split_iname(knl, "i0", n0, inner_tag="l.1", outer_tag="g.1", slabs=(0,0))
+    knl = lp.add_dtypes(knl, {"output": dtype_out, "input": dtype_in})
+    knl = lp.set_options(knl, "no_numpy")  # Output code before editing it
+    knl_orig = knl.copy()
+    # Just do this once so don't ne and nj>=0ed to do in the tuning loop
+    d_in_buf, d_out_buf = get_buffers(queue, dtype_in, n_in_max, dtype_out=dtype_out, n_dtype_out=n_out_max, fill_on_device=True)
 
-    fp_bytes = 8 if fp_format == np.float64 else 4
+    results_dict = {}
+    
+    # Probably excessive searching for most purposes
+    nj_range = [4] if fast else range(1,9)
+    local_size_range = [128] if fast else 32*np.array([1,2,4,8,16,32])
+    
+    for nj in nj_range:
+        for local_size in local_size_range:
 
-    # This assumes fp32
-    len_list = []
-    float_count = 1
-    max_floats = 2**28
-    while float_count <= max_floats:
-        len_list.append(float_count)
-        float_count = int(np.ceil(float_count*1.5))
-    for i in range(29):
-        len_list.append(2**i)
-    len_list = sorted(list(set(len_list)))
+            word_count_list = get_word_counts(n_max, minimum=nj)
 
-    #data = np.random.randint(-127, 128, (1,max_bytes), dtype=np.int8)
-    #inpt = cl.array.to_device(queue, data, allocator=mem_pool)
-    from pyopencl.array import sum as clsum
+            for n in word_count_list:
+                knl = knl_orig
 
-    from pyopencl.tools import ImmediateAllocator, MemoryPool
-    allocator = ImmediateAllocator(queue)
-    mem_pool = MemoryPool(allocator) 
+                events = []
+                ni = n // nj
+                knl = lp.fix_parameters(knl, ni=ni)
+                knl = lp.fix_parameters(knl, nj=nj)
+                if ogti:
+                    n_out = ni
+                    n_in = int(np.ceil(in_out_ratio*n_out))
+                    knl = lp.fix_parameters(n_out=n_out)
+                elif igto:
+                    n_in = ni
+                    n_out = int(np.ceil(out_in_ratio*n_in))
+                    knl = lp.fix_parameters(n_in=n_in)
+                else:
+                    n_in = ni
+                    n_out = ni
+
+                local_size = 128 # 256 or 512 seems to do the best
+                end_slab = 0 if ni % min(local_size,ni) == 0 else 1
+                knl = lp.split_iname(knl, "i", min(local_size,ni), inner_tag="l.0", outer_tag="g.0", slabs=(0,end_slab))
+                knl = lp.tag_inames(knl, [("j", "unr")])
+                #knl = lp.split_iname(knl, "j", nj, inner_tag="l.1", outer_tag="g.1", slabs=(0,0))
+                #knl = lp.set_options(knl, "write_code")  # Output code before editing it
+
+                inpt = cl.array.Array(queue, (nj,n_in), dtype_in, data=d_in_buf)
+                outpt = cl.array.Array(queue, (nj,n_out), dtype_out, data=d_out_buf)     
+
+                dt_avg = 0
+                dt_max = 0
+                dt_min = np.inf
+                events = []
+
+                for j in range(2):
+                    knl(queue, input=inpt, output=outpt)
+                for j in range(ntrials):
+                    evt, _ = knl(queue, input=inpt, output=outpt)
+                    events.append(evt)
+
+                cl.wait_for_events(events)
+                for evt in events:
+                    dt = evt.profile.end - evt.profile.start
+                    dt_avg += dt
+                    if dt > dt_max:
+                        dt_max = dt
+                    if dt < dt_min:
+                        dt_min = dt
+
+                # Convert to seconds
+                dt_avg  = dt_avg / ntrials / 1e9
+                dt_max = dt_max / 1e9
+                dt_min = dt_min / 1e9
+
+                # Calculate bandwidth in GBps
+                nbytes_transferred = dtype_in().itemsize*np.product(inpt.shape) + dtype_out().itemsize*np.product(outpt.shape)
+                avg_bw = nbytes_transferred/dt_avg/1e9
+                max_bw = nbytes_transferred/dt_min/1e9
+                min_bw = nbytes_transferred/dt_max/1e9
+
+                result = BandwidthTestResult(str(queue.device), dt_avg,
+                            dt_min, dt_max, nbytes_transferred, "loopy", (nj, local_size))
+
+                # Keep the result with the lowest tmin
+                if nbytes_transferred not in results_dict:
+                    results_dict[nbytes_transferred] = result
+                elif result.tmin < results_dict[nbytes_transferred].tmin:
+                    results_dict[nbytes_transferred] = result
+
+                print(f"{nbytes_transferred} {dt_avg} {dt_min} {dt_max} {avg_bw} {max_bw} {min_bw}")
+
+                # Need to have read access on both input and output arrays 
+                # for this to work
+
+                #from pyopencl.array import sum as clsum
+                #if n_in == n_out:
+                #    diff = (inpt - outpt)
+                #    if  clsum(inpt - outpt) != 0:
+                #        print("INCORRECT COPY")
+
+    key = lambda result: result.bytes_transferred
+    return tuple(sorted(results_dict.values(), key=key))
 
 
-    print(len_list)
+def enqueue_copy_bandwidth_test_with_queues_like(queue, dtype=None, fill_on_device=True, max_used_bytes=None):
 
-    for n in len_list:
-    #for i in range(29):
+    queues = get_queues_like(queue)
 
-        #n = 2**i
-        kern = lp.fix_parameters(knl, n0=n0, n1=n)
-        #data = np.random.randint(-127, 128, (1,n), dtype=np.int8)
-        #inpt = cl.array.to_device(queue, data, allocator=mem_pool)
-        inpt = cl.clrandom.rand(queue, (n0, n), dtype=fp_format)
-        outpt = cl.array.Array(queue, (n0, n), dtype=fp_format, allocator=mem_pool)
-     
-        #kern = lp.set_options(kern, "write_code")  # Output code before editing it
-
-        for j in range(2):
-            kern(queue, input=inpt, output=outpt)
-        dt = 0
-        events = []
-        for j in range(nruns):
-            evt, _ = kern(queue, input=inpt, output=outpt)
-            events.append(evt)
-
-        cl.wait_for_events(events)
-        for evt in events:
-            dt += evt.profile.end - evt.profile.start 
-        #queue.finish()
-        dt = dt / nruns / 1e9
-
-        nbytes_transferred = 2*fp_bytes*n*n0
-        bandwidth = nbytes_transferred / dt / 1e9
-        print("{} {}".format(nbytes_transferred, bandwidth))
-
-        #print((inpt - outpt)) 
-        diff = (inpt - outpt)
-        if  clsum(inpt - outpt) != 0:
-            print("INCORRECT COPY")
-
-
+    return tuple([enqueue_copy_bandwidth_test(q, dtype=dtype,
+                    fill_on_device=fill_on_device,
+                    max_used_bytes=max_used_bytes) for q in queues])
 
 
 def enqueue_copy_bandwidth_test(queue, dtype=None, fill_on_device=True, max_used_bytes=None, ntrials=1000):
@@ -267,7 +333,7 @@ def enqueue_copy_bandwidth_test(queue, dtype=None, fill_on_device=True, max_used
         max_bw = nbytes_transferred/dt_min/1e9
         min_bw = nbytes_transferred/dt_max/1e9
 
-        result = BandwidthTestResult(str(queue.device), dt_avg, dt_min, dt_max, nbytes_transferred)
+        result = BandwidthTestResult(str(queue.device), dt_avg, dt_min, dt_max, nbytes_transferred, "enqueue_copy")
         results_list.append(result)
 
         print(f"{nbytes_transferred} {dt_avg} {dt_min} {dt_max} {avg_bw} {max_bw} {min_bw}")
@@ -299,6 +365,7 @@ def plot_bandwidth(results_list):
 
     best_fit_bandwidth = M[:,0]/(latency + M[:,0]*inv_bandwidth)/1e9
     
+    
     fig = plt.figure()
     plt.semilogx(M[:,0], M[:,1]/1e9)
     plt.semilogx(M[:,0], best_fit_bandwidth)
@@ -311,20 +378,34 @@ if __name__ == "__main__":
     context = cl.create_some_context(interactive=True)
     queue = cl.CommandQueue(context, properties=cl.command_queue_properties.PROFILING_ENABLE)
 
+    loopy_results_list = loopy_bandwidth_test(queue, fast=False)
+    enqueue_results_list = enqueue_copy_bandwidth_test(queue, dtype=None, fill_on_device=True, max_used_bytes=None)
 
-    #results_list = enqueue_copy_bandwidth_test(queue, dtype=None, fill_on_device=True, max_used_bytes=None)
-
-    #get_alpha_beta_model(results_list)
-    #plot_bandwidth(results_list)
-
-    results_list_list = enqueue_copy_bandwidth_test_with_queues_like(queue, max_used_bytes=None)
+    combined_list = loopy_results_list + enqueue_results_list
     
-    key = lambda result: result.tmin
-    combined_list = [sorted(tup, key=key)[0] for tup in zip(*results_list_list)]
+    tmin_key = lambda result: result.tmin
 
-    for results_list in results_list_list:
-        coeffs = get_alpha_beta_model(results_list)
-        print(coeffs)
+    #results_list_list_enqueue = enqueue_copy_bandwidth_test_with_queues_like(queue)
+    #combined_list_enqueue = [sorted(tup, key=tmin_key)[0] for tup in zip(*results_list_list_enqueue)]
+    
+    # Can't use PoCL until https://github.com/pocl/pocl/pull/1094 is fixed
+    #results_list_list_loopy = loopy_bandwidth_test_with_queues_like(queue, fast=True)
+    #combined_list_loopy = [sorted(tup, key=tmin_key)[0] for tup in zip(*results_list_list_loopy)]
+    
+    #combined_list = [*combined_list_loopy, *combined_list_enqueue]
+
+    # Eliminate redundant data points, save the fastest minimum time
+    results_dict = {}
+    for entry in combined_list:
+        nbytes_transferred = entry.bytes_transferred
+        if nbytes_transferred not in results_dict:
+            results_dict[nbytes_transferred] = entry
+        elif entry.tmin < results_dict[nbytes_transferred].tmin:
+            results_dict[nbytes_transferred] = entry
+
+    bytes_key = lambda result: result.bytes_transferred
+    combined_list = sorted(results_dict.values(), key=bytes_key)
+    for entry in combined_list:
+        print(entry.bytes_transferred, entry.tmin, entry.max_bandwidth)
 
     plot_bandwidth(combined_list)
-
