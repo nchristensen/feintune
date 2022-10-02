@@ -55,7 +55,7 @@ def testBandwidth(fp_format=np.float32, nruns=100):
 
     knl = lp.make_copy_kernel("c,c", old_dim_tags="c,c")
     knl = lp.add_dtypes(knl, {"input": fp_format, "output": fp_format})
-    knl = knl.copy(target=lp.PyOpenCLTarget(my_gpu_devices[0]))
+    #knl = knl.copy(target=lp.PyOpenCLTarget(my_gpu_devices[0]))
     n0 = 2
     #knl = lp.split_iname(knl, "i1", 1024//2, inner_tag="l.0", outer_tag="g.0", slabs=(0,1))
     knl = lp.split_iname(knl, "i1", 256, inner_tag="l.0", outer_tag="g.0", slabs=(0,1))
@@ -67,12 +67,12 @@ def testBandwidth(fp_format=np.float32, nruns=100):
 
     # This assumes fp32
     len_list = []
-    float_count = 1
+    float_count = 2
     max_floats = 2**28
     while float_count <= max_floats:
         len_list.append(float_count)
         float_count = int(np.ceil(float_count*1.5))
-    for i in range(29):
+    for i in range(1,29):
         len_list.append(2**i)
     len_list = sorted(list(set(len_list)))
 
@@ -91,7 +91,7 @@ def testBandwidth(fp_format=np.float32, nruns=100):
         inpt = cl.clrandom.rand(queue, (n0, n), dtype=fp_format)
         outpt = cl.array.Array(queue, (n0, n), dtype=fp_format, allocator=mem_pool)
      
-        #kern = lp.set_options(kern, "write_code")  # Output code before editing it
+        kern = lp.set_options(kern, "write_code")  # Output code before editing it
 
         for j in range(2):
             kern(queue, input=inpt, output=outpt)
@@ -112,9 +112,9 @@ def testBandwidth(fp_format=np.float32, nruns=100):
         print("{} {}".format(nbytes_transferred, bandwidth))
 
         #print((inpt - outpt)) 
-        diff = (inpt - outpt)
-        if  clsum(inpt - outpt) != 0:
-            print("INCORRECT COPY")
+        #diff = (inpt - outpt)
+        #if  clsum(inpt - outpt) != 0:
+        #    print("INCORRECT COPY")
 
 
 def test_face_mass_merged(kern, backend="OPENCL", nruns=10, warmup=True):
