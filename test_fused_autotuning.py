@@ -301,6 +301,39 @@ def apply_feinsum_transformations(t_unit, queue):
         t_unit = fnsm_transform(t_unit, insn_match=ObjTagged(ensm_tag))
         return t_unit
 
+# Only works for subkernels that have no dependency on a prior subkernel
+def autotune_single_subkernel(sk, queue):
+    from generators import einsum3to2_kernel_tlist_generator_v2
+    #from parallel_autotuning_charm4py_v2 import parallel_autotune
+    from parallel_autotuning_mpi4py_v2 import parallel_autotune
+    from run_tests import run_single_param_set_v2
+    from run_tests import generic_test
+
+    einsum_types = list(get_einsum_types(sk))    
+
+    if len(einsum_types) > 1:
+        raise(ValueError("Cannot currently handle multiple einsum types in same subkernel"))
+
+    est = est[0]
+
+    if len(est[0]) == 2 and len(est[1]) == 1:
+        trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
+    #elif len(est[0]) == 2 and len(est[1]) == 0:
+    #    trans_list_list = einsum2to2_kernel_tlist_generator_v2(queue, sk)
+    else:
+        print(est)
+        raise(ValueError("Unhandled einsum type"))
+
+    tdict = parallel_autotune(csk, 0, trans_list_list)
+    
+    transformations = tdict["transformations"]
+    return transformations
+
+    #return list(trans_list_list[0])
+
+
+#def autotune_dependent_subkernel(subkernel, queue):
+
 
 def autotune_parts(parts, queue):
     from generators import einsum3to2_kernel_tlist_generator_v2, einsum2to2_kernel_tlist_generator_v2
@@ -584,8 +617,7 @@ def get_pickled_tunits(directory):
 
     return tunits
 
-def get_lazy_einsum_info(directory):
-    tunits = get_pickled_tunits(directory)
+def get_lazy_einsum_info(tunits):
     for filename, tunit, args in tunits:
         sks = get_subkernels(tunit, args)
         #print(tunit.default_entrypoint)
@@ -624,7 +656,7 @@ def get_lazy_einsum_info(directory):
         print(key, val)
 
 
-    test_feinsum_transforms(tunits)
+    #test_feinsum_transforms(tunits)
 
 def test_feinsum_transforms(tunits):
 
@@ -646,7 +678,9 @@ def test_feinsum_transforms(tunits):
                     print("Couldn't find transformation for", filename)
 
 if __name__ == "__main__":
-    get_lazy_einsum_info("./pickled_programs_prediction")
+    directory = "./pickled_programs_prediction"
+    tunits = get_pickled_tunits(directory)
+    get_lazy_einsum_info(tunits)
     #dump_subkernels_from_pickled(None)
     #charm.start(dump_subkernels_from_pickled)
     #print(result)
