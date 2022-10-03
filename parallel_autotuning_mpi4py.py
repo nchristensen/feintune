@@ -91,7 +91,7 @@ def test(args):
     platform_id, knl, tlist_generator, params, test_fn = args
     comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
     # From MPI.PoolExecutor the communicator for the tasks is not COMM_WORLD
-    queue = get_queue(comm.Get_rank(), platform_id)
+    #queue = get_queue(comm.Get_rank(), platform_id)
     result = run_single_param_set(queue, knl, tlist_generator, params, test_fn)
     #print(mem_top())
     #h = hpy()

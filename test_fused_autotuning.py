@@ -4,12 +4,24 @@ from pytools.tag import Tag
 from meshmode.array_context import EinsumTag
 import pyopencl as cl
 import os
+from os.path import exists
+from utils import unique_program_id
 
 #from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
 #from charm4py.pool import PoolScheduler, Pool
 #from charm4py.charm import Charm, CharmRemote
 
 import mpi4py.MPI as MPI
+
+from generators import einsum3to2_kernel_tlist_generator_v2
+#from parallel_autotuning_charm4py_v2 import parallel_autotune
+from parallel_autotuning_mpi4py_v2 import parallel_autotune
+from run_tests import run_single_param_set_v2
+from run_tests import generic_test
+
+
+
+
 comm = MPI.COMM_WORLD
 
 
@@ -302,19 +314,13 @@ def apply_feinsum_transformations(t_unit, queue):
         return t_unit
 
 # Only works for subkernels that have no dependency on a prior subkernel
-def autotune_single_subkernel(sk, queue):
-    from generators import einsum3to2_kernel_tlist_generator_v2
-    #from parallel_autotuning_charm4py_v2 import parallel_autotune
-    from parallel_autotuning_mpi4py_v2 import parallel_autotune
-    from run_tests import run_single_param_set_v2
-    from run_tests import generic_test
-
+def autotune_standalone_subkernel(sk, queue):
     einsum_types = list(get_einsum_types(sk))    
 
     if len(einsum_types) > 1:
         raise(ValueError("Cannot currently handle multiple einsum types in same subkernel"))
 
-    est = est[0]
+    est = einsum_types[0]
 
     if len(est[0]) == 2 and len(est[1]) == 1:
         trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
@@ -324,7 +330,7 @@ def autotune_single_subkernel(sk, queue):
         print(est)
         raise(ValueError("Unhandled einsum type"))
 
-    tdict = parallel_autotune(csk, 0, trans_list_list)
+    tdict = parallel_autotune(sk, 0, trans_list_list)
     
     transformations = tdict["transformations"]
     return transformations
@@ -615,6 +621,7 @@ def get_pickled_tunits(directory):
             #tunit, args = pickle.load(f)
             f.close()
 
+
     return tunits
 
 def get_lazy_einsum_info(tunits):
@@ -656,6 +663,35 @@ def get_lazy_einsum_info(tunits):
         print(key, val)
 
 
+def autotune_standalone_subkernels(tunits):
+    platforms = cl.get_platforms()
+    cl_ctx = cl.Context(
+        dev_type=cl.device_type.GPU,
+        properties=[(cl.context_properties.PLATFORM, platforms[0])])
+    queue = cl.CommandQueue(cl_ctx,
+        properties=cl.command_queue_properties.PROFILING_ENABLE)
+
+    for filename, tunit, args in tunits:
+        sks = get_subkernels(tunit, args)
+        for sk, csk in sks:
+            pid = unique_program_id(sk)
+            os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
+            filename = f"./hjson/{pid}.pickle"
+            if not exists(filename):
+                einsum_types = list(get_einsum_types(sk))
+                indirection = len(get_indirection_arrays(sk)) > 0
+                if len(einsum_types) > 0:
+                    einsum_types = einsum_types[0]
+                    non_red_axes = len(einsum_types[0])
+                    red_axes = len(einsum_types[1])
+                    total_axes = non_red_axes + red_axes
+                    out_axes = total_axes - red_axes
+                    if not indirection and out_axes == 2 and total_axes == 3:        
+                        autotune_standalone_subkernel(sk, queue)
+            else:
+                print("A TUNE PROFILE ALREADY EXISTS")
+
+
     #test_feinsum_transforms(tunits)
 
 def test_feinsum_transforms(tunits):
@@ -678,9 +714,12 @@ def test_feinsum_transforms(tunits):
                     print("Couldn't find transformation for", filename)
 
 if __name__ == "__main__":
-    directory = "./pickled_programs_prediction"
+    directory = "./pickled_programs_order_1"
     tunits = get_pickled_tunits(directory)
-    get_lazy_einsum_info(tunits)
+    #print(len(tunits))
+    #get_lazy_einsum_info(tunits)
+
+    autotune_standalone_subkernels(tunits)
     #dump_subkernels_from_pickled(None)
     #charm.start(dump_subkernels_from_pickled)
     #print(result)

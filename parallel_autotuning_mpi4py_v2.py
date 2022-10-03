@@ -84,13 +84,17 @@ def get_queue(pe_num, platform_num):
     queue = cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
     return queue
 
+# Assume using platform zero
+comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
+# From MPI.PoolExecutor the communicator for the tasks is not COMM_WORLD
+queue = get_queue(comm.Get_rank(), 0)
 
 def test(args):
     #print(args)
     platform_id, knl, tlist, test_fn = args
-    comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
+    #comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
     # From MPI.PoolExecutor the communicator for the tasks is not COMM_WORLD
-    queue = get_queue(comm.Get_rank(), platform_id)
+    #queue = get_queue(comm.Get_rank(), platform_id)
     result = run_single_param_set_v2(queue, knl, tlist, test_fn)
     #print(mem_top())
     #h = hpy()
@@ -145,14 +149,14 @@ def autotune_pickled_kernels(path, platform_id, actx_class, comm):
 def parallel_autotune(knl, platform_id, trans_list_list):
 
     # Create queue, assume all GPUs on the machine are the same
-    comm = MPI.COMM_WORLD
-    platforms = cl.get_platforms()
-    gpu_devices = platforms[platform_id].get_devices(device_type=cl.device_type.GPU)
-    n_gpus = len(gpu_devices)
-    ctx = cl.Context(devices=[gpu_devices[comm.Get_rank() % n_gpus]])
-    profiling = cl.command_queue_properties.PROFILING_ENABLE
-    queue = cl.CommandQueue(ctx, properties=profiling)    
 
+    #comm = MPI.COMM_WORLD
+    #platforms = cl.get_platforms()
+    #gpu_devices = platforms[platform_id].get_devices(device_type=cl.device_type.GPU)
+    #n_gpus = len(gpu_devices)
+    #ctx = cl.Context(devices=[gpu_devices[comm.Get_rank() % n_gpus]])
+    #profiling = cl.command_queue_properties.PROFILING_ENABLE
+    #queue = cl.CommandQueue(ctx, properties=profiling)    
 
     #import pyopencl.tools as cl_tools
     #actx = actx_class(
@@ -165,7 +169,7 @@ def parallel_autotune(knl, platform_id, trans_list_list):
     from utils import unique_program_id
     pid = unique_program_id(knl)
     os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
-    hjson_file_str = f"hjson/{knl.default_entrypoint.name}_{pid}.hjson"
+    hjson_file_str = f"hjson/{pid}.hjson"
 
     #assert comm.Get_size() > 1
     #assert charm.numPes() > 1
@@ -218,6 +222,7 @@ def parallel_autotune(knl, platform_id, trans_list_list):
         
                 # Workaround for pocl CUDA bug
                 # whereby times are imprecise
+                # There is a fix in a full request for this
                 ret_index = 0
                 for i, result in enumerate(results):
                     if result["data"]["avg_time"] > 1e-7:
