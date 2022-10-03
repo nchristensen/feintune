@@ -676,8 +676,11 @@ def autotune_standalone_subkernels(tunits):
         for sk, csk in sks:
             pid = unique_program_id(sk)
             os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
-            filename = f"./hjson/{pid}.pickle"
-            if not exists(filename):
+            filename = f"./hjson/{pid}.hjson"
+            if exists(filename):
+                print("A TUNE PROFILE ALREADY EXISTS: {filename}")
+            else:
+                print(f"A TUNE PROFILE EXISTS NOT: {filename}")
                 einsum_types = list(get_einsum_types(sk))
                 indirection = len(get_indirection_arrays(sk)) > 0
                 if len(einsum_types) > 0:
@@ -688,8 +691,6 @@ def autotune_standalone_subkernels(tunits):
                     out_axes = total_axes - red_axes
                     if not indirection and out_axes == 2 and total_axes == 3:        
                         autotune_standalone_subkernel(sk, queue)
-            else:
-                print("A TUNE PROFILE ALREADY EXISTS")
 
 
     #test_feinsum_transforms(tunits)
