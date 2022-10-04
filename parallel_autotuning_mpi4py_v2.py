@@ -88,14 +88,19 @@ def get_queue(pe_num, platform_num):
 comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
 # From MPI.PoolExecutor the communicator for the tasks is not COMM_WORLD
 queue = get_queue(comm.Get_rank(), 0)
+from feinsum.empirical_roofline import get_theoretical_maximum_flop_rate
+max_flop_rate = get_theoretical_maximum_flop_rate(queue, np.float64)
 
 def test(args):
-    #print(args)
-    platform_id, knl, tlist, test_fn = args
+    print(args)
+    platform_id, knl, tlist, test_fn, device_latency, device_memory_bandwidth = args
     #comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
     # From MPI.PoolExecutor the communicator for the tasks is not COMM_WORLD
     #queue = get_queue(comm.Get_rank(), platform_id)
-    result = run_single_param_set_v2(queue, knl, tlist, test_fn)
+    result = run_single_param_set_v2(queue, knl, tlist, test_fn,
+            max_flop_rate=max_flop_rate, 
+            device_memory_bandwidth=device_memory_bandwidth,
+            device_latency=device_latency)
     #print(mem_top())
     #h = hpy()
     #print(h.heap())
@@ -146,7 +151,7 @@ def autotune_pickled_kernels(path, platform_id, actx_class, comm):
             #del knl
 
 
-def parallel_autotune(knl, platform_id, trans_list_list):
+def parallel_autotune(knl, platform_id, trans_list_list, device_latency=None, device_memory_bandwidth=None):
 
     # Create queue, assume all GPUs on the machine are the same
 
@@ -184,7 +189,7 @@ def parallel_autotune(knl, platform_id, trans_list_list):
     #    trans_list_list = tlist_generator(actx.queue, knl)
 
     # Could make a massive list with all kernels and parameters
-    args = ((platform_id, knl, tlist, generic_test,) for tlist in trans_list_list)
+    args = ((platform_id, knl, tlist, generic_test, device_latency, device_memory_bandwidth,) for tlist in trans_list_list)
 
     #print(args)
     #exit()
@@ -222,7 +227,7 @@ def parallel_autotune(knl, platform_id, trans_list_list):
         
                 # Workaround for pocl CUDA bug
                 # whereby times are imprecise
-                # There is a fix in a full request for this
+                # There is a fix in a pull request for this
                 ret_index = 0
                 for i, result in enumerate(results):
                     if result["data"]["avg_time"] > 1e-7:

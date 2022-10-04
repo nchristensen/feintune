@@ -351,7 +351,7 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup=True):
     return arg_dict, avg_time
 
 
-def analyze_knl_bandwidth(knl, avg_time):
+def get_knl_device_memory_bytes(knl):
     nbytes = 0
     # What if the output is not in the input arguments?
     #print(knl.default_entrypoint.args)
@@ -360,16 +360,20 @@ def analyze_knl_bandwidth(knl, avg_time):
     args_and_temps = knl.default_entrypoint.args + list(knl.default_entrypoint.temporary_variables.values())
     for arg in args_and_temps:
         if arg.address_space == lp.AddressSpace.GLOBAL:
-            print(arg.name)
-            print(arg.shape)
-            print(type(arg.dtype))
-            entries = np.prod((arg.shape))
-            fp_bytes = arg.dtype.dtype.itemsize
-            nbytes += fp_bytes * entries
-        # This bandwidth calculation assumes data in global memory need only be accessed once
-        # from global memory and is otherwise served from a cache or local memory that is
-        # fast enough to be considered free
-        bw = nbytes / avg_time / 1e9
+            #print(arg.name)
+            #print(arg.shape)
+            #print(type(arg.dtype))
+            nbytes += np.prod((arg.shape))*arg.dtype.dtype.itemsize
+            
+    return nbytes
+
+# avg_time in seconds
+def analyze_knl_bandwidth(knl, avg_time):
+    # This bandwidth calculation assumes data in global memory need only be accessed once
+    # from global memory and is otherwise served from a cache or local memory that is
+    # fast enough to be considered free
+    nbytes = get_knl_device_memory_bytes(knl)
+    bw = nbytes / avg_time
 
     # Seems lp.gather_access_footprint_bytes breaks
     #footprint = lp.gather_access_footprint_bytes(knl)
@@ -378,19 +382,24 @@ def analyze_knl_bandwidth(knl, avg_time):
     #    footprint_bytes += val.eval_with_dict({})
     #footprint_bw =  footprint_bytes / avg_time / 1e9  
     #print(f"Time: {avg_time}, Bytes: {nbytes}, Bandwidth: {bw} GB/s Footprint BW: {footprint_bw} GB/s")
+    Gbps = bw*1e-9
 
-    print(f"Time: {avg_time}, Bytes: {nbytes}, Bandwidth: {bw} GB/s")
-    return frozendict({"observed_GBps": bw, "nbytes_global": nbytes})
+    print(f"Time: {avg_time}, Bytes: {nbytes}, Bandwidth: {Gbps} GB/s")
+    return frozendict({"observed_bandwidth": bw, "nbytes_global": nbytes})
 
 
-def analyze_FLOPS(knl, avg_time, max_gflops=None):
-
+def get_knl_flops(knl):
     op_map = lp.get_op_map(knl, count_within_subscripts=False, subgroup_size=1)
     #print(op_map)
     map_flops = 0
     for val in op_map.values():
         map_flops += val.eval_with_dict({})
-    gflop_rate = map_flops / avg_time / 1e9
+    return map_flops
+
+# Avg time in seconds, max_flop_rate in flops per second
+def analyze_flop_rate(knl, avg_time, max_flop_rate=None):
+    map_flops = get_knl_flops(knl)
+    flop_rate = map_flops / avg_time
 
     """
     n_mat = 1
@@ -408,8 +417,8 @@ def analyze_FLOPS(knl, avg_time, max_gflops=None):
     
     flops = nfaces*n_mat*2*(n_out * n_in * n_elem)
     """
-    gflop_rate = (map_flops / avg_time) * 1e-9
-    print("GFLOP/s: " + str(gflop_rate))
+    flop_rate = map_flops / avg_time
+    print("GFLOP/s: " + str(flop_rate*1e-9))
 
     #print("Map GFLOP/s: " + str(map_gflop_rate))
     #print(flops)
@@ -421,7 +430,6 @@ def analyze_FLOPS(knl, avg_time, max_gflops=None):
         frac_peak_gflops = gflop_rate / max_gflops
         print("Percent peak: " + str(100*(frac_peak_gflops)))
     """
-    print()
 
     # Calculate bandwidth
     # Assumes each element only read once
@@ -434,7 +442,15 @@ def analyze_FLOPS(knl, avg_time, max_gflops=None):
     #print("Percent peak: " + str(100*(frac_peak_GBps)))
     #print()
 
-    return frozendict({"observed_gflop_rate": gflop_rate, "flops": map_flops})#gflop_rate, frac_peak_gflops
+    return frozendict({"observed_flop_rate": flop_rate, "flops": map_flops})#gflop_rate, frac_peak_gflops
+
+
+def get_knl_device_memory_roofline(knl, max_flop_rate, device_latency, device_memory_bandwidth):
+    device_memory_bytes = get_knl_device_memory_bytes(knl)
+    flops_per_byte = get_knl_flops(knl) / device_memory_bytes
+    effective_bandwidth = device_memory_bytes / (device_latency + device_memory_bytes / device_memory_bandwidth)
+    roofline_flop_rate = min(flops_per_byte*effective_bandwidth, max_flop_rate)
+    return roofline_flop_rate
 
 
 def verifyResult(B_dev1, B_dev2, B_dev3, A_dev1, A_dev2, A_dev3, X_dev):
@@ -613,45 +629,61 @@ def run_single_param_set(queue, knl_base, tlist_generator, params, test_fn, max_
     retval = {"transformations": trans_list, "data": data}
     return retval
 
-def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_gflops=None, device_memory_bandwidth=None):
+def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=None, device_memory_bandwidth=None, device_latency=None):
     #trans_list = tlist_generator(params, knl=knl_base)
     print(trans_list)
+    print("MAX_FLOP_RATE", max_flop_rate)
+    print("DEVICE LATENCY", device_latency)
+    print("DEVICE MEMORY BANDWIDTH", device_memory_bandwidth)
+
     knl = apply_transformation_list(knl_base, trans_list)
 
     dev_arrays, avg_time = test_fn(queue, knl)
 
     # Should this return the fraction of peak of should that be calculated in this function?
-    gflops_dict = analyze_FLOPS(knl, avg_time, max_gflops=max_gflops)
+    flop_rate_dict = analyze_flop_rate(knl, avg_time, max_flop_rate=max_flop_rate)
     bw_dict = analyze_knl_bandwidth(knl, avg_time)
 
-    bw = bw_dict["observed_GBps"]
-    gflops = gflops_dict["observed_gflop_rate"]
-
-    if device_memory_bandwidth is not None:  # noqa
-        #bw = analyze_knl_bandwidth(knl, avg_time)
-        frac_peak_GBps = bw / device_memory_bandwidth
-        if frac_peak_GBps  >= bandwidth_cutoff:  # noqa
-            # Should validate result here
-            print("Performance is within tolerance of peak bandwith. Terminating search")  # noqa
-            return choices
-
-    # This is incorrect for general einsum kernels
-    if max_gflops is not None:
-        frac_peak_gflops = gflops/ max_gflops#analyze_FLOPS(knl, max_gflops, avg_time)
-        if frac_peak_gflops >= gflops_cutoff:
-            # Should validate result here
-            print("Performance is within tolerance of peak bandwith or flop rate. Terminating search")  # noqa
-            return choices
+    bw = bw_dict["observed_bandwidth"]
+    flop_rate = flop_rate_dict["observed_flop_rate"]
 
     data = {"avg_time": avg_time}
     data.update(bw_dict.items())
-    data.update(gflops_dict.items())
-    if device_memory_bandwidth is not None:
-        data.update({"frac_peak_gflops": frac_peak_GBps,
-                     "device_memory_GBps": device_memory_bandwidth})
-    if max_gflops is not None:
-        data.update({"frac_peak_gflops": frac_peak_gflops,
-                "max_gflops": max_gflops})
+    data.update(flop_rate_dict.items())
+
+    if device_memory_bandwidth is not None:  # noqa
+        #bw = analyze_knl_bandwidth(knl, avg_time)
+        frac_peak_bandwidth = bw / device_memory_bandwidth
+        data.update({"frac_peak_bandwidth": frac_peak_bandwidth,
+                     "device_memory_bandwidth": device_memory_bandwidth})
+ 
+        #if frac_peak_bandwidth  >= bandwidth_cutoff:  # noqa
+        #    # Should validate result here
+        #    print("Performance is within tolerance of peak bandwith. Terminating search")  # noqa
+        #    return choices
+
+    # This is incorrect for general einsum kernels
+    if max_flop_rate is not None:
+        frac_peak_flop_rate = flop_rate / max_flop_rate#analyze_FLOPS(knl, max_gflops, avg_time)
+        data.update({"frac_peak_flop_rate": frac_peak_flop_rate,
+                "max_flop_rate": max_flop_rate})
+
+        #if frac_peak_gflops >= gflops_cutoff:
+        #    # Should validate result here
+        #    print("Performance is within tolerance of peak bandwith or flop rate. Terminating search")  # noqa
+        #    return choices
+
+    if device_latency is not None and device_memory_bandwidth is not None and max_flop_rate is not None:
+        roofline_flop_rate = get_knl_device_memory_roofline(knl, max_flop_rate,
+                device_latency, device_memory_bandwidth)
+        frac_roofline_flop_rate = flop_rate / roofline_flop_rate
+
+        print("Roofline GFLOP/s:", roofline_flop_rate*1e-9)
+        print()
+
+        data.update({"frac_roofline_flop_rate": frac_roofline_flop_rate,
+                "roofline_flop_rate": roofline_flop_rate})
+        
 
     from frozendict import frozendict
     retval = frozendict({"transformations": trans_list, "data": data})

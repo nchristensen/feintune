@@ -314,7 +314,7 @@ def apply_feinsum_transformations(t_unit, queue):
         return t_unit
 
 # Only works for subkernels that have no dependency on a prior subkernel
-def autotune_standalone_subkernel(sk, queue):
+def autotune_standalone_subkernel(sk, queue, device_latency=None, device_memory_bandwidth=None):
     einsum_types = list(get_einsum_types(sk))    
 
     if len(einsum_types) > 1:
@@ -330,7 +330,8 @@ def autotune_standalone_subkernel(sk, queue):
         print(est)
         raise(ValueError("Unhandled einsum type"))
 
-    tdict = parallel_autotune(sk, 0, trans_list_list)
+    tdict = parallel_autotune(sk, 0, trans_list_list, device_latency=device_latency,
+            device_memory_bandwidth=device_memory_bandwidth)
     
     transformations = tdict["transformations"]
     return transformations
@@ -671,13 +672,23 @@ def autotune_standalone_subkernels(tunits):
     queue = cl.CommandQueue(cl_ctx,
         properties=cl.command_queue_properties.PROFILING_ENABLE)
 
+    # Doesn't really matter if all of the processes do this,
+    # the rank 0 numbers will be used
+    # Would possibly be more accurate to use the minimum latency ever seen
+    # and the maximum bandwidth ever seen
+    from feinsum.empirical_roofline import loopy_bandwidth_test, get_alpha_beta_model
+    results_list = loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
+    device_latency, inverse_bandwidth = get_alpha_beta_model(results_list)
+    device_memory_bandwidth = 1/inverse_bandwidth
+
     for filename, tunit, args in tunits:
+        print("TESTING TUNIT: {filename}")
         sks = get_subkernels(tunit, args)
         for sk, csk in sks:
             pid = unique_program_id(sk)
             os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
-            filename = f"./hjson/{pid}.hjson"
-            if exists(filename):
+            hjson_file = f"./hjson/{pid}.hjson"
+            if exists(hjson_file):
                 print("A TUNE PROFILE ALREADY EXISTS: {filename}")
             else:
                 print(f"A TUNE PROFILE EXISTS NOT: {filename}")
@@ -689,8 +700,9 @@ def autotune_standalone_subkernels(tunits):
                     red_axes = len(einsum_types[1])
                     total_axes = non_red_axes + red_axes
                     out_axes = total_axes - red_axes
-                    if not indirection and out_axes == 2 and total_axes == 3:        
-                        autotune_standalone_subkernel(sk, queue)
+                    if not indirection and out_axes == 2 and total_axes == 3:
+                        autotune_standalone_subkernel(sk, queue,
+                                device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)
 
 
     #test_feinsum_transforms(tunits)
