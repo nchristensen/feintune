@@ -211,8 +211,7 @@ def generate_subkernels(tunit, barriers, phases):
     return subkernels
 
 
-# Obtain non-reduction and reduction inames 
-def get_einsum_types(knl):
+def get_einsums(knl):
     einsums = []
     for instr in knl.default_entrypoint.instructions:
         if isinstance(instr, lp.Assignment):
@@ -224,8 +223,17 @@ def get_einsum_types(knl):
                         einsums.append((instr.within_inames, (),))
                     
     
-    return frozenset(einsums)
+    return einsums
 
+def get_einsum_counts(knl):
+    from collections import Counter
+    counter = Counter(get_einsums(knl))
+    print(counter.items())
+    return counter
+
+# Obtain non-reduction and reduction inames 
+def get_einsum_types(knl):
+    return frozenset(get_einsums(knl))
 
 def dump_subkernels_from_pickled(arg):
 
@@ -639,30 +647,32 @@ def get_lazy_einsum_info(tunits):
         #for einsum in einsums:
         #    print("    ", einsum)
 
-    # Count number of kernels of each einsum type
-    einsum_counts = {}
+    # Count number of subkernels of each einsum type
+    subkernel_counts = {}
     for filename, tunit, args in tunits:
         sks = get_subkernels(tunit, args)
         for sk, csk in sks:
-            einsum_types = list(get_einsum_types(sk))
+            #einsum_types = list(get_einsum_types(sk))
+            einsum_counts = list(get_einsum_counts(sk).items())
             indirection = len(get_indirection_arrays(sk)) > 0
-            print(einsum_types)
-            if len(einsum_types) > 0:
-                einsum_types = einsum_types[0]
-                non_red_axes = len(einsum_types[0])
-                red_axes = len(einsum_types[1])
+            #print(einsum_counts)
+            if len(einsum_counts) > 1:
+                raise ValueError("There should not be multiple einsum types within a single subkernel")
+            if len(einsum_counts) > 0:
+                einsum_type, count = einsum_counts[0]
+                non_red_axes = len(einsum_type[0])
+                red_axes = len(einsum_type[1])
                 total_axes = non_red_axes + red_axes
                 out_axes = total_axes - red_axes
-                key = (total_axes, out_axes, red_axes, indirection)
-                if key in einsum_counts:
-                    einsum_counts[key] += 1
+                key = (total_axes, out_axes, red_axes, count, indirection)
+                if key in subkernel_counts:
+                    subkernel_counts[key] += 1
                 else:
-                    einsum_counts[key] = 1
+                    subkernel_counts[key] = 1
 
 
-    for key, val in einsum_counts.items():
+    for key, val in subkernel_counts.items():
         print(key, val)
-
 
 def autotune_standalone_subkernels(tunits):
     platforms = cl.get_platforms()
@@ -727,12 +737,14 @@ def test_feinsum_transforms(tunits):
                     print("Couldn't find transformation for", filename)
 
 if __name__ == "__main__":
-    directory = "./pickled_programs_order_1"
+    #directory = "./pickled_programs_order_1"
+    directory = "./pickled_programs_prediction"
+
     tunits = get_pickled_tunits(directory)
     #print(len(tunits))
-    #get_lazy_einsum_info(tunits)
+    get_lazy_einsum_info(tunits)
 
-    autotune_standalone_subkernels(tunits)
+    #autotune_standalone_subkernels(tunits)
     #dump_subkernels_from_pickled(None)
     #charm.start(dump_subkernels_from_pickled)
     #print(result)
