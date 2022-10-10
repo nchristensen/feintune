@@ -306,7 +306,7 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
             fp_bytes = arg.dtype.dtype.itemsize
             break
     for arg in list(arg_dict.values()):
-        if arg.name in read_deps and arg.shape[0] == n_elem:
+        if len(arg.shape) == 2 and arg.name in read_deps and arg.shape[0] == n_elem:
             n_in = arg.shape[1]
             dof_arrays.append(arg.name)
 
