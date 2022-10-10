@@ -42,7 +42,7 @@ def unique_program_id(program):
     # Can sorting the instructions change the meaning of the loopy program?
     dstr = md5(str(sorted(domains)).encode()).hexdigest() #List
     istr = md5(str(sorted(instr)).encode()).hexdigest()   #List
-    astr = md5(str(sorted(args, key=lambda arg: arg.name))).encode()).hexdigest()    #List
+    astr = md5(str(sorted(args, key=lambda arg: arg.name)).encode()).hexdigest()    #List
     #nstr = md5(name.encode()).hexdigest()
     #print("dstr", dstr)
     #print("nstr", nstr)
