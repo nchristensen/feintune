@@ -39,9 +39,10 @@ def unique_program_id(program):
     print()
     """
 
-    dstr = md5(str(domains).encode()).hexdigest() #List
-    istr = md5(str(instr).encode()).hexdigest()   #List
-    astr = md5(str(args).encode()).hexdigest()    #List
+    # Can sorting the instructions change the meaning of the loopy program?
+    dstr = md5(str(sorted(domains)).encode()).hexdigest() #List
+    istr = md5(str(sorted(instr)).encode()).hexdigest()   #List
+    astr = md5(str(sorted(args)).encode()).hexdigest()    #List
     #nstr = md5(name.encode()).hexdigest()
     #print("dstr", dstr)
     #print("nstr", nstr)

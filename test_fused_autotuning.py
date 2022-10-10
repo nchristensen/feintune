@@ -269,6 +269,40 @@ def dump_subkernels_from_pickled(arg):
                 """
     #exit()
 
+def feinsum_autotune(tunit, queue):
+    from loopy.match import ObjTagged
+    import feinsum as fnsm
+    from functools import reduce
+    from meshmode.feinsum_transformations import FEINSUM_TO_TRANSFORMS
+
+    assert all(insn.tags_of_type(EinsumTag)
+           for insn in t_unit.default_entrypoint.instructions
+           if isinstance(insn, lp.MultiAssignmentBase)
+           )
+
+    einsum_tags = reduce(
+        frozenset.union,
+        (insn.tags_of_type(EinsumTag)
+         for insn in t_unit.default_entrypoint.instructions),
+        frozenset())
+    for ensm_tag in sorted(einsum_tags,
+       	    key=lambda x: sorted(x.orig_loop_nest)):
+        if reduce(frozenset.union,
+            (insn.reduction_inames()
+                   for insn in (t_unit.default_entrypoint.instructions)
+                   if ensm_tag in insn.tags),
+             frozenset()):
+            fused_einsum = fnsm.match_einsum(t_unit, ObjTagged(ensm_tag))
+        else:
+            # elementwise loop
+            from meshmode.array_context import _get_elementwise_einsum
+            fused_einsum = _get_elementwise_einsum(t_unit, ensm_tag)
+
+
+        normalized_fused_einsum = fnsm.normalize_einsum(fused_einsum)
+        print(normalized_fused_einsum)
+
+
 # Copied from Meshmode
 def apply_feinsum_transformations(t_unit, queue):
     from loopy.match import ObjTagged
@@ -322,7 +356,7 @@ def apply_feinsum_transformations(t_unit, queue):
         return t_unit
 
 # Only works for subkernels that have no dependency on a prior subkernel
-def autotune_standalone_subkernel(sk, queue, device_latency=None, device_memory_bandwidth=None):
+def autotune_standalone_subkernel(sk, queue, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None):
     einsum_types = list(get_einsum_types(sk))    
 
     if len(einsum_types) > 1:
@@ -338,7 +372,7 @@ def autotune_standalone_subkernel(sk, queue, device_latency=None, device_memory_
         print(est)
         raise(ValueError("Unhandled einsum type"))
 
-    tdict = parallel_autotune(sk, 0, trans_list_list, device_latency=device_latency,
+    tdict = parallel_autotune(sk, 0, trans_list_list, max_flop_rate=max_flop_rate, device_latency=device_latency,
             device_memory_bandwidth=device_memory_bandwidth)
     
     transformations = tdict["transformations"]
@@ -686,13 +720,25 @@ def autotune_standalone_subkernels(tunits):
     # the rank 0 numbers will be used
     # Would possibly be more accurate to use the minimum latency ever seen
     # and the maximum bandwidth ever seen
-    from feinsum.empirical_roofline import loopy_bandwidth_test, get_alpha_beta_model
-    results_list = loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
-    device_latency, inverse_bandwidth = get_alpha_beta_model(results_list)
-    device_memory_bandwidth = 1/inverse_bandwidth
+    if comm.Get_rank() == 0:
+        import feinsum.empirical_roofline as er
+        results_list = er.loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
+        device_latency = er.get_min_device_memory_latency(results_list)
+        loopy_bw = er.get_latency_adjusted_max_device_memory_bandwidth(results_list)
+        clpeak_bw = er.get_max_bandwidth_clpeak(queue=queue)
+        clpeak_flop_rate = er.get_max_flop_rate_clpeak(np.float64, queue=queue)    
+        device_memory_bandwidth = max(loopy_bw, clpeak_bw)
+    else:
+        device_memory_bandwidth = None
+        device_latency = None
+        clpeak_flop_rate = None
+
+    #device_latency, inverse_bandwidth = get_alpha_beta_model(results_list)
+    #device_memory_bandwidth = 1/inverse_bandwidth
+    
 
     for filename, tunit, args in tunits:
-        print("TESTING TUNIT: {filename}")
+        print(f"TESTING TUNIT: {filename}")
         sks = get_subkernels(tunit, args)
         for sk, csk in sks:
             pid = unique_program_id(sk)
@@ -702,16 +748,22 @@ def autotune_standalone_subkernels(tunits):
                 print("A TUNE PROFILE ALREADY EXISTS: {filename}")
             else:
                 print(f"A TUNE PROFILE EXISTS NOT: {filename}")
-                einsum_types = list(get_einsum_types(sk))
+                einsum_counts = list(get_einsum_counts(sk).items())
                 indirection = len(get_indirection_arrays(sk)) > 0
-                if len(einsum_types) > 0:
-                    einsum_types = einsum_types[0]
-                    non_red_axes = len(einsum_types[0])
-                    red_axes = len(einsum_types[1])
+                if len(einsum_counts) > 0:
+
+                    if len(einsum_counts) > 1:
+                        raise ValueError("Subkernel has multiple einsum types")
+
+                    einsum_type, einsum_count = einsum_counts[0]
+                    non_red_axes = len(einsum_type[0])
+                    red_axes = len(einsum_type[1])
                     total_axes = non_red_axes + red_axes
                     out_axes = total_axes - red_axes
-                    if not indirection and out_axes == 2 and total_axes == 3:
-                        autotune_standalone_subkernel(sk, queue,
+                    
+                    print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count)
+                    if not indirection and out_axes == 2 and total_axes == 3 and einsum_count <= 11:
+                        autotune_standalone_subkernel(sk, queue, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)
 
 
@@ -742,9 +794,9 @@ if __name__ == "__main__":
 
     tunits = get_pickled_tunits(directory)
     #print(len(tunits))
-    get_lazy_einsum_info(tunits)
+    #get_lazy_einsum_info(tunits)
 
-    #autotune_standalone_subkernels(tunits)
+    autotune_standalone_subkernels(tunits)
     #dump_subkernels_from_pickled(None)
     #charm.start(dump_subkernels_from_pickled)
     #print(result)
