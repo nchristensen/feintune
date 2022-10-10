@@ -733,6 +733,10 @@ def autotune_standalone_subkernels(tunits):
         device_latency = None
         clpeak_flop_rate = None
 
+    device_memory_latency = comm.bcast(device_memory_bandwidth)
+    device_latency = comm.bcast(device_latency)
+    clpeak_flop_rate = comm.bcast(clpeak_flop_rate)
+
     #device_latency, inverse_bandwidth = get_alpha_beta_model(results_list)
     #device_memory_bandwidth = 1/inverse_bandwidth
     
@@ -762,7 +766,7 @@ def autotune_standalone_subkernels(tunits):
                     out_axes = total_axes - red_axes
                     
                     print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count)
-                    if not indirection and out_axes == 2 and total_axes == 3 and einsum_count <= 8:
+                    if not indirection and out_axes == 2 and total_axes == 3 and einsum_count <= 1:
                         autotune_standalone_subkernel(sk, queue, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)
 
@@ -790,7 +794,7 @@ def test_feinsum_transforms(tunits):
 
 if __name__ == "__main__":
     #directory = "./pickled_programs_order_1"
-    directory = "./pickled_programs_prediction"
+    directory = "./pickled_programs_prediction_order_1"
 
     tunits = get_pickled_tunits(directory)
     #print(len(tunits))
