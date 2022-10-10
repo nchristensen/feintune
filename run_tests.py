@@ -387,7 +387,9 @@ def analyze_knl_bandwidth(knl, avg_time, device_memory_latency=None):
     Gbps = bw*1e-9
 
     print(f"Time: {avg_time}, Bytes: {nbytes}, Bandwidth: {Gbps} GB/s")
-    return frozendict({"observed_bandwidth": bw, "nbytes_global": nbytes})
+    return frozendict({"observed_bandwidth": bw,
+                        "nbytes_global": nbytes,
+                        "device_memory_latency": device_memory_latency})
 
 
 def get_knl_flops(knl):
