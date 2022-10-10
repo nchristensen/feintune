@@ -762,7 +762,7 @@ def autotune_standalone_subkernels(tunits):
                     out_axes = total_axes - red_axes
                     
                     print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count)
-                    if not indirection and out_axes == 2 and total_axes == 3 and einsum_count <= 11:
+                    if not indirection and out_axes == 2 and total_axes == 3 and einsum_count <= 8:
                         autotune_standalone_subkernel(sk, queue, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)
 
