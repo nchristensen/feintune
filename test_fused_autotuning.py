@@ -150,7 +150,7 @@ def generate_cumulative_subkernels(tunit, barriers, phases):
             if entry in active_vars:
                 new_args.append(tunit.default_entrypoint.temporary_variables[entry])
 
-        name = tunit.default_entrypoint.name + f"{cur_phase}_cum"
+        name = tunit.default_entrypoint.name + f"_{cur_phase}_cum"
         knl = lp.make_kernel(domains, instructions, kernel_data=new_args, name=name)
         subkernels.append(knl)
     return subkernels
@@ -207,7 +207,7 @@ def generate_subkernels(tunit, barriers, phases):
                 new_temp_args.append(temp)
 
         new_args += new_temp_args
-        name = tunit.default_entrypoint.name + f"{cur_phase}"
+        name = tunit.default_entrypoint.name + f"_{cur_phase}"
         knl = lp.make_kernel(domains, instructions, kernel_data=new_args, name=name)
         subkernels.append(knl)
     return subkernels
