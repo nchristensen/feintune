@@ -7,23 +7,23 @@ import os
 from os.path import exists
 from utils import unique_program_id
 
-#from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
-#from charm4py.pool import PoolScheduler, Pool
-#from charm4py.charm import Charm, CharmRemote
+#import mpi4py.MPI as MPI
+#comm = MPI.COMM_WORLD
 
-import mpi4py.MPI as MPI
+use_charm=True
+if use_charm:
+    from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
+    from charm4py.pool import PoolScheduler, Pool
+    from charm4py.charm import Charm, CharmRemote
+    from parallel_autotuning_charm4py_v2 import parallel_autotune
+else:
+    from parallel_autotuning_mpi4py_v2 import parallel_autotune
+
+
 
 from generators import einsum3to2_kernel_tlist_generator_v2
-#from parallel_autotuning_charm4py_v2 import parallel_autotune
-from parallel_autotuning_mpi4py_v2 import parallel_autotune
 from run_tests import run_single_param_set_v2
 from run_tests import generic_test
-
-
-
-
-comm = MPI.COMM_WORLD
-
 
 class IsDOFArray(Tag):
     pass
@@ -720,7 +720,27 @@ def autotune_standalone_subkernels(tunits):
     # the rank 0 numbers will be used
     # Would possibly be more accurate to use the minimum latency ever seen
     # and the maximum bandwidth ever seen
-    if comm.Get_rank() == 0:
+    if not use_charm:
+        if comm.Get_rank() == 0:
+            import feinsum.empirical_roofline as er
+            results_list = er.loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
+            device_latency = er.get_min_device_memory_latency(results_list)
+            loopy_bw = er.get_latency_adjusted_max_device_memory_bandwidth(results_list)
+            clpeak_bw = er.get_max_bandwidth_clpeak(queue=queue)
+            clpeak_flop_rate = er.get_max_flop_rate_clpeak(np.float64, queue=queue)    
+            device_memory_bandwidth = max(loopy_bw, clpeak_bw)
+        else:
+            device_memory_bandwidth = None
+            device_latency = None
+            clpeak_flop_rate = None
+
+        device_memory_latency = comm.bcast(device_memory_bandwidth)
+        device_latency = comm.bcast(device_latency)
+        clpeak_flop_rate = comm.bcast(clpeak_flop_rate)
+
+        #device_latency, inverse_bandwidth = get_alpha_beta_model(results_list)
+        #device_memory_bandwidth = 1/inverse_bandwidth
+    else:
         import feinsum.empirical_roofline as er
         results_list = er.loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
         device_latency = er.get_min_device_memory_latency(results_list)
@@ -728,14 +748,6 @@ def autotune_standalone_subkernels(tunits):
         clpeak_bw = er.get_max_bandwidth_clpeak(queue=queue)
         clpeak_flop_rate = er.get_max_flop_rate_clpeak(np.float64, queue=queue)    
         device_memory_bandwidth = max(loopy_bw, clpeak_bw)
-    else:
-        device_memory_bandwidth = None
-        device_latency = None
-        clpeak_flop_rate = None
-
-    #device_latency, inverse_bandwidth = get_alpha_beta_model(results_list)
-    #device_memory_bandwidth = 1/inverse_bandwidth
-    
 
     for filename, tunit, args in tunits:
         print(f"TESTING TUNIT: {filename}")
@@ -789,18 +801,20 @@ def test_feinsum_transforms(tunits):
                 except RuntimeError:
                     print("Couldn't find transformation for", filename)
 
-if __name__ == "__main__":
-    #directory = "./pickled_programs_order_1"
+def main(arg):
+    #dump_subkernels_from_pickled(None)
     directory = "./pickled_programs_prediction"
-
+    #directory = "./pickled_programs_prediction_order_1"
     tunits = get_pickled_tunits(directory)
     #print(len(tunits))
     #get_lazy_einsum_info(tunits)
-
     autotune_standalone_subkernels(tunits)
-    #dump_subkernels_from_pickled(None)
-    #charm.start(dump_subkernels_from_pickled)
-    #print(result)
-    #charm.exit()
+   
 
-
+if __name__ == "__main__":
+    if use_charm:
+        charm.start(main)
+        print(result)
+        charm.exit()
+    else:
+        main(0)

@@ -14,8 +14,9 @@ import os
 import loopy as lp
 from os.path import exists
 from run_tests import run_single_param_set_v2, generic_test
-#from grudge.grudge_array_context import convert
+from utils import convert
 #from grudge.execution import diff_prg, elwise_linear
+import mpi4py.MPI as MPI
 
 # Makes one PE inactive on each host so the number of workers is the same on all hosts as
 # opposed to the basic PoolScheduler which has one fewer worker on the host with PE 0.
@@ -53,6 +54,10 @@ def get_queue(pe_num, platform_num):
     queue = cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
     return queue
 
+comm = MPI.COMM_WORLD
+queue = get_queue(comm.Get_rank(), 0)
+#queue = get_queue(0,0)
+
 """
 def do_work(args):
     params = args[0]
@@ -63,13 +68,11 @@ def do_work(args):
     return avg_time, params
 """
 
-def test(args):
-    platform_id, knl, tlist, test_fn = args
-    queue = get_queue(charm.myPe(), platform_id)
-    result = run_single_param_set_v2(queue, knl, tlist, test_fn) 
-    return result
-
-
+#def test(args):
+#    platform_id, knl, tlist, test_fn = args
+#    #queue = get_queue(charm.myPe(), platform_id)
+#    result = run_single_param_set_v2(queue, knl, tlist, test_fn) 
+#    return result
 
 def unpickle_kernel(fname):
     from pickle import load
@@ -105,15 +108,15 @@ def autotune_pickled_kernels(path, platform_id, actx_class, comm):
             else:
                 print("hjson file exists, skipping")
 
-def parallel_autotune(knl, platform_id, tlist_list):
+def parallel_autotune(knl, platform_id, trans_list_list, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None):
 
     # Create queue, assume all GPUs on the machine are the same
-    platforms = cl.get_platforms()
-    gpu_devices = platforms[platform_id].get_devices(device_type=cl.device_type.GPU)
-    n_gpus = len(gpu_devices)
-    ctx = cl.Context(devices=[gpu_devices[charm.myPe() % n_gpus]])
-    profiling = cl.command_queue_properties.PROFILING_ENABLE
-    queue = cl.CommandQueue(ctx, properties=profiling)    
+    #platforms = cl.get_platforms()
+    #gpu_devices = platforms[platform_id].get_devices(device_type=cl.device_type.GPU)
+    #n_gpus = len(gpu_devices)
+    #ctx = cl.Context(devices=[gpu_devices[charm.myPe() % n_gpus]])
+    #profiling = cl.command_queue_properties.PROFILING_ENABLE
+    #queue = cl.CommandQueue(ctx, properties=profiling)    
 
     """
     import pyopencl.tools as cl_tools
@@ -141,10 +144,18 @@ def parallel_autotune(knl, platform_id, tlist_list):
     
     #tlist_generator, pspace_generator = actx.get_generators(knl)
     #params_list = pspace_generator(actx.queue, knl)
+    knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
+    #knl = gac.set_memory_layout(knl)
+    from utils import unique_program_id
+    pid = unique_program_id(knl)
+    os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
+    hjson_file_str = f"hjson/{pid}.hjson"
 
     # Could make a massive list with all kernels and parameters
-    args = [(platform_id, knl, tlist, generic_test,) for tlist in tlist_list]
+    ntransforms = len(trans_list_list)
+    args = [((ind+1,ntransforms),(platform_id, knl, tlist, generic_test, max_flop_rate, device_latency, device_memory_bandwidth,),) for ind, tlist in enumerate(trans_list_list)]
 
+ 
 
     # May help to balance workload
     # Should test if shuffling matters
@@ -158,6 +169,41 @@ def parallel_autotune(knl, platform_id, tlist_list):
     #result = charm.pool.map(do_work, args)
 
     #pool_proxy = Chare(BalancedPoolScheduler, onPE=0) # Need to use own charm++ branch to make work
+    sort_key = lambda entry: entry["data"]["avg_time"]
+    result = {"transformations": {}, "data": {}}
+    #nranks = comm.Get_size()
+    # We should be able to unify the mpi4py and charm4py versions. The only 
+    # difference is how the pool is created
+    pool_proxy = Chare(PoolScheduler, onPE=0)
+    mypool = Pool(pool_proxy)
+
+    from parallel_autotuning_mpi4py_v2 import test
+
+    if len(trans_list_list) > 0: # Guard against empty list
+        results = list(mypool.map(test, args, chunksize=1))
+        results.sort(key=sort_key)
+
+        # Workaround for pocl CUDA bug
+        # whereby times are imprecise
+        # Fixed in newer version of pocl
+        ret_index = 0
+        for i, result in enumerate(results):
+            if result["data"]["avg_time"] > 1e-7:
+                ret_index = i
+                break
+
+        result = results[ret_index]
+
+    #od = {"transformations": transformations, "data": data}
+    if True:#comm.Get_rank() == 0:
+        print(result)
+        out_file = open(hjson_file_str, "wt+")
+        hjson.dump(result, out_file, default=convert)
+        out_file.close()
+
+    return result
+
+
 
     pool_proxy = Chare(PoolScheduler, onPE=0)
     mypool = Pool(pool_proxy)
@@ -237,7 +283,7 @@ def main(args):
 def main(args):
     import mpi4py.MPI as MPI
     from mirgecom.array_context import MirgecomAutotuningArrayContext as Maac
-    comm = MPI.COMM_WORLD
+    #comm = MPI.COMM_WORLD
     
     autotune_pickled_kernels("./pickled_programs", 0, Maac, comm)
     print("DONE!")
