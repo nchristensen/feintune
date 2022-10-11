@@ -774,12 +774,12 @@ def autotune_standalone_subkernels(tunits):
                     out_axes = total_axes - red_axes
                     
                     print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count)
-                    if not indirection and out_axes == 2 and total_axes == 3 and einsum_count <= 11:
+                    if not indirection and out_axes == 2 and total_axes == 3 and einsum_count <= 100:
                         print(sk)
                         autotune_standalone_subkernel(sk, queue, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)
 
-
+    exit()
     #test_feinsum_transforms(tunits)
 
 def test_feinsum_transforms(tunits):
@@ -803,8 +803,8 @@ def test_feinsum_transforms(tunits):
 
 def main(arg):
     #dump_subkernels_from_pickled(None)
-    directory = "./pickled_programs_prediction"
-    #directory = "./pickled_programs_prediction_order_1"
+    #directory = "./pickled_programs_prediction"
+    directory = "./pickled_programs_prediction_order_1"
     tunits = get_pickled_tunits(directory)
     #print(len(tunits))
     #get_lazy_einsum_info(tunits)
@@ -814,7 +814,7 @@ def main(arg):
 if __name__ == "__main__":
     if use_charm:
         charm.start(main)
-        print(result)
+        exit() # charm.exit freezes the program
         charm.exit()
     else:
         main(0)
