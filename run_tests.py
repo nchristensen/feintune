@@ -401,9 +401,11 @@ def get_knl_flops(knl):
     return map_flops
 
 # Avg time in seconds, max_flop_rate in flops per second
-def analyze_flop_rate(knl, avg_time, max_flop_rate=None):
+def analyze_flop_rate(knl, avg_time, max_flop_rate=None, latency=None):
     map_flops = get_knl_flops(knl)
     flop_rate = map_flops / avg_time
+    if latency is None:
+        latency = 0
 
     """
     n_mat = 1
@@ -421,7 +423,10 @@ def analyze_flop_rate(knl, avg_time, max_flop_rate=None):
     
     flops = nfaces*n_mat*2*(n_out * n_in * n_elem)
     """
-    flop_rate = map_flops / avg_time
+    assert latency >= 0
+    assert avg_time - latency > 0
+    # Subtract memory latency from flop_rate if known
+    flop_rate = map_flops / (avg_time - latency)
     print("GFLOP/s: " + str(flop_rate*1e-9))
 
     #print("Map GFLOP/s: " + str(map_gflop_rate))
@@ -644,8 +649,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
 
     dev_arrays, avg_time = test_fn(queue, knl)
 
-    # Should this return the fraction of peak of should that be calculated in this function?
-    flop_rate_dict = analyze_flop_rate(knl, avg_time, max_flop_rate=max_flop_rate)
+    flop_rate_dict = analyze_flop_rate(knl, avg_time, max_flop_rate=max_flop_rate, latency=None)
     bw_dict = analyze_knl_bandwidth(knl, avg_time, device_memory_latency=device_latency)
 
     bw = bw_dict["observed_bandwidth"]

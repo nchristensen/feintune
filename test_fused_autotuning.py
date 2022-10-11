@@ -702,9 +702,10 @@ def get_lazy_einsum_info(tunits):
                 out_axes = total_axes - red_axes
                 key = (total_axes, out_axes, red_axes, count, indirection)
                 if key in subkernel_counts:
-                    subkernel_counts[key] += 1
+                    subkernel_counts[key][0] += 1
+                    subkernel_counts[key][1].append(sk.default_entrypoint.name) 
                 else:
-                    subkernel_counts[key] = 1
+                    subkernel_counts[key] = [1, [sk.default_entrypoint.name]]
 
 
     for key, val in subkernel_counts.items():
@@ -781,7 +782,6 @@ def autotune_standalone_subkernels(tunits):
                         autotune_standalone_subkernel(sk, queue, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)
 
-    exit()
     #test_feinsum_transforms(tunits)
 
 def test_feinsum_transforms(tunits):
@@ -810,8 +810,9 @@ def main(arg):
     tunits = get_pickled_tunits(directory)
     #print(len(tunits))
     #get_lazy_einsum_info(tunits)
+    #charm.exit()
     autotune_standalone_subkernels(tunits)
-   
+    exit() 
 
 if __name__ == "__main__":
     if use_charm:

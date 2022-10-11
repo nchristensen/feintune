@@ -76,28 +76,35 @@ def display_top(snapshot, key_type='lineno', limit=10):
     print("Total allocated size: %.1f KiB" % (total / 1024))
 
 
-
-def get_queue(pe_num, platform_num):
+queue = None
+def set_queue(pe_num, platform_num):
+    global queue
+    if queue is not None:
+        raise ValueError("queue already set")
     platforms = cl.get_platforms()
     gpu_devices = platforms[platform_num].get_devices(device_type=cl.device_type.GPU)
     ctx = cl.Context(devices=[gpu_devices[pe_num % len(gpu_devices)]])
     queue = cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
-    return queue
 
 # Assume using platform zero
 comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
 # From MPI.PoolExecutor the communicator for the tasks is not COMM_WORLD
-queue = get_queue(comm.Get_rank(), 0)
+#queue = get_queue(comm.Get_rank(), 0)
 #from feinsum.empirical_roofline import get_theoretical_maximum_flop_rate
 #max_flop_rate = get_theoretical_maximum_flop_rate(queue, np.float64)
 
 def test(args):
+    global queue
     print(args)
     (cur_test, total_tests), (platform_id, knl, tlist, test_fn, max_flop_rate, device_latency, device_memory_bandwidth,) = args
     #comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
     # From MPI.PoolExecutor the communicator for the tasks is not COMM_WORLD
-    #queue = get_queue(comm.Get_rank(), platform_id)
-    print(f"Executing test {cur_test} of {total_tests}")
+    if queue is None:
+        print("Queue is none. Initializing queue")
+        set_queue(comm.Get_rank(), platform_id)
+        assert queue is not None
+
+    print(f"\nExecuting test {cur_test} of {total_tests}\n")
     result = run_single_param_set_v2(queue, knl, tlist, test_fn,
             max_flop_rate=max_flop_rate, 
             device_memory_bandwidth=device_memory_bandwidth,

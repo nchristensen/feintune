@@ -45,19 +45,23 @@ class AllPEsPoolScheduler(PoolScheduler):
        self.idle_workers = set(range(n_pes))
        self.num_workers = len(self.idle_workers)
 
-
-def get_queue(pe_num, platform_num):
+queue = None
+def set_queue(pe_num, platform_num):
+    global queue
+    if queue is not None:
+        raise ValueError("queue is already set")
     platforms = cl.get_platforms()
     gpu_devices = platforms[platform_num].get_devices(device_type=cl.device_type.GPU)
     ctx = cl.Context(devices=[gpu_devices[pe_num % len(gpu_devices)]])
     queue = cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
-    return queue
+    #queue = 
+    #return queue
 
 # Breaks on Lassen
 #import mpi4py.MPI as MPI
 #comm = MPI.COMM_WORLD
 #queue = get_queue(comm.Get_rank(), 0)
-queue = get_queue(0,0)
+#queue = get_queue(0,0)
 
 """
 def do_work(args):
@@ -68,6 +72,34 @@ def do_work(args):
     avg_time, transform_list = dgk.run_tests.apply_transformations_and_run_test(queue, knl, dgk.run_tests.generic_test, params)
     return avg_time, params
 """
+
+def test(args):
+    print(args)
+    (cur_test, total_tests), (platform_id, knl, tlist, test_fn, max_flop_rate, device_latency, device_memory_bandwidth,) = args
+    #comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
+    # From MPI.PoolExecutor the communicator for the tasks is not COMM_WORLD
+    global queue
+    if queue is None:
+        print("Queue is none. Initializing queue")
+        set_queue(charm.myPe(), platform_id)
+        assert queue is not None
+    
+    print(f"\nExecuting test {cur_test} of {total_tests}\n")
+    result = run_single_param_set_v2(queue, knl, tlist, test_fn,
+            max_flop_rate=max_flop_rate, 
+            device_memory_bandwidth=device_memory_bandwidth,
+            device_latency=device_latency)
+    #print(mem_top())
+    #h = hpy()
+    #print(h.heap())
+    #snapshot = tracemalloc.take_snapshot()
+    #display_top(snapshot)
+    #del knl
+    #del args
+
+    #result = [10,10,10]
+    return result
+
 
 #def test(args):
 #    platform_id, knl, tlist, test_fn = args
@@ -177,8 +209,6 @@ def parallel_autotune(knl, platform_id, trans_list_list, max_flop_rate=None, dev
     # difference is how the pool is created
     pool_proxy = Chare(PoolScheduler, onPE=0)
     mypool = Pool(pool_proxy)
-
-    from parallel_autotuning_mpi4py_v2 import test
 
     if len(trans_list_list) > 0: # Guard against empty list
         results = list(mypool.map(test, args, chunksize=1))
