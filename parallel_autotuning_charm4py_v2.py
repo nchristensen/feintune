@@ -16,7 +16,6 @@ from os.path import exists
 from run_tests import run_single_param_set_v2, generic_test
 from utils import convert
 #from grudge.execution import diff_prg, elwise_linear
-import mpi4py.MPI as MPI
 
 # Makes one PE inactive on each host so the number of workers is the same on all hosts as
 # opposed to the basic PoolScheduler which has one fewer worker on the host with PE 0.
@@ -54,9 +53,11 @@ def get_queue(pe_num, platform_num):
     queue = cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
     return queue
 
-comm = MPI.COMM_WORLD
-queue = get_queue(comm.Get_rank(), 0)
-#queue = get_queue(0,0)
+# Breaks on Lassen
+#import mpi4py.MPI as MPI
+#comm = MPI.COMM_WORLD
+#queue = get_queue(comm.Get_rank(), 0)
+queue = get_queue(0,0)
 
 """
 def do_work(args):
