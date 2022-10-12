@@ -152,6 +152,7 @@ def generate_cumulative_subkernels(tunit, barriers, phases):
 
         name = tunit.default_entrypoint.name + f"_{cur_phase}_cum"
         knl = lp.make_kernel(domains, instructions, kernel_data=new_args, name=name)
+        knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
         subkernels.append(knl)
     return subkernels
 
@@ -209,6 +210,7 @@ def generate_subkernels(tunit, barriers, phases):
         new_args += new_temp_args
         name = tunit.default_entrypoint.name + f"_{cur_phase}"
         knl = lp.make_kernel(domains, instructions, kernel_data=new_args, name=name)
+        knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
         subkernels.append(knl)
     return subkernels
 
@@ -760,6 +762,10 @@ def autotune_standalone_subkernels(tunits):
         print(f"TESTING TUNIT: {filename}")
         sks = get_subkernels(tunit, args)
         for sk, csk in sks:
+            # This changes the identifier so needs to be set beforehand
+            assert sk.default_entrypoint.options.no_numpy
+            assert sk.default_entrypoint.options.return_dict
+
             pid = unique_program_id(sk)
             os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
             hjson_file = f"./hjson/{pid}.hjson"
@@ -780,8 +786,8 @@ def autotune_standalone_subkernels(tunits):
                     total_axes = non_red_axes + red_axes
                     out_axes = total_axes - red_axes
                     
-                    print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count)
-                    if not indirection and out_axes == 2 and total_axes == 3 and einsum_count <= 100:
+                    print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
+                    if not indirection and out_axes == 2 and total_axes == 3 and einsum_count <= 1:
                         print(sk)
                         autotune_standalone_subkernel(sk, queue, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)

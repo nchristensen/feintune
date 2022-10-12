@@ -177,10 +177,12 @@ def parallel_autotune(knl, platform_id, trans_list_list, max_flop_rate=None, dev
     #    queue,
     #    allocator=cl_tools.MemoryPool(cl_tools.ImmediateAllocator(queue)))
 
-    knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
     #knl = gac.set_memory_layout(knl)
     from utils import unique_program_id
     pid = unique_program_id(knl)
+    #knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
+    assert knl.default_entrypoint.options.no_numpy
+    assert knl.default_entrypoint.options.return_dict
     os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
     hjson_file_str = f"hjson/{pid}.hjson"
 
