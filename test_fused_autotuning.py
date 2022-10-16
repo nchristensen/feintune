@@ -7,10 +7,7 @@ import os
 from os.path import exists
 from utils import unique_program_id
 
-#import mpi4py.MPI as MPI
-#comm = MPI.COMM_WORLD
-
-use_charm=True
+use_charm=False
 if use_charm:
     from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
     from charm4py.pool import PoolScheduler, Pool
@@ -18,10 +15,10 @@ if use_charm:
     from parallel_autotuning_charm4py_v2 import parallel_autotune
 else:
     from parallel_autotuning_mpi4py_v2 import parallel_autotune
+    import mpi4py.MPI as MPI
+    comm = MPI.COMM_WORLD
 
-
-
-from generators import einsum3to2_kernel_tlist_generator_v2
+from generators import einsum3to2_kernel_tlist_generator_v2#, einsum4to2_kernel_tlist_generator_v2
 from run_tests import run_single_param_set_v2
 from run_tests import generic_test
 
@@ -215,29 +212,7 @@ def generate_subkernels(tunit, barriers, phases):
     return subkernels
 
 
-def get_einsums(knl):
-    einsums = []
-    for instr in knl.default_entrypoint.instructions:
-        if isinstance(instr, lp.Assignment):
-            for tag in instr.tags:
-                if isinstance(tag, EinsumTag):
-                    if isinstance(instr.expression, lp.symbolic.Reduction):
-                        einsums.append((instr.within_inames, instr.expression.inames,))
-                    else:
-                        einsums.append((instr.within_inames, (),))
-                    
-    
-    return einsums
-
-def get_einsum_counts(knl):
-    from collections import Counter
-    counter = Counter(get_einsums(knl))
-    print(counter.items())
-    return counter
-
-# Obtain non-reduction and reduction inames 
-def get_einsum_types(knl):
-    return frozenset(get_einsums(knl))
+from __init__ import get_einsums, get_einsum_counts, get_einsum_types
 
 def dump_subkernels_from_pickled(arg):
 
@@ -273,7 +248,7 @@ def dump_subkernels_from_pickled(arg):
                 """
     #exit()
 
-def feinsum_autotune(tunit, queue):
+def feinsum_autotune(t_unit, queue):
     from loopy.match import ObjTagged
     import feinsum as fnsm
     from functools import reduce
@@ -370,8 +345,12 @@ def autotune_standalone_subkernel(sk, queue, max_flop_rate=None, device_latency=
 
     if len(est[0]) == 2 and len(est[1]) == 1:
         trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
-    #elif len(est[0]) == 2 and len(est[1]) == 0:
-    #    trans_list_list = einsum2to2_kernel_tlist_generator_v2(queue, sk)
+    elif len(est[0]) == 3 and len(est[1]) == 2:
+        # Modified to handle the 5to3 reduction, but it might not be the fastest
+        trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
+    elif len(est[0]) == 2 and len(est[1]) == 2:
+        # Modified to handle the 5to3 reduction, but it might not be the fastest
+        trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
     else:
         print(est)
         raise(ValueError("Unhandled einsum type"))
@@ -671,6 +650,7 @@ def get_pickled_tunits(directory):
 
     return tunits
 
+
 def get_lazy_einsum_info(tunits):
     for filename, tunit, args in tunits:
         sks = get_subkernels(tunit, args)
@@ -690,9 +670,8 @@ def get_lazy_einsum_info(tunits):
     for filename, tunit, args in tunits:
         sks = get_subkernels(tunit, args)
         for sk, csk in sks:
-            pid = unique_program_id(sk)
-            print(pid)
-    """
+            #pid = unique_program_id(sk)
+            #print(pid)
             #einsum_types = list(get_einsum_types(sk))
             einsum_counts = list(get_einsum_counts(sk).items())
             indirection = len(get_indirection_arrays(sk)) > 0
@@ -708,14 +687,14 @@ def get_lazy_einsum_info(tunits):
                 key = (total_axes, out_axes, red_axes, count, indirection)
                 if key in subkernel_counts:
                     subkernel_counts[key][0] += 1
-                    subkernel_counts[key][1].append(sk.default_entrypoint.name) 
+                    subkernel_counts[key][1] |= set([sk.default_entrypoint.name])
                 else:
-                    subkernel_counts[key] = [1, [sk.default_entrypoint.name]]
+                    subkernel_counts[key] = [1, set([sk.default_entrypoint.name])]
 
 
     for key, val in subkernel_counts.items():
         print(key, val)
-    """
+
 
 def autotune_standalone_subkernels(tunits):
     platforms = cl.get_platforms()
@@ -729,8 +708,28 @@ def autotune_standalone_subkernels(tunits):
     # the rank 0 numbers will be used
     # Would possibly be more accurate to use the minimum latency ever seen
     # and the maximum bandwidth ever seen
-    if not use_charm:
-        if comm.Get_rank() == 0:
+    if True:
+        if not use_charm:
+            if comm.Get_rank() == 0:
+                import feinsum.empirical_roofline as er
+                results_list = er.loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
+                device_latency = er.get_min_device_memory_latency(results_list)
+                loopy_bw = er.get_latency_adjusted_max_device_memory_bandwidth(results_list)
+                clpeak_bw = er.get_max_bandwidth_clpeak(queue=queue)
+                clpeak_flop_rate = er.get_max_flop_rate_clpeak(np.float64, queue=queue)    
+                device_memory_bandwidth = max(loopy_bw, clpeak_bw)
+            else:
+                device_memory_bandwidth = None
+                device_latency = None
+                clpeak_flop_rate = None
+
+            device_memory_latency = comm.bcast(device_memory_bandwidth)
+            device_latency = comm.bcast(device_latency)
+            clpeak_flop_rate = comm.bcast(clpeak_flop_rate)
+
+            #device_latency, inverse_bandwidth = get_alpha_beta_model(results_list)
+            #device_memory_bandwidth = 1/inverse_bandwidth
+        else:
             import feinsum.empirical_roofline as er
             results_list = er.loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
             device_latency = er.get_min_device_memory_latency(results_list)
@@ -738,25 +737,10 @@ def autotune_standalone_subkernels(tunits):
             clpeak_bw = er.get_max_bandwidth_clpeak(queue=queue)
             clpeak_flop_rate = er.get_max_flop_rate_clpeak(np.float64, queue=queue)    
             device_memory_bandwidth = max(loopy_bw, clpeak_bw)
-        else:
-            device_memory_bandwidth = None
-            device_latency = None
-            clpeak_flop_rate = None
-
-        device_memory_latency = comm.bcast(device_memory_bandwidth)
-        device_latency = comm.bcast(device_latency)
-        clpeak_flop_rate = comm.bcast(clpeak_flop_rate)
-
-        #device_latency, inverse_bandwidth = get_alpha_beta_model(results_list)
-        #device_memory_bandwidth = 1/inverse_bandwidth
     else:
-        import feinsum.empirical_roofline as er
-        results_list = er.loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
-        device_latency = er.get_min_device_memory_latency(results_list)
-        loopy_bw = er.get_latency_adjusted_max_device_memory_bandwidth(results_list)
-        clpeak_bw = er.get_max_bandwidth_clpeak(queue=queue)
-        clpeak_flop_rate = er.get_max_flop_rate_clpeak(np.float64, queue=queue)    
-        device_memory_bandwidth = max(loopy_bw, clpeak_bw)
+        device_memory_bandwidth = None
+        device_latency = None
+        clpeak_flop_rate = None
 
     for filename, tunit, args in tunits:
         print(f"TESTING TUNIT: {filename}")
@@ -766,32 +750,58 @@ def autotune_standalone_subkernels(tunits):
             assert sk.default_entrypoint.options.no_numpy
             assert sk.default_entrypoint.options.return_dict
 
-            pid = unique_program_id(sk)
-            os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
-            hjson_file = f"./hjson/{pid}.hjson"
-            if exists(hjson_file):
-                print("A TUNE PROFILE ALREADY EXISTS: {filename}")
-            else:
-                print(f"A TUNE PROFILE EXISTS NOT: {filename}")
-                einsum_counts = list(get_einsum_counts(sk).items())
-                indirection = len(get_indirection_arrays(sk)) > 0
-                if len(einsum_counts) > 0:
+            if False: # Feinsum autotuning
+                feinsum_autotune(tunit, queue)
+            else: # Eager-style autotuning
+                pid = unique_program_id(sk)
+                os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
+                hjson_file = f"./hjson/{pid}.hjson"
+                if False:#exists(hjson_file):
+                    print("A TUNE PROFILE ALREADY EXISTS: {filename}")
+                else:
+                    print(f"A TUNE PROFILE EXISTS NOT: {filename}")
+                    einsum_counts = list(get_einsum_counts(sk).items())
+                    indirection = len(get_indirection_arrays(sk)) > 0
+                    if len(einsum_counts) > 0:
 
-                    if len(einsum_counts) > 1:
-                        raise ValueError("Subkernel has multiple einsum types")
+                        if len(einsum_counts) > 1:
+                            raise ValueError("Subkernel has multiple einsum types")
 
-                    einsum_type, einsum_count = einsum_counts[0]
-                    non_red_axes = len(einsum_type[0])
-                    red_axes = len(einsum_type[1])
-                    total_axes = non_red_axes + red_axes
-                    out_axes = total_axes - red_axes
-                    
-                    print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
-                    if not indirection and out_axes == 2 and total_axes == 3 and einsum_count <= 1:
-                        print(sk)
-                        autotune_standalone_subkernel(sk, queue, max_flop_rate=clpeak_flop_rate,
-                                device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)
-    #test_feinsum_transforms(tunits)
+                        einsum_type, einsum_count = einsum_counts[0]
+                        non_red_axes = len(einsum_type[0])
+                        red_axes = len(einsum_type[1])
+                        total_axes = non_red_axes + red_axes
+                        out_axes = total_axes - red_axes
+                        
+                        print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
+                        if False:#not indirection and out_axes == 3 and total_axes == 5 and einsum_count > 0:
+                            autotune_standalone_subkernel(sk, queue, max_flop_rate=clpeak_flop_rate,
+                                    device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)
+
+                        elif not indirection and out_axes == 2 and total_axes == 4 and einsum_count > 0:
+                            #print(sk)
+                            autotune_standalone_subkernel(sk, queue, max_flop_rate=clpeak_flop_rate,
+                                    device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)
+
+                            #print(add_batch_id(sk, 2))
+                            #batch_einsums(sk, 2)
+
+                            #print(sk)
+                            #try:
+                            #    feinsum_autotune(tunit, queue)
+                            #except:
+                            #    print(f"FAILURE: {pid} failed to with feinsum")
+                        #elif not indirection and out_axes == 2 and total_axes == 4
+                        elif False:#out_axes == 3 and total_axes == 5 and einsum_count > 0:
+                            print(sk)
+                            #feinsum_autotune(sk, queue)
+                            #try:
+                            #    feinsum_autotune(tunit, queue)
+                            #except:
+                            #    print(f"FAILURE: {pid} failed with feinsum")
+                                #print(lp.kernel.tools.show_dependency_graph(lp.preprocess_kernel(sk).default_entrypoint, sk.callables_table))
+                            #exit()
+       #test_feinsum_transforms(tunits)
 
 def test_feinsum_transforms(tunits):
 

@@ -1,5 +1,6 @@
 import numpy as np
 from pytools import memoize_in
+from meshmode.array_context import EinsumTag
 
 #import pyopencl as cl
 #import pyopencl.array
@@ -398,7 +399,253 @@ def generate_transformation_list(k_inner_outer, k_inner_inner, i_inner_outer,
     transformations.append(["add_inames_for_unused_hw_axes"])
     return tuple(transformations)
 
-#@memoize_method
+def get_einsums(knl):
+    einsums = []
+    for instr in knl.default_entrypoint.instructions:
+        if isinstance(instr, lp.Assignment):
+            for tag in instr.tags:
+                if isinstance(tag, EinsumTag):
+                    if isinstance(instr.expression, lp.symbolic.Reduction):
+                        einsums.append((instr.within_inames, instr.expression.inames,))
+                    else:
+                        einsums.append((instr.within_inames, (),))
+                    
+    #print(knl.default_entrypoint.name, einsums)
+    return einsums
+
+def get_einsum_counts(knl):
+    from collections import Counter
+    counter = Counter(get_einsums(knl))
+    #print(counter)
+    return counter
+
+# Obtain non-reduction and reduction inames 
+def get_einsum_types(knl):
+    return frozenset(get_einsums(knl))
+
+
+
+def add_batch_ids(tunit, batch_size):
+    from meshmode.array_context import EinsumTag
+    assert batch_size >= 0
+    new_instructions = []
+    batch_number = 0
+    used_batches = 0
+    num_in_cur_batch = 0
+    batch_instructions_list = []
+    # Could add some priority level based on the length of the chain of einsums so 
+    # if there is a dependency chain es1 -> es2 -> es3 then es2 must be put in
+    # a batch higher than that of es1 and ditto with es3
+    batch_instructions = []
+    for instr in tunit.default_entrypoint.instructions:
+        if isinstance(instr, lp.Assignment) and any([isinstance(tag, EinsumTag) for tag in instr.tags]):
+            new_instr = instr.copy(id=f"batch_{batch_number}_" + instr.id)
+            new_instructions.append(new_instr)
+            batch_instructions.append(new_instr)
+            num_in_cur_batch += 1
+            
+            if num_in_cur_batch == batch_size:
+                batch_number += 1
+                num_in_cur_batch = 0
+                batch_instructions_list.append(batch_instructions)
+                batch_instructions = []
+        else:
+            new_instructions.append(instr)
+
+    # Handle a non-full final batch
+    if len(batch_instructions_list) > 0 and len(batch_instructions_list) < batch_size:
+        batch_instructions_list.append(batch_instructions)
+
+    # Need to add batch ids to the prefetch instructions
+    # and order the batches. The prefetching of the next batch can't begin until the current batch finishes
+    # Can us the group numbers to order tmpgrp__actx_in_1_0_momentum_1_0f
+
+    return tunit.with_kernel(tunit.default_entrypoint.copy(instructions=new_instructions)), batch_instructions_list
+
+
+# Will the temporaries group automatically handle the einsum chunking problem?
+#def alias_temporaries_among_batches(tunit, nbatches):
+#    batch_instructions = {}
+#    for instr in tunit.default_entrypoint.instructions:
+        
+    # Just get the temporaries of each batch and alias those of the same size
+
+"""
+def get_batch_temporaries_by_size(tunit, batches):
+
+    # Assumes all of the temporaries are in local or private memory
+    temp_dict = tunit.default_entrypoint.temporary_variables
+    batch_dict_list = [] # A list of dictionaries of sets
+
+    for batch in batches:
+        batch_dict = {}
+        for einsum in batch:
+            for dep in einsum.dependency_names():
+                if dep in temp_dict:
+                    shape = temp_dict[dep].shape
+                    if shape not in batch_dict:
+                        batch_dict[shape] = set([dep])
+                    else:
+                        batch_dict[shape] |= set([dep])
+        batch_dict_list.append(batch_dict)
+
+    return batch_dict_list
+"""
+
+def get_batch_temporaries_by_size(tunit, nbatches, address_space=None):
+
+    # Assumes all of the temporaries are in local or private memory
+    #for key, val in tunit.default_entrypoint.temporary_variables.items():
+    #    print(key, val.address_space)
+    #exit()
+    if address_space is None:
+        temp_dict = tunit.default_entrypoint.temporary_variables
+    else:
+        temp_dict = {key: val for key, val in tunit.default_entrypoint.temporary_variables.items() if val.address_space == address_space}
+    #print(temp_dict)
+    #exit()
+    batch_dict_list = [] # A list of dictionaries of sets
+
+    # Inefficient
+    for batch_num in range(nbatches):
+        batch_dict = {}
+        for instr in tunit.default_entrypoint.instructions:
+            if f"batch_{batch_num}" in instr.id:
+                for dep in instr.dependency_names():
+                    if dep in temp_dict:
+                        shape = temp_dict[dep].shape
+                        if shape not in batch_dict:
+                            batch_dict[shape] = set([dep])
+                        else:
+                            batch_dict[shape] |= set([dep])
+                           
+        batch_dict_list.append(batch_dict)
+
+    return batch_dict_list
+
+
+def get_alias_sets(batch_dict_list):
+    print(batch_dict_list)
+    sizes = set()
+    for batch_dict in batch_dict_list:
+        sizes |= set(batch_dict.keys())
+    
+    alias_sets = []
+    for size in sizes:
+        arg_lists = []
+        for batch_dict in batch_dict_list:
+            arg_lists.append(sorted(batch_dict[size]))
+        max_len = 0
+        for l in arg_lists:
+            max_len = max(len(l), max_len)
+        for l in arg_lists:
+            while len(l) < max_len:
+                l.append(None) # Pad with None so can slice columns
+        arg_array = np.array(arg_lists)
+        for col in range(arg_array.shape[1]):
+            alias_sets.append(set(arg_array[:,col]) - set([None]))
+    
+    return alias_sets
+
+
+def batch_einsums(tunit, batch_size, **kwargs):
+    if batch_size == 0:
+        return tunit
+
+    # Need to get the existing tags and apply them to the new loops
+    #orig_inames = tunit.default_entrypoint.inames.keys()
+    orig_nonglobal_inames = []
+    # Will need to think about the names of prefetching arrays
+    for name, iname in tunit.default_entrypoint.inames.items():
+        if not any([isinstance(tag, lp.kernel.data.GroupInameTag) for tag in iname.tags]):
+            orig_nonglobal_inames.append(name)
+    #print(orig_nonglobal_inames)
+
+    #orig_iname_dict = tunit.default_entrypoint.inames.items()
+    b_tunit, batches = add_batch_ids(tunit, batch_size)
+    nbatches = len(batches)
+    knl = b_tunit.default_entrypoint
+
+    #print(knl)
+    #print("AFTER PREPROCESS")
+    #print(lp.preprocess_kernel(tunit))
+    #exit()
+
+    def linearize_batches(tunit, batches):
+
+        knl = tunit.default_entrypoint
+        nbatches = len(batches)
+
+        # Alias local memory temporaries
+        #batch_temps_by_size = get_batch_temporaries_by_size(tunit, nbatches) 
+        #alias_sets = get_alias_sets(batch_temps_by_size)
+        #for s in alias_sets:
+        #    knl = lp.alias_temporaries(knl, list(s))
+
+        # Map instruction ids to fetch rules
+        fetch_rules = set([instr.id for instr in knl.instructions if "fetch_rule" in instr.id])
+        for i, batch in enumerate(batches):
+            for einsum in batch:
+                fetch_rule_deps = einsum.depends_on & fetch_rules
+                if len(fetch_rule_deps) > 0 and i > 0:
+                    j = i - 1
+                    for fetch_rule in fetch_rule_deps:
+                        # Make the fetch rule depend on the prior batch
+                        knl = lp.add_dependency(knl, f"id:{fetch_rule}", f"id:batch_{j}*")
+
+        # Create independent loops for each batch                
+        for i in range(0, nbatches): # Should we keep the first batch in the original set of loops
+            # Can the we not duplicate the inames with global tags?
+            knl = lp.duplicate_inames(knl, orig_nonglobal_inames, f"id:batch_{i}_*")
+        # Transfer the tags to the new kernel
+        iname_dict = knl.inames
+        new_iname_dict = knl.inames.copy()
+
+        # O(n²) complexity. This could be more efficient
+        for name, iname in knl.inames.items():
+            for old_name, old_iname in tunit.default_entrypoint.inames.items():
+                # If the iname prefix is the same, then apply the old tags
+                if old_name in name and len(iname.tags) == 0:
+                    new_iname_dict[name] = iname.tagged(old_iname.tags)
+
+        knl = knl.copy(inames=new_iname_dict) 
+
+        # Alias private memory temporaries (for some reason nothing is known about the local memory
+        # temporaries if we attempt to alias them here too)
+        #b_tunit = lp.preprocess_program(tunit.with_kernel(knl)) # Realizes the reductions so we can access the accumulators
+        from loopy.transform.realize_reduction import realize_reduction
+        b_tunit = realize_reduction(tunit.with_kernel(knl), unknown_types_ok=True)
+        batch_temps_by_size = get_batch_temporaries_by_size(b_tunit, nbatches) 
+        alias_sets = get_alias_sets(batch_temps_by_size)
+        #print(alias_sets)
+        #exit()
+        knl = b_tunit.default_entrypoint
+        for s in alias_sets:
+            knl = lp.alias_temporaries(knl, list(s))
+
+        
+
+        """
+        print("Old kernel")
+        for name, iname in tunit.default_entrypoint.inames.items():
+            print(name, iname.tags)
+        print("New Kernel")
+        for name, iname in knl.inames.items():
+            print(name, iname.tags)
+        """     
+
+        #print(knl)
+        #exit()
+
+        return b_tunit.with_kernel(knl)
+
+    b_tunit = linearize_batches(b_tunit, batches)
+
+    return b_tunit
+
+    #return tunit.with_kernel(knl)
+
+
 def apply_transformation_list(knl, transformations):
     # Could just construct a string for the function handle and retrieve the function from that
     function_mapping = {"split_iname": lp.split_iname,
@@ -407,6 +654,7 @@ def apply_transformation_list(knl, transformations):
                         "rename_iname": lp.rename_iname,
                         "tag_array_axes": lp.tag_array_axes,
                         "tag_inames": lp.tag_inames,
+                        "batch_einsums": batch_einsums,
                         "add_inames_for_unused_hw_axes": lp.add_inames_for_unused_hw_axes}
 
     # Maybe add some logic to add slabs=(0,0) if n_elem % k_inner_outer == 0
