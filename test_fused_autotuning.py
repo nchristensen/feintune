@@ -632,6 +632,35 @@ def contains_indirection(tunit):
         print("Kernel does *NOT* contain indirection")
 """
 
+def has_internal_einsum_dependencies(tunit):
+    einsum_dict = {instr.id: instr for instr in tunit.default_entrypoint.instructions if any([isinstance(tag, EinsumTag) for tag in instr.tags])}
+    instr_dict = {instr.id: instr for instr in tunit.default_entrypoint.instructions}
+    for esid, einsum in einsum_dict.items():
+        es_deps = set(einsum.depends_on)
+        while len(es_deps) > 0:
+            dep_id = es_deps.pop()
+            if dep_id in einsum_dict:
+                return True
+            else:
+                es_deps |=  instr_dict[dep_id].depends_on
+        
+    return False 
+
+def print_internal_einsum_dependencies(tunit):
+    einsum_dict = {instr.id: instr for instr in tunit.default_entrypoint.instructions if any([isinstance(tag, EinsumTag) for tag in instr.tags])}
+    instr_dict = {instr.id: instr for instr in tunit.default_entrypoint.instructions}
+    for esid, einsum in einsum_dict.items():
+        deps = []
+        es_deps = set(einsum.depends_on)
+        while len(es_deps) > 0:
+            dep_id = es_deps.pop()
+            if dep_id in einsum_dict:
+                deps.append(dep_id)
+                es_deps |=  instr_dict[dep_id].depends_on
+
+        print(esid, "depends on the following einsums:", set(deps))
+
+
 def get_pickled_tunits(directory):
     files = os.listdir(directory)
     tunits = []
@@ -675,6 +704,8 @@ def get_lazy_einsum_info(tunits):
             #einsum_types = list(get_einsum_types(sk))
             einsum_counts = list(get_einsum_counts(sk).items())
             indirection = len(get_indirection_arrays(sk)) > 0
+            internal_deps = has_internal_einsum_dependencies(sk)
+            print_internal_einsum_dependencies(sk)
             #print(einsum_counts)
             if len(einsum_counts) > 1:
                 raise ValueError("There should not be multiple einsum types within a single subkernel")
@@ -684,7 +715,7 @@ def get_lazy_einsum_info(tunits):
                 red_axes = len(einsum_type[1])
                 total_axes = non_red_axes + red_axes
                 out_axes = total_axes - red_axes
-                key = (total_axes, out_axes, red_axes, count, indirection)
+                key = (total_axes, out_axes, red_axes, count, indirection, internal_deps)
                 if key in subkernel_counts:
                     subkernel_counts[key][0] += 1
                     subkernel_counts[key][1] |= set([sk.default_entrypoint.name])
@@ -708,7 +739,7 @@ def autotune_standalone_subkernels(tunits):
     # the rank 0 numbers will be used
     # Would possibly be more accurate to use the minimum latency ever seen
     # and the maximum bandwidth ever seen
-    if True:
+    if False:
         if not use_charm:
             if comm.Get_rank() == 0:
                 import feinsum.empirical_roofline as er
@@ -779,7 +810,9 @@ def autotune_standalone_subkernels(tunits):
                                     device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)
 
                         elif not indirection and out_axes == 2 and total_axes == 4 and einsum_count > 0:
-                            #print(sk)
+                            print(sk)
+                            print_internal_einsum_dependencies(sk)
+                            exit()
                             autotune_standalone_subkernel(sk, queue, max_flop_rate=clpeak_flop_rate,
                                     device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)
 
@@ -828,9 +861,9 @@ def main(arg):
     directory = "./pickled_programs_prediction_order_1"
     tunits = get_pickled_tunits(directory)
     #print(len(tunits))
-    #get_lazy_einsum_info(tunits)
+    get_lazy_einsum_info(tunits)
     #charm.exit()
-    autotune_standalone_subkernels(tunits)
+    #autotune_standalone_subkernels(tunits)
     exit() 
 
 if __name__ == "__main__":
