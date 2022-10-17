@@ -141,7 +141,10 @@ def autotune_pickled_kernels(path, platform_id, actx_class, comm):
             else:
                 print("hjson file exists, skipping")
 
-def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None):
+def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None, save_path=None):
+
+    if save_path is None:
+        save_path = "./hjson"
 
     # Create queue, assume all GPUs on the machine are the same
     #platforms = cl.get_platforms()
@@ -187,8 +190,9 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
         pid = program_id
     #knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
     #knl = gac.set_memory_layout(knl)
-    os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
-    hjson_file_str = f"hjson/{pid}.hjson"
+    #os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
+    os.makedirs(save_path, exist_ok=True)
+    hjson_file_str = f"{save_path}/{pid}.hjson"
 
     # Could make a massive list with all kernels and parameters
     ntransforms = len(trans_list_list)

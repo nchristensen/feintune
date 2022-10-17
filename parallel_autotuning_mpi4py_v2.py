@@ -159,7 +159,10 @@ def autotune_pickled_kernels(path, platform_id, actx_class, comm):
             #del knl
 
 
-def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None):
+def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None, save_path=None):
+
+    if save_path is None:
+        save_path = "./hjson"
 
     # Create queue, assume all GPUs on the machine are the same
 
@@ -188,8 +191,9 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     #knl = lp.set_options(knl, lp.Options(write_code=True))
     assert knl.default_entrypoint.options.no_numpy
     assert knl.default_entrypoint.options.return_dict
-    os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
-    hjson_file_str = f"hjson/{pid}.hjson"
+    #os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
+    os.makedirs(save_path, exist_ok=True)
+    hjson_file_str = f"{save_path}/{pid}.hjson"
 
     #assert comm.Get_size() > 1
     #assert charm.numPes() > 1

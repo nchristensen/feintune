@@ -335,7 +335,11 @@ def apply_feinsum_transformations(t_unit, queue):
         return t_unit
 
 # Only works for subkernels that have no dependency on a prior subkernel
-def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None):
+def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None, save_path=None):
+
+    if save_path is None:
+        save_path = "./hjson"
+
     einsum_types = list(get_einsum_types(sk))    
 
     if len(einsum_types) > 1:
@@ -356,7 +360,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
         raise(ValueError("Unhandled einsum type"))
 
     tdict = parallel_autotune(sk, 0, trans_list_list, program_id=program_id, max_flop_rate=max_flop_rate, device_latency=device_latency,
-            device_memory_bandwidth=device_memory_bandwidth)
+            device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
     
     transformations = tdict["transformations"]
     return transformations
@@ -812,11 +816,11 @@ def autotune_standalone_subkernels(tunits, save_path=None):
                         print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
                         if False:#not indirection and out_axes == 3 and total_axes == 5 and einsum_count > 0:
                             autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
-                                    device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)
+                                    device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
                         elif not indirection and red_axes > 0 and total_axes <= 4 and einsum_count <= 4:
                             autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
-                                    device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)
+                                    device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
                             #print(add_batch_id(sk, 2))
                             #batch_einsums(sk, 2)
@@ -860,7 +864,7 @@ def test_feinsum_transforms(tunits):
 def main(arg):
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directory = "./pickled_programs_prediction_order_1"
+    directory = "./pickled_programs_prediction_order_2"
     tunits = get_pickled_tunits(directory)
     #print(len(tunits))
     #get_lazy_einsum_info(tunits)
