@@ -20,7 +20,7 @@ def k_inner_outer_options(n_in, k_inner_inner, sm_size,
     # Use sm_size - 1 because CUDA errors when all of local memory is used
     # Assumes a single DOF array. Additional pruning probably required
     # Assumes we prefetch all of the dofs in a strip of elements. This does not need to be the case
-    # though. We could prefetch chunks at a time.
+    # though. We could prefetch chunks (of length equal to the j_inner loop?) at a time.
     options = np.arange(1, ((sm_size - 1) // (fp_bytes*k_inner_inner*n_in)) + 1)
 
     #Arbitrarily limit to at max 6 inline to limit search space
@@ -278,6 +278,7 @@ def einsum3to2_kernel_tlist_generator(params, **kwargs):
 
 def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
 
+    from __init__ import get_einsum_types, get_einsums
     # Create the list of parameter values to try
 
     # Does not account for local memory usage due to register spilling
@@ -361,36 +362,50 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
 
     # Iterate over five search dimensions
     parameter_list = []
+    
+    neinsums = len(get_einsums(knl))
+    batch_size_list = [(batch_size, int(np.ceil(neinsums/batch_size))) for batch_size in range(1,neinsums + 1)]
+    nbatches_dict = {}
 
-    if n_elem*n_out <= 1024:
-        choices = (n_elem, n_elem, n_out, n_out, n_in)
-        parameter_list.append(choices)
-    else:
-        for kii in k_inner_inner_options(start_val=kii_s):
-            # Might be easier to generate all of the entries and then prune those
-            # entries that use too much local memory.
-            # Could also estimate amount of cache needed and prune those that spill.
-            # Also should look at the maximum number of dof arrays per batch and 
-            # allocate those arrays once and reuse them in every batch
-            # is naming them the same sufficient? This current implementation
-            # assumes each batch re-uses the dof arrays
-            # - Check if we need this ... we need this
-            for kio in k_inner_outer_options(n_in, kii, local_mem_size // n_dof_arrays,
-                        fp_bytes=fp_bytes,start_val=kio_s,nelem=n_elem):
-                kio_s = None # Set to None so will form the full set the next time around
-                for iii in i_inner_inner_options(n_out, kii,
-                        max_work_group_size=max_work_group_size, start_val=iii_s):
-                    iii_s = None
-                    for iio in i_inner_outer_options(n_out, iii, start_val=iio_s):
-                        iio_s = None
-                        for ji in j_inner_options(n_in, start_val=ji_s):
-                            ji_s = None
-                            choices = (kio, kii, iio, iii, ji)
-                            parameter_list.append(choices)
+    # Do in reverse so we wind up with the smallest batch size that requires nbatches
+    for nbatches, batch_size in reversed(batch_size_list):
+        nbatches_dict[nbatches] = batch_size
+    batch_size_list = sorted(nbatches_dict.values())
+
+    for batch_size in batch_size_list:#range(3,4):#range(1, neinsums + 1):
+
+        if n_elem*n_out <= 1024:
+            choices = (batch_size, n_elem, n_elem, n_out, n_out, n_in)
+            parameter_list.append(choices)
+        else:
+
+            for kii in k_inner_inner_options(start_val=kii_s):
+                # Might be easier to generate all of the entries and then prune those
+                # entries that use too much local memory.
+                # Could also estimate amount of cache needed and prune those that spill.
+                # Also should look at the maximum number of dof arrays per batch and 
+                # allocate those arrays once and reuse them in every batch
+                # is naming them the same sufficient? This current implementation
+                # assumes each batch re-uses the dof arrays
+                # - Check if we need this ... we need this
+
+                # Just calculate the amount of memory used at kernel generation time
+                # and refuse to run the test if it uses more than the available amount
+                for kio in k_inner_outer_options(n_in, kii, local_mem_size,# // n_dof_arrays,
+                            fp_bytes=fp_bytes,start_val=kio_s,nelem=n_elem):
+                    kio_s = None # Set to None so will form the full set the next time around
+                    for iii in i_inner_inner_options(n_out, kii,
+                            max_work_group_size=max_work_group_size, start_val=iii_s):
+                        iii_s = None
+                        for iio in i_inner_outer_options(n_out, iii, start_val=iio_s):
+                            iio_s = None
+                            for ji in j_inner_options(n_in, start_val=ji_s):
+                                ji_s = None
+                                choices = (batch_size, kio, kii, iio, iii, ji)
+                                parameter_list.append(choices)
 
 
     # Hacky, is there a better way to get this?
-    from __init__ import get_einsum_types
     within_inames, r_inames = list(get_einsum_types(knl))[0]
     for iname in r_inames:
         if "idof" in iname:
@@ -418,8 +433,7 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
     for params in parameter_list:
 
         trans_list = []
-        kio, kii, iio, iii, ji = params
-        batch_size = 2 # This size should always work, even with dependencies between einsums
+        batch_size, kio, kii, iio, iii, ji = params
 
         # TODO: Change this to a frozendict for easier legibility
         if 0 not in params: # If there is a zero length dimension then don't transform

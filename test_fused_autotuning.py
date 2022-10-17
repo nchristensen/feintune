@@ -739,7 +739,7 @@ def autotune_standalone_subkernels(tunits):
     # the rank 0 numbers will be used
     # Would possibly be more accurate to use the minimum latency ever seen
     # and the maximum bandwidth ever seen
-    if False:
+    if True:
         if not use_charm:
             if comm.Get_rank() == 0:
                 import feinsum.empirical_roofline as er

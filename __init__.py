@@ -427,7 +427,8 @@ def get_einsum_types(knl):
 
 def add_batch_ids(tunit, batch_size):
     from meshmode.array_context import EinsumTag
-    assert batch_size >= 0
+    assert batch_size >= 1
+    # Should a batch size of zero be equal to a single batch
     new_instructions = []
     batch_number = 0
     used_batches = 0
@@ -453,7 +454,7 @@ def add_batch_ids(tunit, batch_size):
             new_instructions.append(instr)
 
     # Handle a non-full final batch
-    if len(batch_instructions_list) > 0 and len(batch_instructions_list) < batch_size:
+    if len(batch_instructions) > 0 and len(batch_instructions) < batch_size:
         batch_instructions_list.append(batch_instructions)
 
     # Need to add batch ids to the prefetch instructions
@@ -488,6 +489,7 @@ def get_batch_temporaries_by_size(tunit, batches):
                     else:
                         batch_dict[shape] |= set([dep])
         batch_dict_list.append(batch_dict)
+
 
     return batch_dict_list
 """
@@ -525,7 +527,6 @@ def get_batch_temporaries_by_size(tunit, nbatches, address_space=None):
 
 
 def get_alias_sets(batch_dict_list):
-    print(batch_dict_list)
     sizes = set()
     for batch_dict in batch_dict_list:
         sizes |= set(batch_dict.keys())
@@ -689,6 +690,7 @@ def apply_transformation_list(knl, transformations):
     # Maybe add some logic to add slabs=(0,0) if n_elem % k_inner_outer == 0
     # Maybe can do this based on tranformation name, loop variable, and loop variable
     # bounds
+    print("KERNEL BEFORE TRANSFORMATION")
     print(knl.default_entrypoint)
     print(transformations)
     #exit()

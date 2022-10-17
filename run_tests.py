@@ -646,8 +646,27 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     print("DEVICE MEMORY BANDWIDTH", device_memory_bandwidth)
 
     knl = apply_transformation_list(knl_base, trans_list)
+   
+    ## Calculate the amount of local memory used
+    #temp_dict = knl.default_entrypoint.temporary_variables
 
-    dev_arrays, avg_time = test_fn(queue, knl)
+    temp_dict = {key: val for key, val in knl.default_entrypoint.temporary_variables.items() if val.address_space == lp.AddressSpace.LOCAL or val.address_space == lp.auto}
+    base_storage_dict = {}
+
+    for temp, tarray in temp_dict.items():
+        if tarray.base_storage not in base_storage_dict:
+            base_storage_dict[tarray.base_storage] = np.product(tarray.shape)
+        elif np.product(tarray.shape) > base_storage_dict[tarray.base_storage]:
+            base_storage_dict[tarray.base_storage] = np.product(tarray.shape)
+    local_memory_used = np.sum(list(base_storage_dict.values()))
+    local_memory_avail = queue.device.local_mem_size
+    print(f"KERNEL USING {local_memory_used} out of {local_memory_avail} bytes of local memory") 
+
+    # Could also look at the amount of cache space used and forbid running those that spill 
+    if local_memory_used <= queue.device.local_mem_size: # Don't allow complete filling of local memory
+        dev_arrays, avg_time = test_fn(queue, knl)
+    else:
+        dev_arrays, avg_time = {}, np.inf # Don't run and return return an infinite run time
 
     flop_rate_dict = analyze_flop_rate(knl, avg_time, max_flop_rate=max_flop_rate, latency=None)
     bw_dict = analyze_knl_bandwidth(knl, avg_time, device_memory_latency=device_latency)
