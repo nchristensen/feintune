@@ -809,7 +809,7 @@ def autotune_standalone_subkernels(tunits):
                             autotune_standalone_subkernel(sk, queue, max_flop_rate=clpeak_flop_rate,
                                     device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)
 
-                        elif not indirection and out_axes == 2 and total_axes == 4 and einsum_count > 0:
+                        elif not indirection and red_axes > 0 and einsum_count <= 1:
                             autotune_standalone_subkernel(sk, queue, max_flop_rate=clpeak_flop_rate,
                                     device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)
 

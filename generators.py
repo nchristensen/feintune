@@ -451,8 +451,9 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
             if iio != iii:
                 trans_list.append(("split_iname", (f"{i}", iio,),
                     (("outer_tag", "g.1",), ("slabs",(0,0,),),),))
+                # In theory this should be (0,0)
                 trans_list.append(("split_iname", (f"{i}_inner", iii,), 
-                    (("outer_tag", "ilp",), ("inner_tag","l.1",), ("slabs",(0,1,),),),))
+                    (("outer_tag", "ilp",), ("inner_tag","l.1",), ("slabs",(0,0,),),),))
             else:
                 trans_list.append(("split_iname", (f"{i}", iio,), 
                     (("outer_tag", "g.1",), ("inner_tag", "l.1",), ("slabs",(0,0,),),),))
