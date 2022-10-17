@@ -794,7 +794,7 @@ def autotune_standalone_subkernels(tunits, save_path=None):
                 pid = unique_program_id(sk)
                 print(pid)
 
-                os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
+                os.makedirs(save_path, exist_ok=True)
                 hjson_file = f"{save_path}/{pid}.hjson"
                 if exists(hjson_file):
                     print("A TUNE PROFILE ALREADY EXISTS: {filename}")
@@ -821,7 +821,7 @@ def autotune_standalone_subkernels(tunits, save_path=None):
                         elif not indirection and red_axes > 0 and total_axes <= 4 and einsum_count <= 6:
                             autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                     device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
-
+                            exit()
                             #print(add_batch_id(sk, 2))
                             #batch_einsums(sk, 2)
 
