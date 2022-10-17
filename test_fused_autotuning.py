@@ -7,7 +7,7 @@ import os
 from os.path import exists
 from utils import unique_program_id
 
-use_charm=True
+use_charm=False
 if use_charm:
     from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
     from charm4py.pool import PoolScheduler, Pool
@@ -818,7 +818,7 @@ def autotune_standalone_subkernels(tunits, save_path=None):
                             autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                     device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
-                        elif not indirection and red_axes > 0 and total_axes <= 4 and einsum_count <= 4:
+                        elif not indirection and red_axes > 0 and total_axes <= 4 and einsum_count <= 6:
                             autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                     device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
@@ -864,7 +864,7 @@ def test_feinsum_transforms(tunits):
 def main(arg):
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directory = "./pickled_programs_prediction_order_2"
+    directory = "./pickled_programs_prediction_order_3"
     tunits = get_pickled_tunits(directory)
     #print(len(tunits))
     #get_lazy_einsum_info(tunits)
