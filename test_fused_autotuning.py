@@ -727,13 +727,16 @@ def get_lazy_einsum_info(tunits):
         print(key, val)
 
 
-def autotune_standalone_subkernels(tunits):
+def autotune_standalone_subkernels(tunits, save_path=None):
     platforms = cl.get_platforms()
     cl_ctx = cl.Context(
         dev_type=cl.device_type.GPU,
         properties=[(cl.context_properties.PLATFORM, platforms[0])])
     queue = cl.CommandQueue(cl_ctx,
         properties=cl.command_queue_properties.PROFILING_ENABLE)
+
+    if save_path is None:
+        save_path = "./hjson"
 
     # Doesn't really matter if all of the processes do this,
     # the rank 0 numbers will be used
@@ -788,7 +791,7 @@ def autotune_standalone_subkernels(tunits):
                 print(pid)
 
                 os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
-                hjson_file = f"./hjson/{pid}.hjson"
+                hjson_file = f"{save_path}/{pid}.hjson"
                 if exists(hjson_file):
                     print("A TUNE PROFILE ALREADY EXISTS: {filename}")
                 else:
@@ -862,7 +865,8 @@ def main(arg):
     #print(len(tunits))
     #get_lazy_einsum_info(tunits)
     #charm.exit()
-    autotune_standalone_subkernels(tunits)
+    save_path = directory + "/hjson"
+    autotune_standalone_subkernels(tunits save_path=save_path)
     exit() 
 
 if __name__ == "__main__":
