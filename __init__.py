@@ -504,7 +504,7 @@ def get_batch_temporaries_by_size(tunit, nbatches, address_space=None):
         temp_dict = {key: val for key, val in tunit.default_entrypoint.temporary_variables.items() if val.address_space == address_space}
     #print(temp_dict)
     #exit()
-    batch_dict_list = [] # A list of dictionaries of sets
+    batch_dict_list = [] # A list of dictionaries (keyed by size, one for each batch) of sets of temporary ids
 
     # Inefficient
     for batch_num in range(nbatches):
@@ -535,13 +535,34 @@ def get_alias_sets(batch_dict_list):
         arg_lists = []
         for batch_dict in batch_dict_list:
             arg_lists.append(sorted(batch_dict[size]))
+
         max_len = 0
         for l in arg_lists:
             max_len = max(len(l), max_len)
         for l in arg_lists:
             while len(l) < max_len:
                 l.append(None) # Pad with None so can slice columns
+
+        # This needs to be a bit more robust, we want a variable to alias with itself.
+        # We also can't allow two tempories to alias if they occur in the same block (row)
+
+        # Permute so if a value is found in the current row it isn't found in the current column
+        # except if the value is self
+        # Permute so self is in current column as much as possible
+        # For now just assert to verify this is not the case, don't attempt to fix
         arg_array = np.array(arg_lists)
+
+        flat_arg_array = arg_array.flatten()
+        nonzero_entries = flat_arg_array[np.flatnonzero(flat_arg_array)]
+        unique_entries = np.unique(nonzero_entries)
+        assert len(unique_entries) == len(nonzero_entries)
+
+        for col in range(arg_array.shape[1]):
+            col_set = set(arg_array[:,col].flatten())
+            for row in range(arg_array.shape[0]):
+                row_set = set(arg_array[row,:].flatten())
+                assert col_set & row_set == set([arg_array[row,col]])
+
         for col in range(arg_array.shape[1]):
             alias_sets.append(set(arg_array[:,col]) - set([None]))
     
@@ -588,10 +609,18 @@ def batch_einsums(tunit, batch_size, **kwargs):
             for einsum in batch:
                 fetch_rule_deps = einsum.depends_on & fetch_rules
                 if len(fetch_rule_deps) > 0 and i > 0:
-                    j = i - 1
                     for fetch_rule in fetch_rule_deps:
-                        # Make the fetch rule depend on the prior batch
-                        knl = lp.add_dependency(knl, f"id:{fetch_rule}", f"id:batch_{j}*")
+                        # Make the fetch rule depend on the immediately prior batch if no prior batch already depends on it
+                        add_dep = True
+                        for j in range(i-1, -1, -1):
+                            if any([fetch_rule in prior_batch_einsum.depends_on for prior_batch_einsum in batches[j]]):
+                                add_dep = False
+                                break
+
+                        if add_dep:
+                            j = i - 1
+                            knl = lp.add_dependency(knl, f"id:{fetch_rule}", f"id:batch_{j}*")
+                        
 
         # Create independent loops for each batch                
         for i in range(0, nbatches): # Should we keep the first batch in the original set of loops

@@ -16,12 +16,17 @@ def k_inner_inner_options(start_val=None):
 
 def k_inner_outer_options(n_in, k_inner_inner, sm_size,
                             fp_bytes=8, start_val=None, nelem=None):
-    ilp_limit = min(nelem // k_inner_inner, 6) if nelem is not None else 6
     # Possibilities limited by size of local memory
     # Use sm_size - 1 because CUDA errors when all of local memory is used
+    # Assumes a single DOF array. Additional pruning probably required
+    # Assumes we prefetch all of the dofs in a strip of elements. This does not need to be the case
+    # though. We could prefetch chunks at a time.
     options = np.arange(1, ((sm_size - 1) // (fp_bytes*k_inner_inner*n_in)) + 1)
+
     #Arbitrarily limit to at max 6 inline to limit search space
+    ilp_limit = min(nelem // k_inner_inner, 6) if nelem is not None else 6
     options = list(k_inner_inner*options[options <= ilp_limit])
+
     start_ind = 0 if start_val is None else options.index(start_val)
     options = options[start_ind:]
     return options

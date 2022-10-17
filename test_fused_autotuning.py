@@ -7,7 +7,7 @@ import os
 from os.path import exists
 from utils import unique_program_id
 
-use_charm=False
+use_charm=True
 if use_charm:
     from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
     from charm4py.pool import PoolScheduler, Pool
@@ -810,9 +810,6 @@ def autotune_standalone_subkernels(tunits):
                                     device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)
 
                         elif not indirection and out_axes == 2 and total_axes == 4 and einsum_count > 0:
-                            print(sk)
-                            print_internal_einsum_dependencies(sk)
-                            exit()
                             autotune_standalone_subkernel(sk, queue, max_flop_rate=clpeak_flop_rate,
                                     device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)
 
@@ -861,9 +858,9 @@ def main(arg):
     directory = "./pickled_programs_prediction_order_1"
     tunits = get_pickled_tunits(directory)
     #print(len(tunits))
-    get_lazy_einsum_info(tunits)
+    #get_lazy_einsum_info(tunits)
     #charm.exit()
-    #autotune_standalone_subkernels(tunits)
+    autotune_standalone_subkernels(tunits)
     exit() 
 
 if __name__ == "__main__":
