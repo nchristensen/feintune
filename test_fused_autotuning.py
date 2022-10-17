@@ -742,7 +742,7 @@ def autotune_standalone_subkernels(tunits, save_path=None):
     # the rank 0 numbers will be used
     # Would possibly be more accurate to use the minimum latency ever seen
     # and the maximum bandwidth ever seen
-    if False:
+    if True:
         if not use_charm:
             if comm.Get_rank() == 0:
                 import feinsum.empirical_roofline as er
@@ -860,7 +860,7 @@ def test_feinsum_transforms(tunits):
 def main(arg):
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directory = "./pickled_programs_prediction_order_2"
+    directory = "./pickled_programs_prediction_order_1"
     tunits = get_pickled_tunits(directory)
     #print(len(tunits))
     #get_lazy_einsum_info(tunits)
