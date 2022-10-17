@@ -690,8 +690,8 @@ def apply_transformation_list(knl, transformations):
     # Maybe add some logic to add slabs=(0,0) if n_elem % k_inner_outer == 0
     # Maybe can do this based on tranformation name, loop variable, and loop variable
     # bounds
-    print("KERNEL BEFORE TRANSFORMATION")
-    print(knl.default_entrypoint)
+    #print("KERNEL BEFORE TRANSFORMATION")
+    #print(knl.default_entrypoint)
     print(transformations)
     #exit()
     for t in list(transformations):
