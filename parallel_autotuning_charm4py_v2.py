@@ -141,7 +141,7 @@ def autotune_pickled_kernels(path, platform_id, actx_class, comm):
             else:
                 print("hjson file exists, skipping")
 
-def parallel_autotune(knl, platform_id, trans_list_list, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None):
+def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None):
 
     # Create queue, assume all GPUs on the machine are the same
     #platforms = cl.get_platforms()
@@ -180,8 +180,11 @@ def parallel_autotune(knl, platform_id, trans_list_list, max_flop_rate=None, dev
     
     #tlist_generator, pspace_generator = actx.get_generators(knl)
     #params_list = pspace_generator(actx.queue, knl)
-    from utils import unique_program_id
-    pid = unique_program_id(knl)
+    if program_id is None:
+        from utils import unique_program_id
+        pid = unique_program_id(knl)
+    else:
+        pid = program_id
     #knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
     #knl = gac.set_memory_layout(knl)
     os.makedirs(os.getcwd() + "/hjson", exist_ok=True)

@@ -335,7 +335,7 @@ def apply_feinsum_transformations(t_unit, queue):
         return t_unit
 
 # Only works for subkernels that have no dependency on a prior subkernel
-def autotune_standalone_subkernel(sk, queue, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None):
+def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None):
     einsum_types = list(get_einsum_types(sk))    
 
     if len(einsum_types) > 1:
@@ -355,7 +355,7 @@ def autotune_standalone_subkernel(sk, queue, max_flop_rate=None, device_latency=
         print(est)
         raise(ValueError("Unhandled einsum type"))
 
-    tdict = parallel_autotune(sk, 0, trans_list_list, max_flop_rate=max_flop_rate, device_latency=device_latency,
+    tdict = parallel_autotune(sk, 0, trans_list_list, program_id=program_id, max_flop_rate=max_flop_rate, device_latency=device_latency,
             device_memory_bandwidth=device_memory_bandwidth)
     
     transformations = tdict["transformations"]
@@ -806,11 +806,11 @@ def autotune_standalone_subkernels(tunits):
                         
                         print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
                         if False:#not indirection and out_axes == 3 and total_axes == 5 and einsum_count > 0:
-                            autotune_standalone_subkernel(sk, queue, max_flop_rate=clpeak_flop_rate,
+                            autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                     device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)
 
-                        elif not indirection and red_axes > 0 and einsum_count <= 1:
-                            autotune_standalone_subkernel(sk, queue, max_flop_rate=clpeak_flop_rate,
+                        elif not indirection and red_axes > 0 and einsum_count <= 2:
+                            autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                     device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth)
 
                             #print(add_batch_id(sk, 2))

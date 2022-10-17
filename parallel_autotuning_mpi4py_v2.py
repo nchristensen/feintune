@@ -159,7 +159,7 @@ def autotune_pickled_kernels(path, platform_id, actx_class, comm):
             #del knl
 
 
-def parallel_autotune(knl, platform_id, trans_list_list, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None):
+def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None):
 
     # Create queue, assume all GPUs on the machine are the same
 
@@ -178,10 +178,14 @@ def parallel_autotune(knl, platform_id, trans_list_list, max_flop_rate=None, dev
     #    allocator=cl_tools.MemoryPool(cl_tools.ImmediateAllocator(queue)))
 
     #knl = gac.set_memory_layout(knl)
-    from utils import unique_program_id
-    pid = unique_program_id(knl)
+    if program_id is None:
+        from utils import unique_program_id
+        pid = unique_program_id(knl)
+    else:
+        pid = program_id
+
     #knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
-    knl = lp.set_options(knl, lp.Options(write_code=True))
+    #knl = lp.set_options(knl, lp.Options(write_code=True))
     assert knl.default_entrypoint.options.no_numpy
     assert knl.default_entrypoint.options.return_dict
     os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
