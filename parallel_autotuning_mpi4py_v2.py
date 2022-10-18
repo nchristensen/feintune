@@ -209,7 +209,7 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
 
     # Could make a massive list with all kernels and parameters
     ntransforms = len(trans_list_list)
-    args = [((ind+1,ntransforms),(platform_id, knl, tlist, generic_test, max_flop_rate, device_latency, device_memory_bandwidth,),) for ind, tlist in enumerate(trans_list_list)]
+    args = reversed([((ind+1,ntransforms),(platform_id, knl, tlist, generic_test, max_flop_rate, device_latency, device_memory_bandwidth,),) for ind, tlist in enumerate(trans_list_list)])
 
     #print(args)
     #exit()

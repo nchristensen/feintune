@@ -656,9 +656,9 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
 
     for temp, tarray in temp_dict.items():
         if tarray.base_storage not in base_storage_dict:
-            base_storage_dict[tarray.base_storage] = np.product(tarray.shape)
+            base_storage_dict[tarray.base_storage] = np.product(tarray.shape)*tarray.dtype.dtype.itemsize
         elif np.product(tarray.shape) > base_storage_dict[tarray.base_storage]:
-            base_storage_dict[tarray.base_storage] = np.product(tarray.shape)
+            base_storage_dict[tarray.base_storage] = np.product(tarray.shape)*tarray.dtype.dtype.itemsize
     local_memory_used = np.sum(list(base_storage_dict.values()))
     local_memory_avail = queue.device.local_mem_size
     print(f"KERNEL USING {local_memory_used} out of {local_memory_avail} bytes of local memory") 
