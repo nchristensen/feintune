@@ -797,9 +797,9 @@ def autotune_standalone_subkernels(tunits, save_path=None):
                 os.makedirs(save_path, exist_ok=True)
                 hjson_file = f"{save_path}/{pid}.hjson"
                 if exists(hjson_file):
-                    print(f"A TUNE PROFILE ALREADY EXISTS: {filename}")
+                    print(f"A TUNE PROFILE ALREADY EXISTS: {hjson_file}")
                 else:
-                    print(f"A TUNE PROFILE EXISTS NOT: {filename}")
+                    print(f"A TUNE PROFILE EXISTS NOT: {hjson_file}")
                     einsum_counts = list(get_einsum_counts(sk).items())
                     indirection = len(get_indirection_arrays(sk)) > 0
                     if len(einsum_counts) > 0:
@@ -821,7 +821,7 @@ def autotune_standalone_subkernels(tunits, save_path=None):
                         elif not indirection and red_axes > 0 and total_axes <= 3 and einsum_count <= 4:
                             autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                     device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
-
+                            exit()
                             #print(add_batch_id(sk, 2))
                             #batch_einsums(sk, 2)
 
@@ -864,7 +864,7 @@ def test_feinsum_transforms(tunits):
 def main(arg):
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directory = "./pickled_programs_prediction_order_2"
+    directory = "./pickled_programs_prediction_order_3"
     tunits = get_pickled_tunits(directory)
     #print(len(tunits))
     #get_lazy_einsum_info(tunits)

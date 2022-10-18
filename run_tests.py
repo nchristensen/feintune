@@ -318,7 +318,7 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup=True):
                    
             #arg_dict[arg.name] = cache_arg_dict[str(arg)]
             arg_dict[arg.name] = array
-
+        print("STARTING EXECUTION")
         if warmup:
             for i in range(2):
                 kern(queue, **arg_dict)
@@ -334,7 +334,8 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup=True):
         cl.wait_for_events(events)
         for evt in events:
             sum_time += evt.profile.end - evt.profile.start
-        sum_time = sum_time / 1e9        
+        sum_time = sum_time / 1e9
+        print("FINISHING EXECUTION")
         #queue.finish()
         #"""
     #sum_time = 1.0
