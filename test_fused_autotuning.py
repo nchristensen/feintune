@@ -797,7 +797,7 @@ def autotune_standalone_subkernels(tunits, save_path=None):
                 os.makedirs(save_path, exist_ok=True)
                 hjson_file = f"{save_path}/{pid}.hjson"
                 if exists(hjson_file):
-                    print("A TUNE PROFILE ALREADY EXISTS: {filename}")
+                    print(f"A TUNE PROFILE ALREADY EXISTS: {filename}")
                 else:
                     print(f"A TUNE PROFILE EXISTS NOT: {filename}")
                     einsum_counts = list(get_einsum_counts(sk).items())
