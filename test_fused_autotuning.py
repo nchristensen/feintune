@@ -6,6 +6,7 @@ import pyopencl as cl
 import os
 from os.path import exists
 from utils import unique_program_id
+import hjson
 
 use_charm=True
 if use_charm:
@@ -684,7 +685,7 @@ def get_pickled_tunits(directory):
     return tunits
 
 
-def get_lazy_einsum_info(tunits):
+def get_lazy_einsum_info(tunits, hjson_dir=None):
     for filename, tunit, args in tunits:
         sks = get_subkernels(tunit, args)
         #print(tunit.default_entrypoint)
@@ -700,6 +701,7 @@ def get_lazy_einsum_info(tunits):
 
     # Count number of subkernels of each einsum type
     subkernel_counts = {}
+    print("\nSubkernel information")
     for filename, tunit, args in tunits:
         sks = get_subkernels(tunit, args)
         for sk, csk in sks:
@@ -709,7 +711,8 @@ def get_lazy_einsum_info(tunits):
             einsum_counts = list(get_einsum_counts(sk).items())
             indirection = len(get_indirection_arrays(sk)) > 0
             internal_deps = has_internal_einsum_dependencies(sk)
-            print_internal_einsum_dependencies(sk)
+            #print_internal_einsum_dependencies(sk)
+
             #print(einsum_counts)
             if len(einsum_counts) > 1:
                 raise ValueError("There should not be multiple einsum types within a single subkernel")
@@ -720,13 +723,27 @@ def get_lazy_einsum_info(tunits):
                 total_axes = non_red_axes + red_axes
                 out_axes = total_axes - red_axes
                 key = (total_axes, out_axes, red_axes, count, indirection, internal_deps)
+
+                # Get the performance data if available
+                pid = unique_program_id(sk)
+                data = None
+                if hjson_dir is not None:
+                    filename = hjson_dir + f"/{pid}.hjson"
+                    if exists(filename):
+                        hjson_file = open(filename)
+                        hjson_text = hjson_file.read()
+                        hjson_file.close()
+                        od = hjson.loads(hjson_text)
+                        data = od["data"]["frac_roofline_flop_rate"]
+                print(key, data)
+
                 if key in subkernel_counts:
                     subkernel_counts[key][0] += 1
                     subkernel_counts[key][1] |= set([sk.default_entrypoint.name])
                 else:
                     subkernel_counts[key] = [1, set([sk.default_entrypoint.name])]
 
-
+    print("\nSubkernel summary information")
     for key, val in subkernel_counts.items():
         print(key, val)
 
@@ -864,13 +881,14 @@ def test_feinsum_transforms(tunits):
 def main(arg):
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directory = "./pickled_programs_prediction_order_3"
+    directory = "./pickled_programs_prediction_order_1"
+    save_path = directory + "/hjson"
+
     tunits = get_pickled_tunits(directory)
     #print(len(tunits))
-    #get_lazy_einsum_info(tunits)
+    get_lazy_einsum_info(tunits, hjson_dir=save_path)
     #charm.exit()
-    save_path = directory + "/hjson"
-    autotune_standalone_subkernels(tunits, save_path=save_path)
+    #autotune_standalone_subkernels(tunits, save_path=save_path)
     exit() 
 
 if __name__ == "__main__":
