@@ -83,6 +83,8 @@ def test(args):
         print("Queue is none. Initializing queue")
         set_queue(charm.myPe(), platform_id)
         assert queue is not None
+    else:
+        print("Using prexisting queue")
     
     print(f"\nExecuting test {cur_test} of {total_tests}\n")
     result = run_single_param_set_v2(queue, knl, tlist, test_fn,
