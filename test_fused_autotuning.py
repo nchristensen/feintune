@@ -8,7 +8,7 @@ from os.path import exists
 from utils import unique_program_id
 import hjson
 
-use_charm=True
+use_charm=False
 if use_charm:
     from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
     from charm4py.pool import PoolScheduler, Pool
@@ -735,7 +735,7 @@ def get_lazy_einsum_info(tunits, hjson_dir=None):
                         hjson_file.close()
                         od = hjson.loads(hjson_text)
                         data = od["data"]["frac_roofline_flop_rate"]
-                print(key, data)
+                print(pid, key, data)
 
                 if key in subkernel_counts:
                     subkernel_counts[key][0] += 1
@@ -838,7 +838,7 @@ def autotune_standalone_subkernels(tunits, save_path=None):
                         elif not indirection and red_axes > 0 and total_axes <= 3 and einsum_count <= 4:
                             autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                     device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
-                            exit()
+                            #exit()
                             #print(add_batch_id(sk, 2))
                             #batch_einsums(sk, 2)
 
@@ -881,7 +881,7 @@ def test_feinsum_transforms(tunits):
 def main(arg):
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directory = "./pickled_programs_prediction_order_1"
+    directory = "./pickled_programs_prediction_order_2"
     save_path = directory + "/hjson"
 
     tunits = get_pickled_tunits(directory)
