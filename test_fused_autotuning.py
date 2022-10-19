@@ -5,7 +5,7 @@ from meshmode.array_context import EinsumTag
 import pyopencl as cl
 import os
 from os.path import exists
-from utils import unique_program_id
+from utils import unique_program_id, convert
 import hjson
 
 use_charm=False
@@ -22,6 +22,7 @@ else:
 from generators import einsum3to2_kernel_tlist_generator_v2#, einsum4to2_kernel_tlist_generator_v2
 from run_tests import run_single_param_set_v2
 from run_tests import generic_test
+
 
 class IsDOFArray(Tag):
     pass
@@ -748,6 +749,17 @@ def get_lazy_einsum_info(tunits, hjson_dir=None):
         print(key, val)
 
 
+def get_device_roofline_data(queue):
+    import feinsum.empirical_roofline as er
+    results_list = er.loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
+    device_latency = er.get_min_device_memory_latency(results_list)
+    loopy_bw = er.get_latency_adjusted_max_device_memory_bandwidth(results_list)
+    clpeak_bw = er.get_max_bandwidth_clpeak(queue=queue)
+    clpeak_flop_rate = er.get_max_flop_rate_clpeak(np.float64, queue=queue)    
+    device_memory_bandwidth = max(loopy_bw, clpeak_bw)
+
+    return device_latency, device_memory_bandwidth, clpeak_flop_rate
+
 def autotune_standalone_subkernels(tunits, save_path=None):
     platforms = cl.get_platforms()
     cl_ctx = cl.Context(
@@ -766,32 +778,34 @@ def autotune_standalone_subkernels(tunits, save_path=None):
     if True:
         if not use_charm:
             if comm.Get_rank() == 0:
-                import feinsum.empirical_roofline as er
-                results_list = er.loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
-                device_latency = er.get_min_device_memory_latency(results_list)
-                loopy_bw = er.get_latency_adjusted_max_device_memory_bandwidth(results_list)
-                clpeak_bw = er.get_max_bandwidth_clpeak(queue=queue)
-                clpeak_flop_rate = er.get_max_flop_rate_clpeak(np.float64, queue=queue)    
-                device_memory_bandwidth = max(loopy_bw, clpeak_bw)
+                device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
+                #import feinsum.empirical_roofline as er
+                #results_list = er.loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
+                #device_latency = er.get_min_device_memory_latency(results_list)
+                #loopy_bw = er.get_latency_adjusted_max_device_memory_bandwidth(results_list)
+                #clpeak_bw = er.get_max_bandwidth_clpeak(queue=queue)
+                #clpeak_flop_rate = er.get_max_flop_rate_clpeak(np.float64, queue=queue)    
+                #device_memory_bandwidth = max(loopy_bw, clpeak_bw)
             else:
                 device_memory_bandwidth = None
                 device_latency = None
                 clpeak_flop_rate = None
 
-            device_memory_latency = comm.bcast(device_memory_bandwidth)
+            device_memory_bandwidth = comm.bcast(device_memory_bandwidth)
             device_latency = comm.bcast(device_latency)
             clpeak_flop_rate = comm.bcast(clpeak_flop_rate)
 
             #device_latency, inverse_bandwidth = get_alpha_beta_model(results_list)
             #device_memory_bandwidth = 1/inverse_bandwidth
         else:
-            import feinsum.empirical_roofline as er
-            results_list = er.loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
-            device_latency = er.get_min_device_memory_latency(results_list)
-            loopy_bw = er.get_latency_adjusted_max_device_memory_bandwidth(results_list)
-            clpeak_bw = er.get_max_bandwidth_clpeak(queue=queue)
-            clpeak_flop_rate = er.get_max_flop_rate_clpeak(np.float64, queue=queue)    
-            device_memory_bandwidth = max(loopy_bw, clpeak_bw)
+            device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
+            #import feinsum.empirical_roofline as er
+            #results_list = er.loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
+            #device_latency = er.get_min_device_memory_latency(results_list)
+            #loopy_bw = er.get_latency_adjusted_max_device_memory_bandwidth(results_list)
+            #clpeak_bw = er.get_max_bandwidth_clpeak(queue=queue)
+            #clpeak_flop_rate = er.get_max_flop_rate_clpeak(np.float64, queue=queue)    
+            #device_memory_bandwidth = max(loopy_bw, clpeak_bw)
     else:
         device_memory_bandwidth = None
         device_latency = None
@@ -859,6 +873,62 @@ def autotune_standalone_subkernels(tunits, save_path=None):
                             #exit()
        #test_feinsum_transforms(tunits)
 
+def test_default_transforms(tunits, save_path=None):
+
+    if save_path is None:
+        save_path = "default_transforms_hjson"
+
+    os.makedirs(save_path, exist_ok=True)
+
+    platforms = cl.get_platforms()
+    cl_ctx = cl.Context(
+        dev_type=cl.device_type.GPU,
+        properties=[(cl.context_properties.PLATFORM, platforms[0])])
+    queue = cl.CommandQueue(cl_ctx,
+        properties=cl.command_queue_properties.PROFILING_ENABLE)
+
+    from meshmode.array_context import FusionContractorArrayContext
+    actx = FusionContractorArrayContext(queue)
+
+
+    device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
+
+    for filename, tunit, args in tunits:
+        print(f"TESTING TUNIT: {filename}")
+        sks = get_subkernels(tunit, args)
+        for sk, csk in sks:
+
+            einsum_counts = list(get_einsum_counts(sk).items())
+            indirection = len(get_indirection_arrays(sk)) > 0
+            if len(einsum_counts) > 0:
+                if len(einsum_counts) > 1:
+                    raise ValueError("Subkernel has multiple einsum types")
+
+                einsum_type, einsum_count = einsum_counts[0]
+                non_red_axes = len(einsum_type[0])
+                red_axes = len(einsum_type[1])
+                total_axes = non_red_axes + red_axes
+                out_axes = total_axes - red_axes
+
+                if not indirection and total_axes == 3 and out_axes == 2:
+
+                    # This changes the identifier so needs to be set beforehand
+                    assert sk.default_entrypoint.options.no_numpy
+                    assert sk.default_entrypoint.options.return_dict
+
+                    pid = unique_program_id(sk)
+                    transformed_sk = actx.transform_loopy_program(sk)
+                    ret_dict = run_single_param_set_v2(queue, transformed_sk, [], generic_test,
+                                max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
+                                device_latency=device_latency)
+                       
+                    print(ret_dict["data"])
+                    # Should this functionality be a utility function
+                    hjson_file_str = save_path + f"/{pid}.hjson"
+                    out_file = open(hjson_file_str, "wt+")
+                    hjson.dump(ret_dict, out_file, default=convert)
+                    out_file.close()
+
 def test_feinsum_transforms(tunits):
 
     platforms = cl.get_platforms()
@@ -881,12 +951,13 @@ def test_feinsum_transforms(tunits):
 def main(arg):
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directory = "./pickled_programs_prediction_order_2"
+    directory = "./pickled_programs_prediction_order_1"
     save_path = directory + "/hjson"
 
     tunits = get_pickled_tunits(directory)
     #print(len(tunits))
-    get_lazy_einsum_info(tunits, hjson_dir=save_path)
+    #get_lazy_einsum_info(tunits, hjson_dir=save_path)
+    test_default_transforms(tunits)
     #charm.exit()
     #autotune_standalone_subkernels(tunits, save_path=save_path)
     exit() 
