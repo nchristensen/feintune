@@ -951,15 +951,15 @@ def test_feinsum_transforms(tunits):
 def main(arg):
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directory = "./pickled_programs_prediction_order_1"
+    directory = "./pickled_programs_prediction_order_2"
     save_path = directory + "/hjson"
 
     tunits = get_pickled_tunits(directory)
     #print(len(tunits))
     #get_lazy_einsum_info(tunits, hjson_dir=save_path)
-    test_default_transforms(tunits)
+    #test_default_transforms(tunits)
     #charm.exit()
-    #autotune_standalone_subkernels(tunits, save_path=save_path)
+    autotune_standalone_subkernels(tunits, save_path=save_path)
     exit() 
 
 if __name__ == "__main__":
