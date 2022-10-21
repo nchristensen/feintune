@@ -185,26 +185,23 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     hjson_file_str = f"{save_path}/{pid}.hjson"
     test_results_file =f"{save_path}/{pid}_tests.hjson"
 
-    # Could make a massive list with all kernels and parameters
-    ntransforms = len(trans_list_list)
+    results_dict = load_hjson(test_results_file) if exists(test_results_file) else {}
 
-    if exists(test_results_file):
-        results_dict = load_hjson(test_results_file)
-    else:
-        results_dict = {} 
+    args = [(platform_id, knl, tlist, generic_test, max_flop_rate, device_latency, device_memory_bandwidth,) for tlist in trans_list_list if get_test_id(tlist) not in results_dict]
 
-    args = list(reversed([((ind+1,ntransforms),(platform_id, knl, tlist, generic_test, max_flop_rate, device_latency, device_memory_bandwidth,),) for ind, tlist in enumerate(trans_list_list) if get_test_id(tlist) not in results_dict]))
-        
-    # May help to balance workload
-    # Should test if shuffling matters
-    #from random import shuffle
+    ntransforms = len(args)
+
     shuffle(args)
+    #args = list(reversed(args))
+
+    # Number so the tasks can display how many tasks remain
+    args = [((ind + 1, ntransforms,), arg,) for ind, arg in enumerate(args)]
 
     sort_key = lambda entry: entry[1]["data"]["avg_time"]
     result = {"transformations": {}, "data": {}}
     comm = MPI.COMM_WORLD
     results = []
-    segment_size = 100 # Arbitrary
+    segment_size = 10 # Arbitrary. The kernel build time becomes prohibitive as the number of einsums increases
 
     #nranks = comm.Get_size()
     if len(trans_list_list) > 0: # Guard against empty list
@@ -221,7 +218,6 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
             # Could use initializer kwarg to set the queue
             pool = MPIPoolExecutor(max_workers=max(1, comm.Get_size() - 1))
 
-        #with MPICommExecutor(comm, root=0) as mypool:
         with pool as mypool:
             if mypool is not None:
                 #results = list(mypool.map(test, args, chunksize=1))
