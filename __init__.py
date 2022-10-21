@@ -22,7 +22,7 @@ from grudge_tags import IsDOFArray, ParameterValue
 
 #from bs4 import UnicodeDammit
 import hjson
-#import time
+import time
 #from math import ceil
 #import sys
 
@@ -692,8 +692,9 @@ def apply_transformation_list(knl, transformations):
     # bounds
     #print("KERNEL BEFORE TRANSFORMATION")
     #print(knl.default_entrypoint)
+    print("BEGINNING TRANSFORMATION")
+    start = time.time()    
     print(transformations)
-    #exit()
     for t in list(transformations):
         print(t)
         func = function_mapping[t[0]]
@@ -702,4 +703,6 @@ def apply_transformation_list(knl, transformations):
             args = args + list(t[1])
         kwargs = dict(t[2]) if len(t) > 2 else {}
         knl = func(*args, **kwargs)
+    end = time.time()
+    print("ENDING TRANSFORMATION:", end - start, "seconds")
     return knl

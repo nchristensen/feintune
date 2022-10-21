@@ -185,9 +185,18 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     hjson_file_str = f"{save_path}/{pid}.hjson"
     test_results_file =f"{save_path}/{pid}_tests.hjson"
 
+    print("Final result file:", hjson_file_str)
+    print("Test results file:", test_results_file)
+
     results_dict = load_hjson(test_results_file) if exists(test_results_file) else {}
 
+    #for tlist in trans_list_list:
+    #    print(get_test_id(tlist) in results_dict)
+    #print(results_dict.keys())
+    #exit()
+
     args = [(platform_id, knl, tlist, generic_test, max_flop_rate, device_latency, device_memory_bandwidth,) for tlist in trans_list_list if get_test_id(tlist) not in results_dict]
+    results = list(results_dict.items())
 
     ntransforms = len(args)
 
@@ -198,9 +207,7 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     args = [((ind + 1, ntransforms,), arg,) for ind, arg in enumerate(args)]
 
     sort_key = lambda entry: entry[1]["data"]["avg_time"]
-    result = {"transformations": {}, "data": {}}
     comm = MPI.COMM_WORLD
-    results = []
     segment_size = 10 # Arbitrary. The kernel build time becomes prohibitive as the number of einsums increases
 
     #nranks = comm.Get_size()
@@ -212,36 +219,38 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
         #exit()
         #"""
 
-        if True:#"Spectrum" in MPI.get_vendor()[0] or comm.Get_size() == 0:
-            pool = MPICommExecutor(comm, root=0)
-        else:
-            # Could use initializer kwarg to set the queue
-            pool = MPIPoolExecutor(max_workers=max(1, comm.Get_size() - 1))
+        #if True:#"Spectrum" in MPI.get_vendor()[0] or comm.Get_size() == 0:
+        #    pool = MPICommExecutor(comm, root=0)
+        #else:
+        #    # Could use initializer kwarg to set the queue
+        #    pool = MPIPoolExecutor(max_workers=max(1, comm.Get_size() - 1))
 
-        with pool as mypool:
-            if mypool is not None:
-                #results = list(mypool.map(test, args, chunksize=1))
+            start_ind = 0
+            end_ind = min(segment_size, len(args))
+            while start_ind < end_ind:
+                # Get new result segment
+                args_segment = args[start_ind:end_ind]
+                if True: #"Spectrum" in MPI.get_vendor()[0] or comm.Get_size() == 0:
+                    with MPICommExecutor(comm, root=0) as mypool:
+                        if mypool is not None:
+                            #results = list(mypool.map(test, args, chunksize=1))
+                            partial_results = list(mypool.map(test, args_segment, chunksize=1))
+                            results = results + partial_results
+                else:               
+                    with MPIPoolExecutor(max_workers=(1, comm.Get_size() - 1)): 
+                        partial_results = list(mypool.map(test, args_segment, chunksize=1))
+                        results = results + partial_results
 
-                start_ind = 0
-                end_ind = min(segment_size, len(args))
-                while start_ind < end_ind:
-                    # Get new result segment
-                    args_segment = args[start_ind:end_ind]
-                    partial_results = list(mypool.map(test, args_segment, chunksize=1))
-                
-                    # Add to existing results
-                    results = results + partial_results
-                    start_ind += segment_size
-                    end_ind = min(end_ind + segment_size, len(args))
+                # Add to existing results
+                start_ind += segment_size
+                end_ind = min(end_ind + segment_size, len(args))
 
-                    # Write the partial results to a file
-                    if comm.Get_rank() == 0:
-                       dump_hjson(test_results_file, dict(results)) 
+                # Write the partial results to a file
+                if comm.Get_rank() == 0:
+                   dump_hjson(test_results_file, dict(results)) 
 
-                results.sort(key=sort_key)
-                result = results[0][1]
-
-       
+    results.sort(key=sort_key)
+    result = results[0][1] if len(results) > 0 else {"transformations": {}, "data": {}}
     # Write the final result to a file 
     if comm.Get_rank() == 0:
         print(result)

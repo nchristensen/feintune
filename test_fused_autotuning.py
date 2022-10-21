@@ -735,12 +735,14 @@ def get_lazy_einsum_info(tunits, hjson_dir=None):
 
                 data = None
                 if hjson_dir is not None:
-                    filename = hjson_dir + f"/{pid}.hjson"
-                    if exists(filename):
-                        hjson_file = open(filename)
-                        hjson_text = hjson_file.read()
-                        hjson_file.close()
-                        od = hjson.loads(hjson_text)
+                    fn = hjson_dir + f"/{pid}.hjson"
+                    if exists(fn):
+                        print(fn)
+                        #hjson_file = open(fn)
+                        #hjson_text = hjson_file.read()
+                        #hjson_file.close()
+                        #od = hjson.loads(hjson_text)
+                        od = load_hjson(fn)
                         data = od["data"]["frac_roofline_flop_rate"]
                 print(pid, key, data)
 
@@ -856,7 +858,7 @@ def autotune_standalone_subkernels(tunits, save_path=None):
                             autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                     device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
-                        elif not indirection and red_axes > 0 and total_axes <= 4 and einsum_count <= 6:
+                        elif not indirection and red_axes > 0 and total_axes <= 4 and einsum_count <= 1:
                             autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                     device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
                             #exit()
@@ -973,7 +975,7 @@ def compare_weighted_avg_frac_rooflines(directory, pid_dict):
 
         data = []
         total_avg_exec_time = 0
-        for filename in overlapping_files:
+        for filename in files:
             split_filename = filename.split(".")
             pid = split_filename[0]
             f = os.path.join(d, filename)
