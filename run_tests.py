@@ -294,18 +294,15 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup=True):
                 elif isinstance(arg, lp.ArrayArg):
                     array = cl.array.Array(queue, arg.shape, arg.dtype, order="C", allocator=mem_pool)
                     #cl.clrandom.fill_rand(array, queue=queue)
-                    print("No tags recognized. Assuming default data layout")
-                    print(arg.name)
+                    print(arg.name, "No tags recognized. Assuming default data layout")
                     # Assume default layout
                     #array = cl.clrandom.rand(queue, arg.shape, dtype=arg.dtype)
 
                 if not arg.is_output:
                     if isinstance(array, cl.array.Array):
-                        #pass
                         cl.clrandom.fill_rand(array, queue=queue)
                     elif isinstance(array[0], cl.array.Array):
                         for entry in array:
-                            #pass
                             cl.clrandom.fill_rand(entry, queue=queue)
                     else:
                         raise TypeError
@@ -327,6 +324,7 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup=True):
         #"""
         sum_time = 0.0
         events = []
+        # Should the cache be polluted between runs?
         for i in range(nruns):
             evt, out = kern(queue, **arg_dict)
             events.append(evt)
@@ -340,7 +338,7 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup=True):
         #"""
     #sum_time = 1.0
     avg_time = sum_time / nruns
-    """
+    #"""
     for entry in arg_dict:
         if isinstance(entry, cl.array.Array):
             del entry
@@ -348,7 +346,7 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup=True):
             for item in entry:
                 del item
     del kern
-    """
+    #"""
     return arg_dict, avg_time
 
 

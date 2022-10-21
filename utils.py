@@ -1,3 +1,12 @@
+import hjson
+
+def load_hjson(filename):
+    hjson_file = open(filename, "rt")
+    hjson_text = hjson_file.read()
+    hjson_file.close()
+    od = hjson.loads(hjson_text)
+    return od
+
 def convert(o):
     from numpy import generic
     from frozendict import frozendict
@@ -6,6 +15,11 @@ def convert(o):
     elif isinstance(o, frozendict):
         return dict(o)
     raise TypeError
+
+def dump_hjson(filename, out_dict): 
+    out_file = open(filename, "wt")
+    hjson.dump(out_dict, out_file, default=convert)
+    out_file.close()
 
 def unique_program_id(tunit):
     from loopy.tools import LoopyKeyBuilder

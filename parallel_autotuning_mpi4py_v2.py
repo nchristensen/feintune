@@ -13,10 +13,12 @@ import os
 import loopy as lp
 from os.path import exists
 from run_tests import run_single_param_set_v2, generic_test
-from utils import convert
+from utils import convert, dump_hjson, load_hjson
 #from grudge.execution import diff_prg, elwise_linear
 import mpi4py.MPI as MPI
 from mpi4py.futures import MPIPoolExecutor, MPICommExecutor
+from hashlib import md5
+from random import shuffle
 #from mpipool import MPIPool
 
 #from guppy import hpy
@@ -26,7 +28,6 @@ import os
 import tracemalloc
 #from mem_top import mem_top
 #import matplotlib.pyplot as plt
-
 data_dict = {}
 
 def display_top(snapshot, key_type='lineno', limit=10):
@@ -84,6 +85,7 @@ def set_queue(pe_num, platform_num):
     platforms = cl.get_platforms()
     gpu_devices = platforms[platform_num].get_devices(device_type=cl.device_type.GPU)
     ctx = cl.Context(devices=[gpu_devices[pe_num % len(gpu_devices)]])
+
     queue = cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
 
 # Assume using platform zero
@@ -92,6 +94,9 @@ comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this i
 #queue = get_queue(comm.Get_rank(), 0)
 #from feinsum.empirical_roofline import get_theoretical_maximum_flop_rate
 #max_flop_rate = get_theoretical_maximum_flop_rate(queue, np.float64)
+
+def get_test_id(tlist):
+    return md5(str(tlist).encode()).hexdigest()
 
 def test(args):
     global queue
@@ -116,9 +121,9 @@ def test(args):
     #display_top(snapshot)
     #del knl
     #del args
-
+    test_id = get_test_id(tlist)
     #result = [10,10,10]
-    return result
+    return test_id, result
 
 def unpickle_kernel(fname):
     from pickle import load
@@ -164,22 +169,6 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     if save_path is None:
         save_path = "./hjson"
 
-    # Create queue, assume all GPUs on the machine are the same
-
-    #comm = MPI.COMM_WORLD
-    #platforms = cl.get_platforms()
-    #gpu_devices = platforms[platform_id].get_devices(device_type=cl.device_type.GPU)
-    #n_gpus = len(gpu_devices)
-    #ctx = cl.Context(devices=[gpu_devices[comm.Get_rank() % n_gpus]])
-    #profiling = cl.command_queue_properties.PROFILING_ENABLE
-    #queue = cl.CommandQueue(ctx, properties=profiling)    
-
-    #import pyopencl.tools as cl_tools
-    #actx = actx_class(
-    #    comm,
-    #    queue,
-    #    allocator=cl_tools.MemoryPool(cl_tools.ImmediateAllocator(queue)))
-
     #knl = gac.set_memory_layout(knl)
     if program_id is None:
         from utils import unique_program_id
@@ -191,47 +180,32 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     #knl = lp.set_options(knl, lp.Options(write_code=True))
     assert knl.default_entrypoint.options.no_numpy
     assert knl.default_entrypoint.options.return_dict
-    #os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
+
     os.makedirs(save_path, exist_ok=True)
     hjson_file_str = f"{save_path}/{pid}.hjson"
-
-    #assert comm.Get_size() > 1
-    #assert charm.numPes() > 1
-    #assert charm.numPes() - 1 <= charm.numHosts()*len(gpu_devices)
-    #assert charm.numPes() <= charm.numHosts()*(len(gpu_devices) + 1)
-    # Check that it can assign one PE to each GPU
-    # The first PE is used for scheduling
-    # Not certain how this will work with multiple nodes
-
-    #if trans_list_list is None:
-    #    tlist_generator = actx.get_generators(knl)
-    #    trans_list_list = tlist_generator(actx.queue, knl)
+    test_results_file =f"{save_path}/{pid}_tests.hjson"
 
     # Could make a massive list with all kernels and parameters
     ntransforms = len(trans_list_list)
-    args = reversed([((ind+1,ntransforms),(platform_id, knl, tlist, generic_test, max_flop_rate, device_latency, device_memory_bandwidth,),) for ind, tlist in enumerate(trans_list_list)])
 
-    #print(args)
-    #exit()
+    if exists(test_results_file):
+        results_dict = load_hjson(test_results_file)
+    else:
+        results_dict = {} 
 
+    args = list(reversed([((ind+1,ntransforms),(platform_id, knl, tlist, generic_test, max_flop_rate, device_latency, device_memory_bandwidth,),) for ind, tlist in enumerate(trans_list_list) if get_test_id(tlist) not in results_dict]))
+        
     # May help to balance workload
     # Should test if shuffling matters
     #from random import shuffle
-    #shuffle(args)
+    shuffle(args)
 
-
-    #a = Array(AutotuneTask, dims=(len(args)), args=args[0])
-    #a.get_queue()
-   
-    #result = charm.pool.map(do_work, args)
-
-    #pool_proxy = Chare(BalancedPoolScheduler, onPE=0) # Need to use own charm++ branch to make work
-
-    #pool_proxy = Chare(PoolScheduler, onPE=0)
-
-    sort_key = lambda entry: entry["data"]["avg_time"]
+    sort_key = lambda entry: entry[1]["data"]["avg_time"]
     result = {"transformations": {}, "data": {}}
     comm = MPI.COMM_WORLD
+    results = []
+    segment_size = 100 # Arbitrary
+
     #nranks = comm.Get_size()
     if len(trans_list_list) > 0: # Guard against empty list
         #executor = MPIPoolExecutor(max_workers=1)
@@ -240,28 +214,42 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
         #    print(entry)
         #exit()
         #"""
-        with MPICommExecutor(comm, root=0) as mypool:
-            if mypool is not None:
-                results = list(mypool.map(test, args, chunksize=1))
-                results.sort(key=sort_key)
-        
-                # Workaround for pocl CUDA bug
-                # whereby times are imprecise
-                # There is a fix in a pull request for this
-                ret_index = 0
-                for i, result in enumerate(results):
-                    if result["data"]["avg_time"] > 1e-7:
-                        ret_index = i
-                        break
 
-                result = results[ret_index]
-    
-    #od = {"transformations": transformations, "data": data}
+        if "Spectrum" in MPI.get_vendor()[0] or comm.Get_size() == 0:
+            pool = MPI.CommExecutor(comm, root=0)
+        else:
+            # Could use initializer kwarg to set the queue
+            pool = MPIPoolExecutor(max_workers=max(1, comm.Get_size() - 1))
+
+        #with MPICommExecutor(comm, root=0) as mypool:
+        with pool as mypool:
+            if mypool is not None:
+                #results = list(mypool.map(test, args, chunksize=1))
+
+                start_ind = 0
+                end_ind = min(segment_size, len(args))
+                while start_ind < end_ind:
+                    # Get new result segment
+                    args_segment = args[start_ind:end_ind]
+                    partial_results = list(mypool.map(test, args_segment, chunksize=1))
+                
+                    # Add to existing results
+                    results = results + partial_results
+                    start_ind += segment_size
+                    end_ind = min(end_ind + segment_size, len(args))
+
+                    # Write the partial results to a file
+                    if comm.Get_rank() == 0:
+                       dump_hjson(test_results_file, dict(results)) 
+
+                results.sort(key=sort_key)
+                result = results[0][1]
+
+       
+    # Write the final result to a file 
     if comm.Get_rank() == 0:
         print(result)
-        out_file = open(hjson_file_str, "wt+")
-        hjson.dump(result, out_file, default=convert)
-        out_file.close()
+        dump_hjson(hjson_file_str, result)
 
     return result
 
@@ -291,7 +279,6 @@ def main(args):
     args = [[param, knl] for param in params]
 
     # May help to balance workload
-    from random import shuffle
     shuffle(args)
     
     #a = Array(AutotuneTask, dims=(len(args)), args=args[0])
