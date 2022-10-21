@@ -230,14 +230,14 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
             while start_ind < end_ind:
                 # Get new result segment
                 args_segment = args[start_ind:end_ind]
-                if True: #"Spectrum" in MPI.get_vendor()[0] or comm.Get_size() == 0:
+                if False: #"Spectrum" in MPI.get_vendor()[0] or comm.Get_size() == 0:
                     with MPICommExecutor(comm, root=0) as mypool:
                         if mypool is not None:
                             #results = list(mypool.map(test, args, chunksize=1))
                             partial_results = list(mypool.map(test, args_segment, chunksize=1))
                             results = results + partial_results
                 else:               
-                    with MPIPoolExecutor(max_workers=(1, comm.Get_size() - 1)): 
+                    with MPIPoolExecutor(max_workers=max(1, comm.Get_size() - 1)) as mypool: 
                         partial_results = list(mypool.map(test, args_segment, chunksize=1))
                         results = results + partial_results
 
