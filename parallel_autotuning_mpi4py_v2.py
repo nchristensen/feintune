@@ -213,7 +213,7 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
         #"""
 
         if True:#"Spectrum" in MPI.get_vendor()[0] or comm.Get_size() == 0:
-            pool = MPI.CommExecutor(comm, root=0)
+            pool = MPICommExecutor(comm, root=0)
         else:
             # Could use initializer kwarg to set the queue
             pool = MPIPoolExecutor(max_workers=max(1, comm.Get_size() - 1))
