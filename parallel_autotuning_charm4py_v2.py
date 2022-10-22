@@ -14,7 +14,9 @@ import os
 import loopy as lp
 from os.path import exists
 from run_tests import run_single_param_set_v2, generic_test
-from utils import convert
+from utils import convert, load_hjson, dump_hjson
+from hashlib import md5
+from random import shuffle
 #from grudge.execution import diff_prg, elwise_linear
 
 # Makes one PE inactive on each host so the number of workers is the same on all hosts as
@@ -73,6 +75,9 @@ def do_work(args):
     return avg_time, params
 """
 
+def get_test_id(tlist):
+    return md5(str(tlist).encode()).hexdigest()
+
 def test(args):
     print(args)
     (cur_test, total_tests), (platform_id, knl, tlist, test_fn, max_flop_rate, device_latency, device_memory_bandwidth,) = args
@@ -100,8 +105,8 @@ def test(args):
     #del args
 
     #result = [10,10,10]
-    return result
-
+    test_id = get_test_id(tlist)
+    return test_id, result
 
 #def test(args):
 #    platform_id, knl, tlist, test_fn = args
@@ -195,34 +200,57 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     #os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
     os.makedirs(save_path, exist_ok=True)
     hjson_file_str = f"{save_path}/{pid}.hjson"
+    test_results_file =f"{save_path}/{pid}_tests.hjson"
 
-    # Could make a massive list with all kernels and parameters
-    ntransforms = len(trans_list_list)
-    args = [((ind+1,ntransforms),(platform_id, knl, tlist, generic_test, max_flop_rate, device_latency, device_memory_bandwidth,),) for ind, tlist in enumerate(trans_list_list)]
+    print("Final result file:", hjson_file_str)
+    print("Test results file:", test_results_file)
 
- 
+    results_dict = load_hjson(test_results_file) if exists(test_results_file) else {}
 
-    # May help to balance workload
-    # Should test if shuffling matters
-    #from random import shuffle
-    #shuffle(args)
+    args = [(platform_id, knl, tlist, generic_test, max_flop_rate, device_latency, device_memory_bandwidth,) for tlist in trans_list_list if get_test_id(tlist) not in results_dict]
+    results = list(results_dict.items())
 
+    ntransforms = len(args)
 
-    #a = Array(AutotuneTask, dims=(len(args)), args=args[0])
-    #a.get_queue()
-   
-    #result = charm.pool.map(do_work, args)
+    shuffle(args)
+    #args = list(reversed(args))
 
-    #pool_proxy = Chare(BalancedPoolScheduler, onPE=0) # Need to use own charm++ branch to make work
-    sort_key = lambda entry: entry["data"]["avg_time"]
-    result = {"transformations": {}, "data": {}}
-    #nranks = comm.Get_size()
+    # Number so the tasks can display how many tasks remain
+    args = [((ind + 1, ntransforms,), arg,) for ind, arg in enumerate(args)]
+
+    sort_key = lambda entry: entry[1]["data"]["avg_time"]
+    segment_size = 10 # Arbitrary. The kernel build time becomes prohibitive as the number of einsums increases
+
     # We should be able to unify the mpi4py and charm4py versions. The only 
     # difference is how the pool is created
     pool_proxy = Chare(PoolScheduler, onPE=0)
     mypool = Pool(pool_proxy)
 
     if len(trans_list_list) > 0: # Guard against empty list
+        start_ind = 0
+        end_ind = min(segment_size, len(args))
+        while start_ind < end_ind:
+            # Get new result segment
+            args_segment = args[start_ind:end_ind]
+            partial_results = list(mypool.map(test, args_segment, chunksize=1))
+            results = results + partial_results
+
+            # Add to existing results
+            start_ind += segment_size
+            end_ind = min(end_ind + segment_size, len(args))
+
+            # Write the partial results to a file
+            dump_hjson(test_results_file, dict(results)) 
+
+    results.sort(key=sort_key)
+    result = results[0][1] if len(results) > 0 else {"transformations": {}, "data": {}}
+    # Write the final result to a file 
+    print(result)
+    dump_hjson(hjson_file_str, result)
+
+    return result
+
+"""
         results = list(mypool.map(test, args, chunksize=1))
         results.sort(key=sort_key)
 
@@ -276,7 +304,7 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     #out_file.close()
 
     return transformations
-
+"""
 """
 def main(args):
 
