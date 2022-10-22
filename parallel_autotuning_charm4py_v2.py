@@ -80,7 +80,7 @@ def get_test_id(tlist):
 
 def test(args):
     print(args)
-    (cur_test, total_tests), (platform_id, knl, tlist, test_fn, max_flop_rate, device_latency, device_memory_bandwidth,) = args
+    (cur_test, total_tests), (test_id, platform_id, knl, tlist, test_fn, max_flop_rate, device_latency, device_memory_bandwidth,) = args
     #comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
     # From MPI.PoolExecutor the communicator for the tasks is not COMM_WORLD
     global queue
@@ -105,7 +105,7 @@ def test(args):
     #del args
 
     #result = [10,10,10]
-    test_id = get_test_id(tlist)
+    #test_id = get_test_id(tlist)
     return test_id, result
 
 #def test(args):
@@ -207,7 +207,12 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
 
     results_dict = load_hjson(test_results_file) if exists(test_results_file) else {}
 
-    args = [(platform_id, knl, tlist, generic_test, max_flop_rate, device_latency, device_memory_bandwidth,) for tlist in trans_list_list if get_test_id(tlist) not in results_dict]
+    for tlist in trans_list_list:
+        print(get_test_id(tlist) in results_dict)
+    print(results_dict.keys())
+    exit()
+
+    args = [(get_test_id(tlist), platform_id, knl, tlist, generic_test, max_flop_rate, device_latency, device_memory_bandwidth,) for tlist in trans_list_list if get_test_id(tlist) not in results_dict]
     results = list(results_dict.items())
 
     ntransforms = len(args)
