@@ -207,10 +207,10 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
 
     results_dict = load_hjson(test_results_file) if exists(test_results_file) else {}
 
-    for tlist in trans_list_list:
-        print(get_test_id(tlist) in results_dict)
-    print(results_dict.keys())
-    exit()
+    #for tlist in trans_list_list:
+    #    print(get_test_id(tlist) in results_dict)
+    #print(results_dict.keys())
+    #exit()
 
     args = [(get_test_id(tlist), platform_id, knl, tlist, generic_test, max_flop_rate, device_latency, device_memory_bandwidth,) for tlist in trans_list_list if get_test_id(tlist) not in results_dict]
     results = list(results_dict.items())
