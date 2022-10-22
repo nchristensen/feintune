@@ -827,12 +827,12 @@ def autotune_standalone_subkernels(tunits, save_path=None):
             # This changes the identifier so needs to be set beforehand
             assert sk.default_entrypoint.options.no_numpy
             assert sk.default_entrypoint.options.return_dict
+            pid = unique_program_id(sk)
+            #print(pid)
 
             if False: # Feinsum autotuning
                 feinsum_autotune(tunit, queue)
             else: # Eager-style autotuning
-                pid = unique_program_id(sk)
-                print(pid)
 
                 os.makedirs(save_path, exist_ok=True)
                 hjson_file = f"{save_path}/{pid}.hjson"
@@ -882,6 +882,7 @@ def autotune_standalone_subkernels(tunits, save_path=None):
                             #exit()
        #test_feinsum_transforms(tunits)
 
+
 def test_default_transforms(tunits, save_path=None):
 
     if save_path is None:
@@ -906,7 +907,11 @@ def test_default_transforms(tunits, save_path=None):
         print(f"TESTING TUNIT: {filename}")
         sks = get_subkernels(tunit, args)
         for sk, csk in sks:
-
+            # This changes the identifier so needs to be set beforehand
+            assert sk.default_entrypoint.options.no_numpy
+            assert sk.default_entrypoint.options.return_dict
+            pid = unique_program_id(sk)
+        
             einsum_counts = list(get_einsum_counts(sk).items())
             indirection = len(get_indirection_arrays(sk)) > 0
             if len(einsum_counts) > 0:
@@ -921,11 +926,6 @@ def test_default_transforms(tunits, save_path=None):
 
                 if not indirection and red_axes > 0:
 
-                    # This changes the identifier so needs to be set beforehand
-                    assert sk.default_entrypoint.options.no_numpy
-                    assert sk.default_entrypoint.options.return_dict
-
-                    pid = unique_program_id(sk)
                     transformed_sk = actx.transform_loopy_program(sk)
                     ret_dict = run_single_param_set_v2(queue, transformed_sk, [], generic_test,
                                 max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
@@ -937,7 +937,6 @@ def test_default_transforms(tunits, save_path=None):
                     out_file = open(hjson_file_str, "wt+")
                     hjson.dump(ret_dict, out_file, default=convert)
                     out_file.close()
-
 
 def test_feinsum_transforms(tunits):
 
@@ -1005,12 +1004,15 @@ def main(arg):
 
     tunits = get_pickled_tunits(directory)
     #print(len(tunits))
-    pid_dict = get_lazy_einsum_info(tunits, hjson_dir=save_path)
-    #test_default_transforms(tunits, save_path=directory + "/default_transforms_hjson")
+    #pid_dict = get_lazy_einsum_info(tunits, hjson_dir=save_path)
+    print("Default PID")
+    test_default_transforms(tunits, save_path=directory + "/default_transforms_hjson")
     #charm.exit()
+    print("Autotune PID")
     autotune_standalone_subkernels(tunits, save_path=save_path)
 
-    compare_weighted_avg_frac_rooflines(directory, pid_dict)
+
+    #compare_weighted_avg_frac_rooflines(directory, pid_dict)
     exit() 
 
 if __name__ == "__main__":
