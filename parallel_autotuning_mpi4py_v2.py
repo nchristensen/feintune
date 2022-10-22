@@ -190,8 +190,11 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
 
     results_dict = load_hjson(test_results_file) if exists(test_results_file) else {}
 
-    #for tlist in trans_list_list:
-    #    print(get_test_id(tlist) in results_dict)
+    count = 0
+    for tlist in trans_list_list:
+        if get_test_id(tlist) in results_dict:
+            count += 1
+    print("ALREADY TUNED:", count)
     #print(results_dict.keys())
     #exit()
 
@@ -230,7 +233,7 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
             while start_ind < end_ind:
                 # Get new result segment
                 args_segment = args[start_ind:end_ind]
-                if False: #"Spectrum" in MPI.get_vendor()[0] or comm.Get_size() == 0:
+                if True: #"Spectrum" in MPI.get_vendor()[0] or comm.Get_size() == 0:
                     with MPICommExecutor(comm, root=0) as mypool:
                         if mypool is not None:
                             #results = list(mypool.map(test, args, chunksize=1))
