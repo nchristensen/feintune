@@ -373,7 +373,8 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
         nbatches_dict[nbatches] = batch_size
     batch_size_list = sorted(nbatches_dict.values())
 
-    for batch_size in batch_size_list:#range(3,4):#range(1, neinsums + 1):
+    # Very small batches tend to not run
+    for batch_size in list(reversed(batch_size_list)):#range(3,4):#range(1, neinsums + 1):
 
         if n_elem*n_out <= 1024:
             choices = (batch_size, n_elem, n_elem, n_out, n_out, n_in)
@@ -467,6 +468,8 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
             if nf is not None:
                 trans_list.append(("tag_inames", (((f"{f}", "unr",),),),))
 
+            #"""
+            # The more einsums the slower the prefetching becomes
             for arg in read_dof_arrays:
                 # Should only prefetch if there are no indirection arrays
                 strides = [dim_tag.stride for dim_tag in arg_dict[arg].dim_tags if isinstance(dim_tag, lp.kernel.array.FixedStrideArrayDimTag)]
@@ -485,6 +488,7 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
 
                 trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
                     (("temporary_name", f"{arg}f",), ("default_tag","l.auto",),),))
+            #"""
 
             trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag","for",),),))
 

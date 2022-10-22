@@ -627,6 +627,7 @@ def batch_einsums(tunit, batch_size, **kwargs):
         for i in range(0, nbatches): # Should we keep the first batch in the original set of loops
             # Can the we not duplicate the inames with global tags?
             knl = lp.duplicate_inames(knl, orig_nonglobal_inames, f"id:batch_{i}_*")
+            #knl = lp.duplicate_inames(knl, orig_inames, f"id:batch_{i}_*")
         # Transfer the tags to the new kernel
         iname_dict = knl.inames
         new_iname_dict = knl.inames.copy()
