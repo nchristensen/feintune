@@ -80,7 +80,7 @@ def get_test_id(tlist):
 
 def test(args):
     print(args)
-    (cur_test, total_tests), (test_id, platform_id, knl, tlist, test_fn, max_flop_rate, device_latency, device_memory_bandwidth,) = args
+    timeout, ((cur_test, total_tests), (test_id, platform_id, knl, tlist, test_fn, max_flop_rate, device_latency, device_memory_bandwidth,),) = args
     #comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
     # From MPI.PoolExecutor the communicator for the tasks is not COMM_WORLD
     global queue
@@ -95,7 +95,8 @@ def test(args):
     result = run_single_param_set_v2(queue, knl, tlist, test_fn,
             max_flop_rate=max_flop_rate, 
             device_memory_bandwidth=device_memory_bandwidth,
-            device_latency=device_latency)
+            device_latency=device_latency,
+            timeout=timeout)
     #print(mem_top())
     #h = hpy()
     #print(h.heap())
@@ -148,7 +149,7 @@ def autotune_pickled_kernels(path, platform_id, actx_class, comm):
             else:
                 print("hjson file exists, skipping")
 
-def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None, save_path=None):
+def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None, save_path=None, timeout=30):
 
     if save_path is None:
         save_path = "./hjson"
@@ -224,7 +225,7 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     args = [((ind + 1, ntransforms,), arg,) for ind, arg in enumerate(args)]
 
     sort_key = lambda entry: entry[1]["data"]["avg_time"]
-    segment_size = 10 # Arbitrary. The kernel build time becomes prohibitive as the number of einsums increases
+    segment_size = 5*(charm.numPes() - 1) # Arbitrary.
 
     # We should be able to unify the mpi4py and charm4py versions. The only 
     # difference is how the pool is created
@@ -237,8 +238,17 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
         while start_ind < end_ind:
             # Get new result segment
             args_segment = args[start_ind:end_ind]
-            partial_results = list(mypool.map(test, args_segment, chunksize=1))
+            args_segment_with_timeout = [(timeout, args,) for args in args_segment]
+            partial_results = list(mypool.map(test, args_segment_with_timeout, chunksize=1))
             results = results + partial_results
+            #print(results)
+            #exit()
+ 
+            results.sort(key=sort_key)
+            
+            #timeout = min(timeout, 10*results[0][1]["data"]["wall_clock_time"])
+
+            timeout = 3*results[0][1]["data"]["wall_clock_time"]
 
             # Add to existing results
             start_ind += segment_size

@@ -8,7 +8,7 @@ from os.path import exists
 from utils import unique_program_id, convert, load_hjson, dump_hjson
 import hjson
 
-use_charm=True
+use_charm=False
 if use_charm:
     from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
     from charm4py.pool import PoolScheduler, Pool
@@ -998,10 +998,11 @@ def compare_weighted_avg_frac_rooflines(directory, pid_dict):
 def main(arg):
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directories = [ "./pickled_programs_prediction_order_1"]#,
+    directories = [ "./pickled_programs_prediction_order_1",
                     #"./pickled_programs_prediction_order_2",
                     #"./pickled_programs_prediction_order_3",
-                    #"./pickled_programs_prediction_order_4"]
+                    #"./pickled_programs_prediction_order_4"
+                  ]
 
     for directory in directories:
         save_path = directory + "/hjson"

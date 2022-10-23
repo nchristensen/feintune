@@ -101,7 +101,7 @@ def get_test_id(tlist):
 def test(args):
     global queue
     print(args)
-    (cur_test, total_tests), (test_id, platform_id, knl, tlist, test_fn, max_flop_rate, device_latency, device_memory_bandwidth,) = args
+    timeout, ((cur_test, total_tests,), (test_id, platform_id, knl, tlist, test_fn, max_flop_rate, device_latency, device_memory_bandwidth,),) = args
     #comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
     # From MPI.PoolExecutor the communicator for the tasks is not COMM_WORLD
     if queue is None:
@@ -113,7 +113,8 @@ def test(args):
     result = run_single_param_set_v2(queue, knl, tlist, test_fn,
             max_flop_rate=max_flop_rate, 
             device_memory_bandwidth=device_memory_bandwidth,
-            device_latency=device_latency)
+            device_latency=device_latency,
+            timeout=timeout)
     #print(mem_top())
     #h = hpy()
     #print(h.heap())
@@ -164,7 +165,7 @@ def autotune_pickled_kernels(path, platform_id, actx_class, comm):
             #del knl
 
 
-def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None, save_path=None):
+def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None, save_path=None, timeout=30):
 
     if save_path is None:
         save_path = "./hjson"
@@ -211,7 +212,7 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
 
     sort_key = lambda entry: entry[1]["data"]["avg_time"]
     comm = MPI.COMM_WORLD
-    segment_size = 10 # Arbitrary. The kernel build time becomes prohibitive as the number of einsums increases
+    segment_size = 5*max(1, (comm.Get_size() - 1)) # Arbitrary. The kernel build time becomes prohibitive as the number of einsums increases
 
     #nranks = comm.Get_size()
     if len(trans_list_list) > 0: # Guard against empty list
@@ -233,16 +234,34 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
             while start_ind < end_ind:
                 # Get new result segment
                 args_segment = args[start_ind:end_ind]
+                args_segment_with_timeout = [(timeout, arg,) for arg in args_segment]
                 if True: #"Spectrum" in MPI.get_vendor()[0] or comm.Get_size() == 0:
                     with MPICommExecutor(comm, root=0) as mypool:
                         if mypool is not None:
                             #results = list(mypool.map(test, args, chunksize=1))
-                            partial_results = list(mypool.map(test, args_segment, chunksize=1))
+                            partial_results = list(mypool.map(test, args_segment_with_timeout, chunksize=1))
                             results = results + partial_results
+                            """
+                            results.sort(key=sort_key)
+                            # Should probably surround in try-except
+                            timeout = 3*results[0][1]["data"]["wall_clock_time"]
+
+                            # Add to existing results
+                            start_ind += segment_size
+                            end_ind = min(end_ind + segment_size, len(args))
+
+                            # Write the partial results to a file
+                            if comm.Get_rank() == 0:
+                               dump_hjson(test_results_file, dict(results)) 
+                            """
                 else:               
                     with MPIPoolExecutor(max_workers=max(1, comm.Get_size() - 1)) as mypool: 
-                        partial_results = list(mypool.map(test, args_segment, chunksize=1))
+                        partial_results = list(mypool.map(test, args_segment_with_timeout, chunksize=1))
                         results = results + partial_results
+
+                results.sort(key=sort_key)
+                # Should probably surround in try-except
+                timeout = 3*results[0][1]["data"]["wall_clock_time"]
 
                 # Add to existing results
                 start_ind += segment_size

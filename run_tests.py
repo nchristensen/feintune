@@ -8,6 +8,12 @@ import loopy as lp
 from loopy.version import LOOPY_USE_LANGUAGE_VERSION_2018_2
 from pyopencl.tools import ImmediateAllocator, MemoryPool
 from frozendict import frozendict
+from pebble import concurrent, ProcessExpired
+from pebble.concurrent.process import _process_wrapper
+from concurrent.futures import TimeoutError
+import multiprocessing as mp
+
+max_double = np.finfo('d').max
 #from loopy.kernel.data import AddressSpace
 
 """
@@ -229,6 +235,8 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup=True):
         f.close()
         """
 
+        print("STARTING ALLOCATION")
+        start = time.time()
         allocator = ImmediateAllocator(queue)
         mem_pool = MemoryPool(allocator)
 
@@ -315,7 +323,10 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup=True):
                    
             #arg_dict[arg.name] = cache_arg_dict[str(arg)]
             arg_dict[arg.name] = array
+            end = time.time()
+        print("ENDING ALLOCATION", end - start, "seconds" )
         print("STARTING EXECUTION")
+        start = time.time()
         if warmup:
             for i in range(2):
                 kern(queue, **arg_dict)
@@ -333,12 +344,13 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup=True):
         for evt in events:
             sum_time += evt.profile.end - evt.profile.start
         sum_time = sum_time / 1e9
-        print("FINISHING EXECUTION")
+        end= time.time()
+        print("FINISHING EXECUTION", end - start, "seconds")
         #queue.finish()
         #"""
     #sum_time = 1.0
     avg_time = sum_time / nruns
-    #"""
+    """
     for entry in arg_dict:
         if isinstance(entry, cl.array.Array):
             del entry
@@ -346,7 +358,7 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup=True):
             for item in entry:
                 del item
     del kern
-    #"""
+    """
     return arg_dict, avg_time
 
 
@@ -637,7 +649,75 @@ def run_single_param_set(queue, knl_base, tlist_generator, params, test_fn, max_
     retval = {"transformations": trans_list, "data": data}
     return retval
 
-def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=None, device_memory_bandwidth=None, device_latency=None):
+
+def get_queue_from_bus_id(bus_id):
+    for platform in cl.get_platforms():
+        for d in platform.get_devices():
+            if "NVIDIA" in d.vendor:
+                d_bus_id = d.pci_bus_id_nv
+            elif "Advanced Micro Devices" in d.vendor:
+                d_bus_id = d.topology_amd.bus
+            else:
+                d_bus_id = None
+
+            if d_bus_id == bus_id:
+                ctx = cl.Context(devices=[d])
+                my_queue = cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
+                return my_queue
+
+    raise ValueError(f"No device with bus_id {bus_id} found")
+
+
+def get_bus_id_from_queue(queue):
+    d = queue.device
+    if "NVIDIA" in d.vendor:
+        d_bus_id = d.pci_bus_id_nv
+    elif "Advanced Micro Devices" in d.vendor:
+        d_bus_id = d.topology_amd.bus
+    else:
+        raise RuntimeError("Can't query bus id")
+    return d_bus_id
+
+
+# Cuda initialization fails if try to fork rather than spawn
+mp_context = mp.get_context('spawn')
+
+# Need to change the timeout so can't use this decorate (and can't decorating
+# a function while using 'spawn' is not support inside another function)
+#@concurrent.process(context=mp.get_context('spawn'), timeout=autotune_timeout)
+def test_fn_wrapper(bus_id, knl, test_fn):
+    queue = get_queue_from_bus_id(bus_id)
+    dev_arrays, avg_time = test_fn(queue,knl)
+    return avg_time
+
+def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=5):
+
+     
+    wrapped_fn = _process_wrapper(test_fn_wrapper, timeout, None, None, mp_context) 
+    bus_id = get_bus_id_from_queue(queue)
+    start = time.time()
+    future = wrapped_fn(bus_id, knl, test_fn)
+
+    #future = test_fn_wrapper(bus_id, knl, test_fn)
+
+    try:
+        result = future.result()
+    except TimeoutError as error:
+        print("Test function timed out. Time limit %f seconds. Returning null result" % float(error.args[1]))
+        result = max_double
+    except ProcessExpired as error:
+        print("%s. Exit code: %d" % (error, error.exitcode))
+        result = max_double
+    except Exception as error:    
+        print("Test function raised %s" % error)
+        print(error.traceback)  # traceback of the function
+
+    end = time.time()
+    wall_clock_time = end - start if result != max_double else max_double
+
+    return result, wall_clock_time
+
+def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=None, device_memory_bandwidth=None, device_latency=None, timeout=5):
     #trans_list = tlist_generator(params, knl=knl_base)
     print(trans_list)
     print("MAX_FLOP_RATE", max_flop_rate)
@@ -662,10 +742,24 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     print(f"KERNEL USING {local_memory_used} out of {local_memory_avail} bytes of local memory") 
 
     # Could also look at the amount of cache space used and forbid running those that spill 
+
+     
     if local_memory_used <= queue.device.local_mem_size: # Don't allow complete filling of local memory
-        dev_arrays, avg_time = test_fn(queue, knl)
+
+        # Maybe not needed anymore?
+        #knl_flops = get_knl_flops(knl)
+        #if device_latency is not None and device_memory_bandwidth is not None and max_flop_rate is not None:
+        #    roofline_flop_rate = get_knl_device_memory_roofline(knl, max_flop_rate,
+        #            device_latency, device_memory_bandwidth)
+        #    roofline_execution_time = knl_flops/roofline_flop_rate
+        #    timeout = max(timeout, 1000*roofline_execution_time)
+
+        print("Executing test with timeout of", timeout, "seconds") 
+        avg_time, wall_clock_time = run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=timeout) 
+        #avg_time = test_fn(queue, knl)
     else:
-        dev_arrays, avg_time = {}, np.inf # Don't run and return return an infinite run time
+        print("Invalid kernel: too much local memory used")
+        avg_time, wall_clock_time = max_double, max_double # Don't run and return return an infinite run time
 
     flop_rate_dict = analyze_flop_rate(knl, avg_time, max_flop_rate=max_flop_rate, latency=None)
     bw_dict = analyze_knl_bandwidth(knl, avg_time, device_memory_latency=device_latency)
@@ -673,7 +767,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     bw = bw_dict["observed_bandwidth"]
     flop_rate = flop_rate_dict["observed_flop_rate"]
 
-    data = {"avg_time": avg_time}
+    data = {"avg_time": avg_time, "wall_clock_time": wall_clock_time}
     data.update(bw_dict.items())
     data.update(flop_rate_dict.items())
 
