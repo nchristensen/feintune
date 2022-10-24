@@ -203,8 +203,9 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     #knl = gac.set_memory_layout(knl)
     #os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
     os.makedirs(save_path, exist_ok=True)
+    os.makedirs(save_path + "/test_data", exist_ok=True)
     hjson_file_str = f"{save_path}/{pid}.hjson"
-    test_results_file =f"{save_path}/{pid}_tests.hjson"
+    test_results_file =f"{save_path}/test_data/{pid}_tests.hjson"
 
     print("Final result file:", hjson_file_str)
     print("Test results file:", test_results_file)
@@ -228,7 +229,9 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     args = [((ind + 1, ntransforms,), arg,) for ind, arg in enumerate(args)]
 
     sort_key = lambda entry: entry[1]["data"]["avg_time"]
-    segment_size = 5*(charm.numPes() - 1) # Arbitrary.
+
+    test_per_process = 5
+    segment_size = test_per_process*(charm.numPes() - 1) # Arbitrary.
 
     # We should be able to unify the mpi4py and charm4py versions. The only 
     # difference is how the pool is created
@@ -242,7 +245,7 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
             # Get new result segment
             args_segment = args[start_ind:end_ind]
             args_segment_with_timeout = [(timeout, args,) for args in args_segment]
-            partial_results = list(mypool.map(test, args_segment_with_timeout, chunksize=1))
+            partial_results = list(mypool.map(test, args_segment_with_timeout, chunksize=test_per_process))
             results = results + partial_results
             results.sort(key=sort_key)
             

@@ -185,8 +185,10 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     assert knl.default_entrypoint.options.return_dict
 
     os.makedirs(save_path, exist_ok=True)
+    os.makedirs(save_path + "/test_data", exist_ok=True)
     hjson_file_str = f"{save_path}/{pid}.hjson"
-    test_results_file =f"{save_path}/{pid}_tests.hjson"
+    test_results_file =f"{save_path}/test_data/{pid}_tests.hjson"
+
 
     print("Final result file:", hjson_file_str)
     print("Test results file:", test_results_file)
@@ -214,7 +216,8 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
 
     sort_key = lambda entry: entry[1]["data"]["avg_time"]
     comm = MPI.COMM_WORLD
-    segment_size = 5*max(1, (comm.Get_size() - 1)) # Arbitrary. The kernel build time becomes prohibitive as the number of einsums increases
+    test_per_process = 5
+    segment_size = test_per_process*max(1, (comm.Get_size() - 1)) # Arbitrary. The kernel build time becomes prohibitive as the number of einsums increases
 
     #nranks = comm.Get_size()
     if len(trans_list_list) > 0: # Guard against empty list
@@ -241,21 +244,8 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
                     with MPICommExecutor(comm, root=0) as mypool:
                         if mypool is not None:
                             #results = list(mypool.map(test, args, chunksize=1))
-                            partial_results = list(mypool.map(test, args_segment_with_timeout, chunksize=1))
+                            partial_results = list(mypool.map(test, args_segment_with_timeout, chunksize=test_per_process))
                             results = results + partial_results
-                            """
-                            results.sort(key=sort_key)
-                            # Should probably surround in try-except
-                            timeout = 3*results[0][1]["data"]["wall_clock_time"]
-
-                            # Add to existing results
-                            start_ind += segment_size
-                            end_ind = min(end_ind + segment_size, len(args))
-
-                            # Write the partial results to a file
-                            if comm.Get_rank() == 0:
-                               dump_hjson(test_results_file, dict(results)) 
-                            """
                 else:               
                     with MPIPoolExecutor(max_workers=max(1, comm.Get_size() - 1)) as mypool: 
                         partial_results = list(mypool.map(test, args_segment_with_timeout, chunksize=1))
@@ -272,6 +262,9 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
                    # Should probably surround in try-except
                    timeout = min(initial_timeout, 3*results[0][1]["data"]["wall_clock_time"])
 
+                # Broadcast the updated timeout: problem - for fast kernels the wall-clock
+                # time is much larger than the execution time, and the process can be
+                # slow for reasons unrelated to the kernel execution
                 timeout = comm.bcast(timeout)
 
 
