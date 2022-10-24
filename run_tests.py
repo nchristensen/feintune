@@ -13,7 +13,7 @@ from pebble.concurrent.process import _process_wrapper
 from concurrent.futures import TimeoutError
 import multiprocessing as mp
 
-max_double = np.finfo('d').max
+max_double = np.inf#np.finfo('d').max
 #from loopy.kernel.data import AddressSpace
 
 """
