@@ -167,6 +167,8 @@ def autotune_pickled_kernels(path, platform_id, actx_class, comm):
 
 def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None, save_path=None, timeout=30):
 
+    initial_timeout = timeout
+
     if save_path is None:
         save_path = "./hjson"
 
@@ -259,17 +261,19 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
                         partial_results = list(mypool.map(test, args_segment_with_timeout, chunksize=1))
                         results = results + partial_results
 
-                results.sort(key=sort_key)
-                # Should probably surround in try-except
-                timeout = 3*results[0][1]["data"]["wall_clock_time"]
-
                 # Add to existing results
                 start_ind += segment_size
                 end_ind = min(end_ind + segment_size, len(args))
 
                 # Write the partial results to a file
                 if comm.Get_rank() == 0:
+                   results.sort(key=sort_key)
                    dump_hjson(test_results_file, dict(results)) 
+                   # Should probably surround in try-except
+                   timeout = min(initial_timeout, 3*results[0][1]["data"]["wall_clock_time"])
+
+                timeout = comm.bcast(timeout)
+
 
     results.sort(key=sort_key)
     result = results[0][1] if len(results) > 0 else {"transformations": {}, "data": {}}
