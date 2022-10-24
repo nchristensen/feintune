@@ -690,7 +690,7 @@ def test_fn_wrapper(bus_id, knl, test_fn):
     dev_arrays, avg_time = test_fn(queue,knl)
     return avg_time
 
-def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=5):
+def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=30):
 
      
     wrapped_fn = _process_wrapper(test_fn_wrapper, timeout, None, None, mp_context) 
@@ -717,7 +717,7 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=5):
 
     return result, wall_clock_time
 
-def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=None, device_memory_bandwidth=None, device_latency=None, timeout=5):
+def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=None, device_memory_bandwidth=None, device_latency=None, timeout=30):
     #trans_list = tlist_generator(params, knl=knl_base)
     print(trans_list)
     print("MAX_FLOP_RATE", max_flop_rate)
@@ -754,9 +754,10 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
         #    roofline_execution_time = knl_flops/roofline_flop_rate
         #    timeout = max(timeout, 1000*roofline_execution_time)
 
-        print("Executing test with timeout of", timeout, "seconds") 
-        avg_time, wall_clock_time = run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=timeout) 
-        #avg_time = test_fn(queue, knl)
+        #print("Executing test with timeout of", timeout, "seconds") 
+        #avg_time, wall_clock_time = run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=timeout) 
+        _, avg_time = test_fn(queue, knl)
+        wall_clock_time = timeout
     else:
         print("Invalid kernel: too much local memory used")
         avg_time, wall_clock_time = max_double, max_double # Don't run and return return an infinite run time
