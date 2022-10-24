@@ -8,9 +8,11 @@ def load_hjson(filename):
     return od
 
 def convert(o):
-    from numpy import generic
+    from numpy import generic, inf, finfo, float32
     from frozendict import frozendict
-    if isinstance(o, generic): 
+    if o == inf:
+        return finfo(float32).max
+    elif isinstance(o, generic): 
         return o.item()
     elif isinstance(o, frozendict):
         return dict(o)
