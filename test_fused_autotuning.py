@@ -879,7 +879,7 @@ def autotune_standalone_subkernels(tunits, save_path=None):
        #test_feinsum_transforms(tunits)
 
 
-def test_default_transforms(tunits, save_path=None):
+def test_default_transforms(sk_list, save_path=None):
 
     if save_path is None:
         save_path = "default_transforms_hjson"
@@ -899,40 +899,34 @@ def test_default_transforms(tunits, save_path=None):
 
     device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
 
-    for filename, tunit, args in tunits:
-        print(f"TESTING TUNIT: {filename}")
-        sks = get_subkernels(tunit, args)
-        for sk, csk in sks:
-            # This changes the identifier so needs to be set beforehand
-            assert sk.default_entrypoint.options.no_numpy
-            assert sk.default_entrypoint.options.return_dict
-            pid = unique_program_id(sk)
-        
-            einsum_counts = list(get_einsum_counts(sk).items())
-            indirection = len(get_indirection_arrays(sk)) > 0
-            if len(einsum_counts) > 0:
-                if len(einsum_counts) > 1:
-                    raise ValueError("Subkernel has multiple einsum types")
+    for pid, sk, csk in sk_list:
+        print(f"Testing subkernel: {pid}")
 
-                einsum_type, einsum_count = einsum_counts[0]
-                non_red_axes = len(einsum_type[0])
-                red_axes = len(einsum_type[1])
-                total_axes = non_red_axes + red_axes
-                out_axes = total_axes - red_axes
+        einsum_counts = list(get_einsum_counts(sk).items())
+        indirection = len(get_indirection_arrays(sk)) > 0
+        if len(einsum_counts) > 0:
+            if len(einsum_counts) > 1:
+                raise ValueError("Subkernel has multiple einsum types")
 
-                if not indirection and red_axes > 0:
+            einsum_type, einsum_count = einsum_counts[0]
+            non_red_axes = len(einsum_type[0])
+            red_axes = len(einsum_type[1])
+            total_axes = non_red_axes + red_axes
+            out_axes = total_axes - red_axes
 
-                    transformed_sk = actx.transform_loopy_program(sk)
-                    ret_dict = run_single_param_set_v2(queue, transformed_sk, [], generic_test,
-                                max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
-                                device_latency=device_latency)
-                       
-                    print(ret_dict["data"])
-                    # Should this functionality be a utility function
-                    hjson_file_str = save_path + f"/{pid}.hjson"
-                    out_file = open(hjson_file_str, "wt+")
-                    hjson.dump(ret_dict, out_file, default=convert)
-                    out_file.close()
+            if not indirection and red_axes > 0:
+
+                transformed_sk = actx.transform_loopy_program(sk)
+                ret_dict = run_single_param_set_v2(queue, transformed_sk, [], generic_test,
+                            max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
+                            device_latency=device_latency)
+                   
+                print(ret_dict["data"])
+                # Should this functionality be a utility function
+                hjson_file_str = save_path + f"/{pid}.hjson"
+                out_file = open(hjson_file_str, "wt+")
+                hjson.dump(ret_dict, out_file, default=convert)
+                out_file.close()
 
 def test_feinsum_transforms(tunits):
 
@@ -966,6 +960,8 @@ def compare_weighted_avg_frac_rooflines(directory, pid_dict):
     tuned_data = []
     untuned_data = []
 
+    print(len(overlapping_files))
+
     def get_data(files, d, pid_dict):
 
         data = []
@@ -976,14 +972,14 @@ def compare_weighted_avg_frac_rooflines(directory, pid_dict):
             f = os.path.join(d, filename)
             dct = load_hjson(f)
             data.append((pid, dct["data"],))
-            total_avg_exec_time += pid_dict[pid]*(dct["data"]["avg_time"] - dct["data"]["device_memory_latency"])
-            #total_avg_exec_time += dct["data"]["avg_time"] - dct["data"]["device_memory_latency"]
+            #total_avg_exec_time += pid_dict[pid]*(dct["data"]["avg_time"] - dct["data"]["device_memory_latency"])
+            total_avg_exec_time += dct["data"]["avg_time"] - dct["data"]["device_memory_latency"]
 
         weighted_avg_roofline = 0
         for pid, entry in data:
-            weighted_avg_roofline += pid_dict[pid]*entry["frac_roofline_flop_rate"]*(entry["avg_time"] - entry["device_memory_latency"])/total_avg_exec_time
+            #weighted_avg_roofline += pid_dict[pid]*entry["frac_roofline_flop_rate"]*(entry["avg_time"] - entry["device_memory_latency"])/total_avg_exec_time
 
-            #weighted_avg_roofline += entry["frac_roofline_flop_rate"]*(entry["avg_time"] - entry["device_memory_latency"])/total_avg_exec_time
+            weighted_avg_roofline += entry["frac_roofline_flop_rate"]*(entry["avg_time"] - entry["device_memory_latency"])/total_avg_exec_time
 
         return weighted_avg_roofline
 
@@ -993,7 +989,23 @@ def compare_weighted_avg_frac_rooflines(directory, pid_dict):
     print(len(overlapping_files), len(untuned_files), untuned_frac_roofline, tuned_frac_roofline)
 
 
- 
+def collect_subkernels(tunits):
+
+    out_list = []
+    for filename, tunit, args in tunits:
+        print(f"OBTAINING SUBKERNELS FROM: {filename}")
+        sks = get_subkernels(tunit, args)
+
+        for sk, csk in sks:
+            # This changes the identifier so needs to be set beforehand
+            assert sk.default_entrypoint.options.no_numpy
+            assert sk.default_entrypoint.options.return_dict
+            pid = unique_program_id(sk)
+            out_list.append((pid, sk, csk,))
+
+    return out_list
+
+
 
 def main(arg):
     #dump_subkernels_from_pickled(None)
@@ -1006,12 +1018,15 @@ def main(arg):
 
     for directory in directories:
         save_path = directory + "/hjson"
-
         tunits = get_pickled_tunits(directory)
-        test_default_transforms(tunits, save_path=directory + "/default_transforms_hjson")
-        pid_dict = get_lazy_einsum_info(tunits, hjson_dir=save_path)
-        autotune_standalone_subkernels(tunits, save_path=save_path)
-        compare_weighted_avg_frac_rooflines(directory, pid_dict)
+        sk_list = collect_subkernels(tunits)
+
+        test_default_transforms(sk_list, save_path=directory + "/default_transforms_hjson")
+
+        #autotune_standalone_subkernels(tunits, save_path=save_path)
+
+        #pid_dict = get_lazy_einsum_info(tunits, hjson_dir=save_path)
+        #compare_weighted_avg_frac_rooflines(directory, pid_dict)
 
     exit() 
 
