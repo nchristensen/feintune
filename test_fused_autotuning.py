@@ -709,12 +709,6 @@ def get_lazy_einsum_info(tunits, hjson_dir=None):
         for sk, csk in sks:
 
             pid = unique_program_id(sk)
-            # Count occurances of this pid
-            if pid in pid_dict:
-                pid_dict[pid] += 1
-            else:
-                pid_dict[pid] = 1
-
 
             #einsum_types = list(get_einsum_types(sk))
             einsum_counts = list(get_einsum_counts(sk).items())
@@ -752,8 +746,6 @@ def get_lazy_einsum_info(tunits, hjson_dir=None):
     for key, val in subkernel_counts.items():
         print(key, val)
 
-    return pid_dict
-
 def get_device_roofline_data(queue):
     import feinsum.empirical_roofline as er
     results_list = er.loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
@@ -765,7 +757,7 @@ def get_device_roofline_data(queue):
 
     return device_latency, device_memory_bandwidth, clpeak_flop_rate
 
-def autotune_standalone_subkernels(tunits, save_path=None):
+def autotune_standalone_subkernels(sk_list, save_path=None):
     platforms = cl.get_platforms()
     cl_ctx = cl.Context(
         dev_type=cl.device_type.GPU,
@@ -816,67 +808,59 @@ def autotune_standalone_subkernels(tunits, save_path=None):
         device_latency = None
         clpeak_flop_rate = None
 
-    for filename, tunit, args in tunits:
-        print(f"TESTING TUNIT: {filename}")
-        sks = get_subkernels(tunit, args)
-        for sk, csk in sks:
-            # This changes the identifier so needs to be set beforehand
-            assert sk.default_entrypoint.options.no_numpy
-            assert sk.default_entrypoint.options.return_dict
-            pid = unique_program_id(sk)
-            #print(pid)
+    for pid, sk, csk in sk_list:
 
-            if False: # Feinsum autotuning
-                feinsum_autotune(tunit, queue)
-            else: # Eager-style autotuning
+        if False: # Feinsum autotuning
+            feinsum_autotune(tunit, queue)
+        else: # Eager-style autotuning
 
-                os.makedirs(save_path, exist_ok=True)
-                hjson_file = f"{save_path}/{pid}.hjson"
-                if exists(hjson_file):
-                    print(f"A TUNE PROFILE ALREADY EXISTS: {hjson_file}")
-                else:
-                    print(f"A TUNE PROFILE EXISTS NOT: {hjson_file}")
-                    einsum_counts = list(get_einsum_counts(sk).items())
-                    indirection = len(get_indirection_arrays(sk)) > 0
-                    if len(einsum_counts) > 0:
+            os.makedirs(save_path, exist_ok=True)
+            hjson_file = f"{save_path}/{pid}.hjson"
+            if exists(hjson_file):
+                print(f"A TUNE PROFILE ALREADY EXISTS: {hjson_file}")
+            else:
+                print(f"A TUNE PROFILE EXISTS NOT: {hjson_file}")
+                einsum_counts = list(get_einsum_counts(sk).items())
+                indirection = len(get_indirection_arrays(sk)) > 0
+                if len(einsum_counts) > 0:
 
-                        if len(einsum_counts) > 1:
-                            raise ValueError("Subkernel has multiple einsum types")
+                    if len(einsum_counts) > 1:
+                        raise ValueError("Subkernel has multiple einsum types")
 
-                        einsum_type, einsum_count = einsum_counts[0]
-                        non_red_axes = len(einsum_type[0])
-                        red_axes = len(einsum_type[1])
-                        total_axes = non_red_axes + red_axes
-                        out_axes = total_axes - red_axes
-                        
-                        print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
-                        if False:#not indirection and out_axes == 3 and total_axes == 5 and einsum_count > 0:
-                            autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
-                                    device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
+                    einsum_type, einsum_count = einsum_counts[0]
+                    non_red_axes = len(einsum_type[0])
+                    red_axes = len(einsum_type[1])
+                    total_axes = non_red_axes + red_axes
+                    out_axes = total_axes - red_axes
+                    
+                    print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
+                    if False:#not indirection and out_axes == 3 and total_axes == 5 and einsum_count > 0:
+                        autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
+                                device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
-                        elif not indirection and red_axes > 0 and total_axes <= 4 and einsum_count <= 3:
-                            autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
-                                    device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
-                            #exit()
-                            #print(add_batch_id(sk, 2))
-                            #batch_einsums(sk, 2)
+                    elif not indirection and red_axes > 0 and total_axes <= 4 and einsum_count <= 3:
+                        autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
+                                device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
+                        #exit()
+                        #print(add_batch_id(sk, 2))
+                        #batch_einsums(sk, 2)
 
-                            #print(sk)
-                            #try:
-                            #    feinsum_autotune(tunit, queue)
-                            #except:
-                            #    print(f"FAILURE: {pid} failed to with feinsum")
-                        #elif not indirection and out_axes == 2 and total_axes == 4
-                        elif False:#out_axes == 3 and total_axes == 5 and einsum_count > 0:
-                            print(sk)
-                            #feinsum_autotune(sk, queue)
-                            #try:
-                            #    feinsum_autotune(tunit, queue)
-                            #except:
-                            #    print(f"FAILURE: {pid} failed with feinsum")
-                                #print(lp.kernel.tools.show_dependency_graph(lp.preprocess_kernel(sk).default_entrypoint, sk.callables_table))
-                            #exit()
-       #test_feinsum_transforms(tunits)
+                        #print(sk)
+                        #try:
+                        #    feinsum_autotune(tunit, queue)
+                        #except:
+                        #    print(f"FAILURE: {pid} failed to with feinsum")
+                    #elif not indirection and out_axes == 2 and total_axes == 4
+                    elif False:#out_axes == 3 and total_axes == 5 and einsum_count > 0:
+                        print(sk)
+                        #feinsum_autotune(sk, queue)
+                        #try:
+                        #    feinsum_autotune(tunit, queue)
+                        #except:
+                        #    print(f"FAILURE: {pid} failed with feinsum")
+                            #print(lp.kernel.tools.show_dependency_graph(lp.preprocess_kernel(sk).default_entrypoint, sk.callables_table))
+                        #exit()
+   #test_feinsum_transforms(tunits)
 
 
 def test_default_transforms(sk_list, save_path=None):
@@ -993,6 +977,7 @@ def compare_weighted_avg_frac_rooflines(directory, pid_dict):
 def collect_subkernels(tunits):
 
     out_list = []
+    pid_counts = {}
     for filename, tunit, args in tunits:
         print(f"OBTAINING SUBKERNELS FROM: {filename}")
         sks = get_subkernels(tunit, args)
@@ -1003,8 +988,13 @@ def collect_subkernels(tunits):
             assert sk.default_entrypoint.options.return_dict
             pid = unique_program_id(sk)
             out_list.append((pid, sk, csk,))
+            if pid in pid_counts:
+                pid_counts[pid] += 1
+            else:
+                pid_counts[pid] = 1
+   
 
-    return out_list
+    return out_list, pid_counts
 
 
 
@@ -1020,14 +1010,15 @@ def main(arg):
     for directory in directories:
         save_path = directory + "/hjson"
         tunits = get_pickled_tunits(directory)
-        sk_list = collect_subkernels(tunits)
+        sk_list, pid_dict = collect_subkernels(tunits)
 
-        test_default_transforms(sk_list, save_path=directory + "/default_transforms_hjson")
+        #get_lazy_einsum_info(tunits, hjson_dir=save_path)
 
-        #autotune_standalone_subkernels(tunits, save_path=save_path)
+        #test_default_transforms(sk_list, save_path=directory + "/default_transforms_hjson")
 
-        #pid_dict = get_lazy_einsum_info(tunits, hjson_dir=save_path)
-        #compare_weighted_avg_frac_rooflines(directory, pid_dict)
+        #autotune_standalone_subkernels(sk_list, save_path=save_path)
+
+        compare_weighted_avg_frac_rooflines(directory, pid_dict)
 
     exit() 
 
