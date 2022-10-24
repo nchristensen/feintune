@@ -854,7 +854,7 @@ def autotune_standalone_subkernels(tunits, save_path=None):
                             autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                     device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
-                        elif not indirection and red_axes > 0 and total_axes <= 4 and einsum_count <= 4:
+                        elif not indirection and red_axes > 0 and total_axes <= 4 and einsum_count <= 3:
                             autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                     device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
                             #exit()
@@ -974,19 +974,21 @@ def compare_weighted_avg_frac_rooflines(directory, pid_dict):
             split_filename = filename.split(".")
             pid = split_filename[0]
             f = os.path.join(d, filename)
+            #print(f)
             dct = load_hjson(f)
             data.append((pid, dct["data"],))
-            total_avg_exec_time += pid_dict[pid]*(dct["data"]["avg_time"] - dct["data"]["device_memory_latency"])
-            #total_avg_exec_time += dct["data"]["avg_time"] - dct["data"]["device_memory_latency"]
+            #total_avg_exec_time += pid_dict[pid]*(dct["data"]["avg_time"] - dct["data"]["device_memory_latency"])
+            total_avg_exec_time += dct["data"]["avg_time"] - dct["data"]["device_memory_latency"]
 
         weighted_avg_roofline = 0
         for pid, entry in data:
-            weighted_avg_roofline += pid_dict[pid]*entry["frac_roofline_flop_rate"]*(entry["avg_time"] - entry["device_memory_latency"])/total_avg_exec_time
-
-            #weighted_avg_roofline += entry["frac_roofline_flop_rate"]*(entry["avg_time"] - entry["device_memory_latency"])/total_avg_exec_time
+            #weighted_avg_roofline += pid_dict[pid]*entry["frac_roofline_flop_rate"]*(entry["avg_time"] - entry["device_memory_latency"])/total_avg_exec_time
+            print(entry['frac_roofline_flop_rate'])
+            weighted_avg_roofline += entry["frac_roofline_flop_rate"]*(entry["avg_time"] - entry["device_memory_latency"])/total_avg_exec_time
 
         return weighted_avg_roofline
 
+    print(overlapping_files)
     tuned_frac_roofline = get_data(overlapping_files, tuned_dir, pid_dict)
     untuned_frac_roofline = get_data(overlapping_files, untuned_dir, pid_dict)
     
@@ -1006,11 +1008,13 @@ def main(arg):
 
     for directory in directories:
         save_path = directory + "/hjson"
-
         tunits = get_pickled_tunits(directory)
+
+        #autotune_standalone_subkernels(tunits, save_path=save_path)
+
         test_default_transforms(tunits, save_path=directory + "/default_transforms_hjson")
+
         pid_dict = get_lazy_einsum_info(tunits, hjson_dir=save_path)
-        autotune_standalone_subkernels(tunits, save_path=save_path)
         compare_weighted_avg_frac_rooflines(directory, pid_dict)
 
     exit() 
