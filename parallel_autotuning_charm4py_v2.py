@@ -156,6 +156,16 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     if save_path is None:
         save_path = "./hjson"
 
+    assert charm.numPes() > 1
+    assert knl.default_entrypoint.options.no_numpy
+    assert knl.default_entrypoint.options.return_dict
+
+    if program_id is None:
+        from utils import unique_program_id
+        pid = unique_program_id(knl)
+    else:
+        pid = program_id
+
     # Create queue, assume all GPUs on the machine are the same
     #platforms = cl.get_platforms()
     #gpu_devices = platforms[platform_id].get_devices(device_type=cl.device_type.GPU)
@@ -179,10 +189,6 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     hjson_file_str = f"hjson/{knl.default_entrypoint.name}_{pid}.hjson"
     """
 
-    assert charm.numPes() > 1
-    assert knl.default_entrypoint.options.no_numpy
-    assert knl.default_entrypoint.options.return_dict
-
     #assert charm.numPes() - 1 <= charm.numHosts()*len(gpu_devices)
     #assert charm.numPes() <= charm.numHosts()*(len(gpu_devices) + 1)
     # Check that it can assign one PE to each GPU
@@ -193,11 +199,6 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     
     #tlist_generator, pspace_generator = actx.get_generators(knl)
     #params_list = pspace_generator(actx.queue, knl)
-    if program_id is None:
-        from utils import unique_program_id
-        pid = unique_program_id(knl)
-    else:
-        pid = program_id
     #knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
     #knl = gac.set_memory_layout(knl)
     #os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
