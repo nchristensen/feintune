@@ -379,14 +379,14 @@ def get_knl_device_memory_bytes(knl):
     return nbytes
 
 # avg_time in seconds
-def analyze_knl_bandwidth(knl, avg_time, device_memory_latency=None):
+def analyze_knl_bandwidth(knl, avg_time, device_latency=None):
     # This bandwidth calculation assumes data in global memory need only be accessed once
     # from global memory and is otherwise served from a cache or local memory that is
     # fast enough to be considered free
-    if device_memory_latency is None:
-        device_memory_latency = 0
+    if device_latency is None:
+        device_latency = 0
     nbytes = get_knl_device_memory_bytes(knl)
-    bw = nbytes / (avg_time - device_memory_latency)
+    bw = nbytes / (avg_time - device_latency)
 
     # Seems lp.gather_access_footprint_bytes breaks
     #footprint = lp.gather_access_footprint_bytes(knl)
@@ -400,7 +400,7 @@ def analyze_knl_bandwidth(knl, avg_time, device_memory_latency=None):
     print(f"Time: {avg_time}, Bytes: {nbytes}, Bandwidth: {Gbps} GB/s")
     return frozendict({"observed_bandwidth": bw,
                         "nbytes_global": nbytes,
-                        "device_memory_latency": device_memory_latency})
+                        "device_latency": device_latency})
 
 
 def get_knl_flops(knl):
@@ -767,7 +767,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     print("DEVICE MEMORY BANDWIDTH", device_memory_bandwidth)
 
     flop_rate_dict = analyze_flop_rate(knl, avg_time, max_flop_rate=max_flop_rate, latency=None)
-    bw_dict = analyze_knl_bandwidth(knl, avg_time, device_memory_latency=device_latency)
+    bw_dict = analyze_knl_bandwidth(knl, avg_time, device_latency=device_latency)
 
     bw = bw_dict["observed_bandwidth"]
     flop_rate = flop_rate_dict["observed_flop_rate"]

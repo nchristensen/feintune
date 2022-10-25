@@ -749,7 +749,7 @@ def get_lazy_einsum_info(tunits, hjson_dir=None):
 def get_device_roofline_data(queue):
     import feinsum.empirical_roofline as er
     results_list = er.loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
-    device_latency = er.get_min_device_memory_latency(results_list)
+    device_latency = er.get_min_device_latency(results_list)
     loopy_bw = er.get_latency_adjusted_max_device_memory_bandwidth(results_list)
     clpeak_bw = er.get_max_bandwidth_clpeak(queue=queue)
     clpeak_flop_rate = er.get_max_flop_rate_clpeak(np.float64, queue=queue)    
@@ -778,7 +778,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                 device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
                 #import feinsum.empirical_roofline as er
                 #results_list = er.loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
-                #device_latency = er.get_min_device_memory_latency(results_list)
+                #device_latency = er.get_min_device_latency(results_list)
                 #loopy_bw = er.get_latency_adjusted_max_device_memory_bandwidth(results_list)
                 #clpeak_bw = er.get_max_bandwidth_clpeak(queue=queue)
                 #clpeak_flop_rate = er.get_max_flop_rate_clpeak(np.float64, queue=queue)    
@@ -798,7 +798,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
             device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
             #import feinsum.empirical_roofline as er
             #results_list = er.loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
-            #device_latency = er.get_min_device_memory_latency(results_list)
+            #device_latency = er.get_min_device_latency(results_list)
             #loopy_bw = er.get_latency_adjusted_max_device_memory_bandwidth(results_list)
             #clpeak_bw = er.get_max_bandwidth_clpeak(queue=queue)
             #clpeak_flop_rate = er.get_max_flop_rate_clpeak(np.float64, queue=queue)    
@@ -957,13 +957,13 @@ def compare_weighted_avg_frac_rooflines(directory, pid_dict):
             #print(f)
             dct = load_hjson(f)
             data.append((pid, dct["data"],))
-            #total_avg_exec_time += pid_dict[pid]*(dct["data"]["avg_time"] - dct["data"]["device_memory_latency"])
-            total_avg_exec_time += dct["data"]["avg_time"] - dct["data"]["device_memory_latency"]
+            #total_avg_exec_time += pid_dict[pid]*(dct["data"]["avg_time"] - dct["data"]["device_latency"])
+            total_avg_exec_time += dct["data"]["avg_time"] - dct["data"]["device_latency"]
 
         weighted_avg_roofline = 0
         for pid, entry in data:
-            #weighted_avg_roofline += pid_dict[pid]*entry["frac_roofline_flop_rate"]*(entry["avg_time"] - entry["device_memory_latency"])/total_avg_exec_time
-            weighted_avg_roofline += entry["frac_roofline_flop_rate"]*(entry["avg_time"] - entry["device_memory_latency"])/total_avg_exec_time
+            #weighted_avg_roofline += pid_dict[pid]*entry["frac_roofline_flop_rate"]*(entry["avg_time"] - entry["device_latency"])/total_avg_exec_time
+            weighted_avg_roofline += entry["frac_roofline_flop_rate"]*(entry["avg_time"] - entry["device_latency"])/total_avg_exec_time
 
         return weighted_avg_roofline
 
