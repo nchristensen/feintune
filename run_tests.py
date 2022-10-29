@@ -12,6 +12,7 @@ from pebble import concurrent, ProcessExpired
 from pebble.concurrent.process import _process_wrapper
 from concurrent.futures import TimeoutError
 import multiprocessing as mp
+import base64
 
 max_double = np.inf#np.finfo('d').max
 #from loopy.kernel.data import AddressSpace
@@ -690,6 +691,34 @@ def test_fn_wrapper(bus_id, knl, test_fn):
     dev_arrays, avg_time = test_fn(queue,knl)
     return avg_time
 
+
+def run_subprocess_with_timout(queue, knl, test_fn, timeout=30):
+    from pickle import dumps
+    from subprocess import run, TimeoutExpired, CalledProcessError
+    pickled_knl = base64.b64encode(dumps(knl)).decode('ASCII')
+    pickled_test_fn = base64.b64encode(dumps(test_fn)).decode('ASCII')
+    bus_id = get_bus_id_from_queue(queue)
+    try:
+        start = time.time()
+        completed = run(["python", "run_tests.py", str(bus_id), pickled_knl, pickled_test_fn],
+                        capture_output=True, check=True, timeout=timeout, text=True) 
+        end = time.time()
+        output = completed.stdout
+        return float(output.split()[-1]), end - start 
+    except TimeoutExpired as e:
+        return np.inf, np.inf
+    #except CalledProcessError as e:
+
+
+def unpickle_and_run_test(bus_id, pickled_knl, pickled_test_fn):
+    from pickle import loads
+    knl = loads(base64.b64decode(pickled_knl.encode('ASCII')))
+    test_fn = loads(base64.b64decode(pickled_test_fn.encode('ASCII')))
+    queue = get_queue_from_bus_id(int(bus_id))
+    dev_arrays, avg_time = test_fn(queue, knl)
+    print("Average execution time:", avg_time)
+
+
 def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=30):
 
      
@@ -754,6 +783,8 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             # statistics
             #print("Executing test with timeout of", timeout, "seconds") 
             avg_time, wall_clock_time = run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=timeout) 
+        elif True:
+            avg_time, wall_clock_time = run_subprocess_with_timout(queue, knl, test_fn, timeout=30)
         else:
             _, avg_time = test_fn(queue, knl)
             wall_clock_time = timeout
@@ -1343,6 +1374,12 @@ def get_transformation_id(device_id):
     return od[device_id]
 
 if __name__ == "__main__": 
+
+    import sys
+    
+    unpickle_and_run_test(*sys.argv[1:])
+
+    """
     from __init__ import gen_diff_knl, load_transformations_from_file, apply_transformation_list
     from grudge.execution import diff_prg, elwise_linear_prg, face_mass_prg
 
@@ -1360,7 +1397,8 @@ if __name__ == "__main__":
     fp_format_dict = {np.float32: (4, "FP32"), np.float64: (8, "FP64"),
                         np.complex128: (16, "C128")}
     fp_bytes, fp_string = (8, "FP64") if fp_format == np.float64 else (4, "FP32")
-
+    """
+    
     """
     to_test = True
     if to_test:
@@ -1498,7 +1536,7 @@ if __name__ == "__main__":
 
     #"""
     # Test autotuner
-    knl = diff_prg(3, 1000000, 3, np.float64)
+    #knl = diff_prg(3, 1000000, 3, np.float64)
     #print(knl)
     #print(knl.default_entrypoint.domains)
     #print(knl.default_entrypoint.instructions)
@@ -1508,7 +1546,7 @@ if __name__ == "__main__":
     #dofs = 84
     #knl = elwise_linear_prg(1000000, 3*dofs, np.float64, nnodes_in=dofs)
     #start_param = (24, 4, 126, 9, 28)#(96, 32, 60, 2, 5)
-    start_param = None
+    #start_param = None
     ## Figure out the actual dimensions
     #knl = face_mass_prg(178746, 4, 20, 20, np.float64)
 
@@ -1520,8 +1558,8 @@ if __name__ == "__main__":
     # Titan V
     #result = exhaustive_search(queue, knl, generic_test, time_limit=np.inf, max_gflops=6144, device_memory_bandwidth=580, gflops_cutoff=0.95, bandwidth_cutoff=1.0, start_param=start_param)
     #print(result)
-    pspace_generator = gen_autotune_list
-    tlist_generator = mxm_trans_list_generator 
-    result = exhaustive_search_v2(queue, knl, generic_test, pspace_generator, tlist_generator, time_limit=np.inf, gflops_cutoff=0.95, bandwidth_cutoff=1.0, start_param=start_param)
+    #pspace_generator = gen_autotune_list
+    #tlist_generator = mxm_trans_list_generator 
+    #result = exhaustive_search_v2(queue, knl, generic_test, pspace_generator, tlist_generator, time_limit=np.inf, gflops_cutoff=0.95, bandwidth_cutoff=1.0, start_param=start_param)
  
     #result = exhaustive_search_v2(queue, knl, generic_test, pspace_generator, tlist_generator, time_limit=np.inf, max_gflops=6144, device_memory_bandwidth=580, gflops_cutoff=0.95, bandwidth_cutoff=1.0, start_param=start_param)

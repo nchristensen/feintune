@@ -1016,9 +1016,9 @@ def main(arg):
 
         #test_default_transforms(sk_list, save_path=directory + "/default_transforms_hjson")
 
-        #autotune_standalone_subkernels(sk_list, save_path=save_path)
+        autotune_standalone_subkernels(sk_list, save_path=save_path)
 
-        compare_weighted_avg_frac_rooflines(directory, pid_dict)
+        #compare_weighted_avg_frac_rooflines(directory, pid_dict)
 
     exit() 
 
