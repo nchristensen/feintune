@@ -194,13 +194,45 @@ def test_face_mass_merged(kern, backend="OPENCL", nruns=10, warmup=True):
 
     return (B_dev, A_dev, X_dev), avg_time
 
+
+def measure_execution_time(queue, tunit, arg_dict, nruns, warmup_runs):
+    for i in range(warmup_runs):
+        kern(queue, **arg_dict)
+    #queue.finish()
+
+    sum_time = 0.0
+    events = []
+    # Should the cache be polluted between runs?
+    for i in range(nruns):
+        evt, out = kern(queue, **arg_dict)
+        events.append(evt)
+
+    cl.wait_for_events(events)
+    for evt in events:
+        sum_time += evt.profile.end - evt.profile.start
+
+    avg_time = sum_time / 1e9 / nruns
+    return avg_time
+   
+
+
+# Strips out instructions and executes kernel to see how long the
+# argument setting, etc, requires. This assumes there is only
+# one kernel or function in the generated code
+def measure_execution_latency(queue, tunit, nruns=10, warmup=True):
+    
+    code = lp.generate_code_v2(tunit).device_code()
+    null_kernel_code = device_code.split("{")[0] + "{}"
+    
+
+
 # Maybe the queue could also be a cuda stream? Could use the type of that to
 # distinguish between CUDA and OpenCL possibly
 # This hardcodes the memory layout, should probably instead retrieve it from somewhere on a per
 # tag basis
 
 #cache_arg_dict = {}
-def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup=True):
+def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup_runs=2):
 
     kern = lp.set_options(kern, "no_numpy")
     kern = lp.set_options(kern, "return_dict")
@@ -327,12 +359,13 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup=True):
         print("ENDING ALLOCATION", end - start, "seconds" )
         print("STARTING EXECUTION")
         start = time.time()
+        avg_time = measure_execution_time(queue, kern, arg_dict, nruns, warmup_runs) 
+        """
         if warmup:
             for i in range(2):
                 kern(queue, **arg_dict)
-            queue.finish()
+            #queue.finish()
 
-        #"""
         sum_time = 0.0
         events = []
         # Should the cache be polluted between runs?
@@ -344,21 +377,14 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup=True):
         for evt in events:
             sum_time += evt.profile.end - evt.profile.start
         sum_time = sum_time / 1e9
+        avg_time = sum_time / nruns
+        """
         end= time.time()
         print("FINISHING EXECUTION", end - start, "seconds")
+
         #queue.finish()
-        #"""
     #sum_time = 1.0
-    avg_time = sum_time / nruns
-    """
-    for entry in arg_dict:
-        if isinstance(entry, cl.array.Array):
-            del entry
-        else:
-            for item in entry:
-                del item
-    del kern
-    """
+
     return arg_dict, avg_time
 
 
@@ -690,7 +716,7 @@ def test_fn_wrapper(bus_id, knl, test_fn):
     dev_arrays, avg_time = test_fn(queue,knl)
     return avg_time
 
-def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=5):
+def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=30):
 
      
     wrapped_fn = _process_wrapper(test_fn_wrapper, timeout, None, None, mp_context) 
@@ -717,7 +743,7 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=5):
 
     return result, wall_clock_time
 
-def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=None, device_memory_bandwidth=None, device_latency=None, timeout=5):
+def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=None, device_memory_bandwidth=None, device_latency=None, timeout=30):
     #trans_list = tlist_generator(params, knl=knl_base)
     print(trans_list)
     print("MAX_FLOP_RATE", max_flop_rate)
