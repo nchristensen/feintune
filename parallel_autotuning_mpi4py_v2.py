@@ -244,7 +244,7 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
                     with MPICommExecutor(comm, root=0) as mypool:
                         if mypool is not None:
                             #results = list(mypool.map(test, args, chunksize=1))
-                            partial_results = list(mypool.map(test, args_segment_with_timeout, chunksize=test_per_process))
+                            partial_results = list(mypool.map(test, args_segment_with_timeout, chunksize=1))
                             results = results + partial_results
                 else:               
                     with MPIPoolExecutor(max_workers=max(1, comm.Get_size() - 1)) as mypool: 

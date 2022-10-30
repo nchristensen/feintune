@@ -8,7 +8,7 @@ from os.path import exists
 from utils import unique_program_id, convert, load_hjson, dump_hjson
 import hjson
 
-use_charm=False
+use_charm=True
 if use_charm:
     from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
     from charm4py.pool import PoolScheduler, Pool
@@ -957,13 +957,13 @@ def compare_weighted_avg_frac_rooflines(directory, pid_dict):
             #print(f)
             dct = load_hjson(f)
             data.append((pid, dct["data"],))
-            #total_avg_exec_time += pid_dict[pid]*(dct["data"]["avg_time"] - dct["data"]["device_memory_latency"])
-            total_avg_exec_time += dct["data"]["avg_time"] - dct["data"]["device_memory_latency"]
+            total_avg_exec_time += pid_dict[pid]*(dct["data"]["avg_time"] - dct["data"]["device_memory_latency"])
+            #total_avg_exec_time += dct["data"]["avg_time"] - dct["data"]["device_memory_latency"]
 
         weighted_avg_roofline = 0
         for pid, entry in data:
-            #weighted_avg_roofline += pid_dict[pid]*entry["frac_roofline_flop_rate"]*(entry["avg_time"] - entry["device_memory_latency"])/total_avg_exec_time
-            weighted_avg_roofline += entry["frac_roofline_flop_rate"]*(entry["avg_time"] - entry["device_memory_latency"])/total_avg_exec_time
+            weighted_avg_roofline += pid_dict[pid]*entry["frac_roofline_flop_rate"]*(entry["avg_time"] - entry["device_memory_latency"])/total_avg_exec_time
+            #weighted_avg_roofline += entry["frac_roofline_flop_rate"]*(entry["avg_time"] - entry["device_memory_latency"])/total_avg_exec_time
 
         return weighted_avg_roofline
 
@@ -999,26 +999,28 @@ def collect_subkernels(tunits):
 
 
 def main(arg):
+
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directories = [ "./pickled_programs_prediction_order_1",
+    directories = [ #"./pickled_programs_prediction_order_1",
                     #"./pickled_programs_prediction_order_2",
                     #"./pickled_programs_prediction_order_3",
-                    #"./pickled_programs_prediction_order_4"
+                    "./pickled_programs_prediction_order_4"
                   ]
 
     for directory in directories:
         save_path = directory + "/hjson"
         tunits = get_pickled_tunits(directory)
+        # ID changes based on whether python was run with -O
         sk_list, pid_dict = collect_subkernels(tunits)
 
         #get_lazy_einsum_info(tunits, hjson_dir=save_path)
 
         #test_default_transforms(sk_list, save_path=directory + "/default_transforms_hjson")
 
-        #autotune_standalone_subkernels(sk_list, save_path=save_path)
+        autotune_standalone_subkernels(sk_list, save_path=save_path)
 
-        compare_weighted_avg_frac_rooflines(directory, pid_dict)
+        #compare_weighted_avg_frac_rooflines(directory, pid_dict)
 
     exit() 
 

@@ -245,7 +245,7 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
             # Get new result segment
             args_segment = args[start_ind:end_ind]
             args_segment_with_timeout = [(timeout, args,) for args in args_segment]
-            partial_results = list(mypool.map(test, args_segment_with_timeout, chunksize=test_per_process))
+            partial_results = list(mypool.map(test, args_segment_with_timeout, chunksize=1))
             results = results + partial_results
             results.sort(key=sort_key)
             
