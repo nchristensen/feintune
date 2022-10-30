@@ -151,8 +151,20 @@ def autotune_pickled_kernels(path, platform_id, actx_class, comm):
 
 def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None, save_path=None, timeout=30):
 
+    initial_timeout = timeout
+
     if save_path is None:
         save_path = "./hjson"
+
+    assert charm.numPes() > 1
+    assert knl.default_entrypoint.options.no_numpy
+    assert knl.default_entrypoint.options.return_dict
+
+    if program_id is None:
+        from utils import unique_program_id
+        pid = unique_program_id(knl)
+    else:
+        pid = program_id
 
     # Create queue, assume all GPUs on the machine are the same
     #platforms = cl.get_platforms()
@@ -177,10 +189,6 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     hjson_file_str = f"hjson/{knl.default_entrypoint.name}_{pid}.hjson"
     """
 
-    assert charm.numPes() > 1
-    assert knl.default_entrypoint.options.no_numpy
-    assert knl.default_entrypoint.options.return_dict
-
     #assert charm.numPes() - 1 <= charm.numHosts()*len(gpu_devices)
     #assert charm.numPes() <= charm.numHosts()*(len(gpu_devices) + 1)
     # Check that it can assign one PE to each GPU
@@ -191,17 +199,13 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     
     #tlist_generator, pspace_generator = actx.get_generators(knl)
     #params_list = pspace_generator(actx.queue, knl)
-    if program_id is None:
-        from utils import unique_program_id
-        pid = unique_program_id(knl)
-    else:
-        pid = program_id
     #knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
     #knl = gac.set_memory_layout(knl)
     #os.makedirs(os.getcwd() + "/hjson", exist_ok=True)
     os.makedirs(save_path, exist_ok=True)
+    os.makedirs(save_path + "/test_data", exist_ok=True)
     hjson_file_str = f"{save_path}/{pid}.hjson"
-    test_results_file =f"{save_path}/{pid}_tests.hjson"
+    test_results_file =f"{save_path}/test_data/{pid}_tests.hjson"
 
     print("Final result file:", hjson_file_str)
     print("Test results file:", test_results_file)
@@ -225,7 +229,9 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     args = [((ind + 1, ntransforms,), arg,) for ind, arg in enumerate(args)]
 
     sort_key = lambda entry: entry[1]["data"]["avg_time"]
-    segment_size = 5*(charm.numPes() - 1) # Arbitrary.
+
+    test_per_process = 5
+    segment_size = test_per_process*(charm.numPes() - 1) # Arbitrary.
 
     # We should be able to unify the mpi4py and charm4py versions. The only 
     # difference is how the pool is created
@@ -241,14 +247,11 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
             args_segment_with_timeout = [(timeout, args,) for args in args_segment]
             partial_results = list(mypool.map(test, args_segment_with_timeout, chunksize=1))
             results = results + partial_results
-            #print(results)
-            #exit()
- 
             results.sort(key=sort_key)
             
             #timeout = min(timeout, 10*results[0][1]["data"]["wall_clock_time"])
 
-            timeout = 3*results[0][1]["data"]["wall_clock_time"]
+            timeout = min(initial_timeout, 3*results[0][1]["data"]["wall_clock_time"])
 
             # Add to existing results
             start_ind += segment_size

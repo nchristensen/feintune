@@ -12,8 +12,9 @@ from pebble import concurrent, ProcessExpired
 from pebble.concurrent.process import _process_wrapper
 from concurrent.futures import TimeoutError
 import multiprocessing as mp
+import base64
 
-max_double = np.finfo('d').max
+max_double = np.inf#np.finfo('d').max
 #from loopy.kernel.data import AddressSpace
 
 """
@@ -405,14 +406,14 @@ def get_knl_device_memory_bytes(knl):
     return nbytes
 
 # avg_time in seconds
-def analyze_knl_bandwidth(knl, avg_time, device_memory_latency=None):
+def analyze_knl_bandwidth(knl, avg_time, device_latency=None):
     # This bandwidth calculation assumes data in global memory need only be accessed once
     # from global memory and is otherwise served from a cache or local memory that is
     # fast enough to be considered free
-    if device_memory_latency is None:
-        device_memory_latency = 0
+    if device_latency is None:
+        device_latency = 0
     nbytes = get_knl_device_memory_bytes(knl)
-    bw = nbytes / (avg_time - device_memory_latency)
+    bw = nbytes / (avg_time - device_latency)
 
     # Seems lp.gather_access_footprint_bytes breaks
     #footprint = lp.gather_access_footprint_bytes(knl)
@@ -426,7 +427,7 @@ def analyze_knl_bandwidth(knl, avg_time, device_memory_latency=None):
     print(f"Time: {avg_time}, Bytes: {nbytes}, Bandwidth: {Gbps} GB/s")
     return frozendict({"observed_bandwidth": bw,
                         "nbytes_global": nbytes,
-                        "device_memory_latency": device_memory_latency})
+                        "device_latency": device_latency})
 
 
 def get_knl_flops(knl):
@@ -716,6 +717,38 @@ def test_fn_wrapper(bus_id, knl, test_fn):
     dev_arrays, avg_time = test_fn(queue,knl)
     return avg_time
 
+
+def run_subprocess_with_timout(queue, knl, test_fn, timeout=30):
+    from pickle import dumps
+    from subprocess import run, TimeoutExpired, CalledProcessError
+    pickled_knl = base64.b85encode(dumps(knl)).decode('ASCII')
+    pickled_test_fn = base64.b85encode(dumps(test_fn)).decode('ASCII')
+    bus_id = get_bus_id_from_queue(queue)
+    try:
+        start = time.time()
+        completed = run(["python", "run_tests.py", str(bus_id), pickled_knl, pickled_test_fn],
+                        capture_output=True, check=True, timeout=timeout, text=True) 
+        end = time.time()
+        output = completed.stdout
+        return float(output.split()[-1]), end - start 
+    except TimeoutExpired as e:
+        print("Subprocess timed out")
+        return max_double, max_double
+    except CalledProcessError as e:
+        print("Subprocess failed with the following output:")
+        print(e)
+        return max_double, max_double
+
+
+def unpickle_and_run_test(bus_id, pickled_knl, pickled_test_fn):
+    from pickle import loads
+    knl = loads(base64.b85decode(pickled_knl.encode('ASCII')))
+    test_fn = loads(base64.b85decode(pickled_test_fn.encode('ASCII')))
+    queue = get_queue_from_bus_id(int(bus_id))
+    dev_arrays, avg_time = test_fn(queue, knl)
+    print("Average execution time:", avg_time)
+
+
 def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=30):
 
      
@@ -743,13 +776,8 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=30):
 
     return result, wall_clock_time
 
-def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=None, device_memory_bandwidth=None, device_latency=None, timeout=30):
-    #trans_list = tlist_generator(params, knl=knl_base)
-    print(trans_list)
-    print("MAX_FLOP_RATE", max_flop_rate)
-    print("DEVICE LATENCY", device_latency)
-    print("DEVICE MEMORY BANDWIDTH", device_memory_bandwidth)
 
+def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=np.inf):
     knl = apply_transformation_list(knl_base, trans_list)
    
     ## Calculate the amount of local memory used
@@ -780,15 +808,28 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
         #    roofline_execution_time = knl_flops/roofline_flop_rate
         #    timeout = max(timeout, 1000*roofline_execution_time)
 
-        print("Executing test with timeout of", timeout, "seconds") 
-        avg_time, wall_clock_time = run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=timeout) 
-        #avg_time = test_fn(queue, knl)
+        if False:
+            # Breaks with certain MPI implementations
+            # Occasionally all kernels time out so the returned answer is bad and ruins the roofline
+            # statistics
+            avg_time, wall_clock_time = run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=timeout) 
+        elif True:
+            print("Executing test with timeout of", timeout, "seconds") 
+            avg_time, wall_clock_time = run_subprocess_with_timout(queue, knl, test_fn, timeout=30)
+        else:
+            _, avg_time = test_fn(queue, knl)
+            wall_clock_time = timeout
     else:
         print("Invalid kernel: too much local memory used")
         avg_time, wall_clock_time = max_double, max_double # Don't run and return return an infinite run time
 
+    print(trans_list)
+    print("MAX_FLOP_RATE", max_flop_rate)
+    print("DEVICE LATENCY", device_latency)
+    print("DEVICE MEMORY BANDWIDTH", device_memory_bandwidth)
+
     flop_rate_dict = analyze_flop_rate(knl, avg_time, max_flop_rate=max_flop_rate, latency=None)
-    bw_dict = analyze_knl_bandwidth(knl, avg_time, device_memory_latency=device_latency)
+    bw_dict = analyze_knl_bandwidth(knl, avg_time, device_latency=device_latency)
 
     bw = bw_dict["observed_bandwidth"]
     flop_rate = flop_rate_dict["observed_flop_rate"]
@@ -797,56 +838,40 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     data.update(bw_dict.items())
     data.update(flop_rate_dict.items())
 
-    if device_memory_bandwidth is not None:  # noqa
-        #bw = analyze_knl_bandwidth(knl, avg_time)
-        frac_peak_bandwidth = bw / device_memory_bandwidth
-        data.update({"frac_peak_bandwidth": frac_peak_bandwidth,
-                     "device_memory_bandwidth": device_memory_bandwidth})
- 
-        #if frac_peak_bandwidth  >= bandwidth_cutoff:  # noqa
-        #    # Should validate result here
-        #    print("Performance is within tolerance of peak bandwith. Terminating search")  # noqa
-        #    return choices
+    frac_peak_bandwidth = bw / device_memory_bandwidth
+    data.update({"frac_peak_bandwidth": frac_peak_bandwidth,
+                 "device_memory_bandwidth": device_memory_bandwidth})
+
+    #if frac_peak_bandwidth  >= bandwidth_cutoff:  # noqa
+    #    # Should validate result here
+    #    print("Performance is within tolerance of peak bandwith. Terminating search")  # noqa
+    #    return choices
 
     # This is incorrect for general einsum kernels
-    if max_flop_rate is not None:
-        frac_peak_flop_rate = flop_rate / max_flop_rate#analyze_FLOPS(knl, max_gflops, avg_time)
-        data.update({"frac_peak_flop_rate": frac_peak_flop_rate,
-                "max_flop_rate": max_flop_rate})
+    frac_peak_flop_rate = flop_rate / max_flop_rate#analyze_FLOPS(knl, max_gflops, avg_time)
+    data.update({"frac_peak_flop_rate": frac_peak_flop_rate,
+            "max_flop_rate": max_flop_rate})
 
-        #if frac_peak_gflops >= gflops_cutoff:
-        #    # Should validate result here
-        #    print("Performance is within tolerance of peak bandwith or flop rate. Terminating search")  # noqa
-        #    return choices
+    #if frac_peak_gflops >= gflops_cutoff:
+    #    # Should validate result here
+    #    print("Performance is within tolerance of peak bandwith or flop rate. Terminating search")  # noqa
+    #    return choices
 
-    if device_latency is not None and device_memory_bandwidth is not None and max_flop_rate is not None:
-        roofline_flop_rate = get_knl_device_memory_roofline(knl, max_flop_rate,
-                device_latency, device_memory_bandwidth)
-        frac_roofline_flop_rate = flop_rate / roofline_flop_rate
+    roofline_flop_rate = get_knl_device_memory_roofline(knl, max_flop_rate,
+            device_latency, device_memory_bandwidth)
+    frac_roofline_flop_rate = flop_rate / roofline_flop_rate
 
-        print("Roofline GFLOP/s:", roofline_flop_rate*1e-9)
-        print()
+    print("Roofline GFLOP/s:", roofline_flop_rate*1e-9)
+    print()
 
-        data.update({"frac_roofline_flop_rate": frac_roofline_flop_rate,
-                "roofline_flop_rate": roofline_flop_rate})
-        
+    data.update({"frac_roofline_flop_rate": frac_roofline_flop_rate,
+            "roofline_flop_rate": roofline_flop_rate})
+    
 
     from frozendict import frozendict
     retval = frozendict({"transformations": trans_list, "data": data})
     print(retval)
     return retval
-
-    """
-    data = None
-    if device_memory_bandwidth is not None and max_gflops is not None:
-        data = (frac_peak_GBps*device_memory_bandwidth, 
-                frac_peak_gflops*max_gflops, 
-                frac_peak_GBps, 
-                frac_peak_gflops)
-
-    return (avg_time, trans_list, data)
-    """
-
 
 
 def exhaustive_search_v2(queue, knl, test_fn, pspace_generator, tlist_generator, time_limit=float("inf"), max_gflops=None, 
@@ -1380,6 +1405,12 @@ def get_transformation_id(device_id):
     return od[device_id]
 
 if __name__ == "__main__": 
+
+    import sys
+    
+    unpickle_and_run_test(*sys.argv[1:])
+
+    """
     from __init__ import gen_diff_knl, load_transformations_from_file, apply_transformation_list
     from grudge.execution import diff_prg, elwise_linear_prg, face_mass_prg
 
@@ -1397,7 +1428,8 @@ if __name__ == "__main__":
     fp_format_dict = {np.float32: (4, "FP32"), np.float64: (8, "FP64"),
                         np.complex128: (16, "C128")}
     fp_bytes, fp_string = (8, "FP64") if fp_format == np.float64 else (4, "FP32")
-
+    """
+    
     """
     to_test = True
     if to_test:
@@ -1535,7 +1567,7 @@ if __name__ == "__main__":
 
     #"""
     # Test autotuner
-    knl = diff_prg(3, 1000000, 3, np.float64)
+    #knl = diff_prg(3, 1000000, 3, np.float64)
     #print(knl)
     #print(knl.default_entrypoint.domains)
     #print(knl.default_entrypoint.instructions)
@@ -1545,7 +1577,7 @@ if __name__ == "__main__":
     #dofs = 84
     #knl = elwise_linear_prg(1000000, 3*dofs, np.float64, nnodes_in=dofs)
     #start_param = (24, 4, 126, 9, 28)#(96, 32, 60, 2, 5)
-    start_param = None
+    #start_param = None
     ## Figure out the actual dimensions
     #knl = face_mass_prg(178746, 4, 20, 20, np.float64)
 
@@ -1557,8 +1589,8 @@ if __name__ == "__main__":
     # Titan V
     #result = exhaustive_search(queue, knl, generic_test, time_limit=np.inf, max_gflops=6144, device_memory_bandwidth=580, gflops_cutoff=0.95, bandwidth_cutoff=1.0, start_param=start_param)
     #print(result)
-    pspace_generator = gen_autotune_list
-    tlist_generator = mxm_trans_list_generator 
-    result = exhaustive_search_v2(queue, knl, generic_test, pspace_generator, tlist_generator, time_limit=np.inf, gflops_cutoff=0.95, bandwidth_cutoff=1.0, start_param=start_param)
+    #pspace_generator = gen_autotune_list
+    #tlist_generator = mxm_trans_list_generator 
+    #result = exhaustive_search_v2(queue, knl, generic_test, pspace_generator, tlist_generator, time_limit=np.inf, gflops_cutoff=0.95, bandwidth_cutoff=1.0, start_param=start_param)
  
     #result = exhaustive_search_v2(queue, knl, generic_test, pspace_generator, tlist_generator, time_limit=np.inf, max_gflops=6144, device_memory_bandwidth=580, gflops_cutoff=0.95, bandwidth_cutoff=1.0, start_param=start_param)
