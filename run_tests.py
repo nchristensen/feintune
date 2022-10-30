@@ -706,8 +706,12 @@ def run_subprocess_with_timout(queue, knl, test_fn, timeout=30):
         output = completed.stdout
         return float(output.split()[-1]), end - start 
     except TimeoutExpired as e:
-        return np.inf, np.inf
-    #except CalledProcessError as e:
+        print("Subprocess timed out")
+        return max_double, max_double
+    except CalledProcessError as e:
+        print("Subprocess failed with the following output:")
+        print(e)
+        return max_double, max_double
 
 
 def unpickle_and_run_test(bus_id, pickled_knl, pickled_test_fn):
@@ -746,6 +750,7 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=30):
 
     return result, wall_clock_time
 
+
 def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=np.inf):
     knl = apply_transformation_list(knl_base, trans_list)
    
@@ -781,9 +786,9 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             # Breaks with certain MPI implementations
             # Occasionally all kernels time out so the returned answer is bad and ruins the roofline
             # statistics
-            #print("Executing test with timeout of", timeout, "seconds") 
             avg_time, wall_clock_time = run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=timeout) 
         elif True:
+            print("Executing test with timeout of", timeout, "seconds") 
             avg_time, wall_clock_time = run_subprocess_with_timout(queue, knl, test_fn, timeout=30)
         else:
             _, avg_time = test_fn(queue, knl)
