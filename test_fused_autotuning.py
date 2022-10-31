@@ -1002,8 +1002,8 @@ def main(arg):
 
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directories = [ #"./pickled_programs_prediction_order_1",
-                    "./pickled_programs_prediction_order_2",
+    directories = [ "./pickled_programs_prediction_order_1",
+                    #"./pickled_programs_prediction_order_2",
                     #"./pickled_programs_prediction_order_3",
                     #"./pickled_programs_prediction_order_4"
                   ]

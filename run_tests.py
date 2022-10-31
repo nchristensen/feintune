@@ -814,9 +814,19 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=np.inf):
 
 def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=np.inf):
     knl = apply_transformation_list(knl_base, trans_list)
-   
-    ## Calculate the amount of local memory used
-    #temp_dict = knl.default_entrypoint.temporary_variables
+
+    local_sizes = set()
+    for trans in trans_list:
+        if trans[0] == "split_iname" and "inner" in trans[1][0]:
+            local_sizes |= {trans[1][1]}
+    print(local_sizes)
+    assert len(local_sizes) <= 2
+
+    workitems = np.product(list(local_sizes))
+
+    # AMD does something weird with max_work_group_size so using
+    # max_work_item_sizes[0] here instead
+    max_work_group_size = queue.device.max_work_item_sizes[0] 
 
     temp_dict = {key: val for key, val in knl.default_entrypoint.temporary_variables.items() if val.address_space == lp.AddressSpace.LOCAL or val.address_space == lp.auto}
     base_storage_dict = {}
@@ -833,7 +843,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     # Could also look at the amount of cache space used and forbid running those that spill 
 
     measured_latency = None 
-    if local_memory_used <= queue.device.local_mem_size: # Don't allow complete filling of local memory
+    if local_memory_used <= queue.device.local_mem_size and workitems <= max_work_group_size: # Don't allow complete filling of local memory
 
         # Maybe not needed anymore?
         #knl_flops = get_knl_flops(knl)

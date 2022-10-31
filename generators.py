@@ -289,7 +289,8 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
     # and subtract that from available local memory?
     # Would need to multiply that number by the number of concurrent threads, including ilp
     local_mem_size = queue.device.local_mem_size
-    max_work_group_size = queue.device.max_work_group_size
+    max_work_group_size = queue.device.max_work_item_sizes[0]
+    #max_work_group_size = queue.device.max_work_group_size
 
     # Find read dof arrays. These are the ones that will be prefetched
     read_deps = frozenset()
