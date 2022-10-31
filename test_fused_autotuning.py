@@ -908,7 +908,7 @@ def test_default_transforms(sk_list, save_path=None):
                 print(ret_dict["data"])
                 # Should this functionality be a utility function
                 hjson_file_str = save_path + f"/{pid}.hjson"
-                out_file = open(hjson_file_str, "wt+")
+                out_file = open(hjson_file_str, "wt")
                 hjson.dump(ret_dict, out_file, default=convert)
                 out_file.close()
 
@@ -1002,8 +1002,8 @@ def main(arg):
 
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directories = [ #"./pickled_programs_prediction_order_1",
-                    "./pickled_programs_prediction_order_2",
+    directories = [ "./pickled_programs_prediction_order_1",
+                    #"./pickled_programs_prediction_order_2",
                     #"./pickled_programs_prediction_order_3",
                     #"./pickled_programs_prediction_order_4"
                   ]
