@@ -165,7 +165,7 @@ def autotune_pickled_kernels(path, platform_id, actx_class, comm):
             #del knl
 
 
-def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None, save_path=None, timeout=30):
+def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None, save_path=None, timeout=60):
 
     initial_timeout = timeout
 

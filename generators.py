@@ -8,6 +8,7 @@ from grudge_tags import (IsDOFArray, IsSepVecDOFArray,
 
 def k_inner_inner_options(start_val=None):
     #options = [8, 16, 4, 32]
+    #options = [64, 32, 16, 8]
     options = [32, 16, 8]
     #options = [32, 16]
     start_ind = 0 if start_val is None else options.index(start_val)

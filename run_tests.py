@@ -409,26 +409,8 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup_runs=2):
 
         measured_latency = measure_execution_latency(queue, kern, arg_dict, nruns, warmup_runs)
         avg_time = measure_execution_time(queue, kern, arg_dict, nruns, warmup_runs) 
-        """
-        if warmup:
-            for i in range(2):
-                kern(queue, **arg_dict)
-            #queue.finish()
 
-        sum_time = 0.0
-        events = []
-        # Should the cache be polluted between runs?
-        for i in range(nruns):
-            evt, out = kern(queue, **arg_dict)
-            events.append(evt)
-
-        cl.wait_for_events(events)
-        for evt in events:
-            sum_time += evt.profile.end - evt.profile.start
-        sum_time = sum_time / 1e9
-        avg_time = sum_time / nruns
-        """
-        end= time.time()
+        end = time.time()
         print("FINISHING EXECUTION", end - start, "seconds")
 
         #queue.finish()
@@ -452,6 +434,7 @@ def get_knl_device_memory_bytes(knl):
             nbytes += np.prod((arg.shape))*arg.dtype.dtype.itemsize
             
     return nbytes
+
 
 # avg_time in seconds
 def analyze_knl_bandwidth(knl, avg_time, device_latency=None):
@@ -484,6 +467,7 @@ def get_knl_flops(knl):
     for val in op_map.values():
         map_flops += val.eval_with_dict({})
     return map_flops
+
 
 # Avg time in seconds, max_flop_rate in flops per second
 def analyze_flop_rate(knl, avg_time, max_flop_rate=None, latency=None):
@@ -687,6 +671,7 @@ def apply_transformations_and_run_test(queue, knl, test_fn, params, tgenerator, 
 	return result_saved
     """
 
+
 def run_single_param_set(queue, knl_base, tlist_generator, params, test_fn, max_gflops=None, device_memory_bandwidth=None):
     trans_list = tlist_generator(params, knl=knl_base)
     knl = apply_transformation_list(knl_base, trans_list)
@@ -777,7 +762,7 @@ def run_subprocess_with_timout(queue, knl, test_fn, timeout=np.inf):
                         capture_output=True, check=True, timeout=timeout, text=True) 
         end = time.time()
         output = completed.stdout
-        split_output = output.split(":")
+        split_output = output.split("|")
         return float(split_output[-3]), float(split_output[-1]), end - start
     except TimeoutExpired as e:
         print("Subprocess timed out")
@@ -794,9 +779,9 @@ def unpickle_and_run_test(bus_id, pickled_knl, pickled_test_fn):
     knl = loads(base64.b85decode(pickled_knl.encode('ASCII')))
     test_fn = loads(base64.b85decode(pickled_test_fn.encode('ASCII')))
     queue = get_queue_from_bus_id(int(bus_id))
-    dev_arrays, avg_time, avg_latency = test_fn(queue, knl)
+    dev_arrays, avg_time, measured_latency = test_fn(queue, knl)
     
-    print("Average execution time:", avg_time, "Average execution latency:", avg_latency)
+    print("|Average execution time|", avg_time, "|Average execution latency|", measured_latency)
 
 
 def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=np.inf):
@@ -847,7 +832,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
 
     # Could also look at the amount of cache space used and forbid running those that spill 
 
-    avg_latency = None 
+    measured_latency = None 
     if local_memory_used <= queue.device.local_mem_size: # Don't allow complete filling of local memory
 
         # Maybe not needed anymore?
@@ -863,7 +848,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             # Occasionally all kernels time out so the returned answer is bad and ruins the roofline
             # statistics
             avg_time, measured_latency, wall_clock_time = run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=timeout) 
-        elif False:
+        elif True:
             print("Executing test with timeout of", timeout, "seconds") 
             avg_time, measured_latency, wall_clock_time = run_subprocess_with_timout(queue, knl, test_fn, timeout=timeout)
         else:
@@ -873,13 +858,13 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
         print("Invalid kernel: too much local memory used")
         avg_time, wall_clock_time = max_double, max_double # Don't run and return return an infinite run time
 
-    if avg_latency is None:
+    if measured_latency is None:
         measured_latency = device_latency
 
     print(trans_list)
     print("MAX_FLOP_RATE", max_flop_rate)
     print("COPY LATENCY:", device_latency)
-    print("NULL KERNEL LATENCY:", avg_latency)
+    print("NULL KERNEL LATENCY:", measured_latency)
     print("DEVICE MEMORY BANDWIDTH:", device_memory_bandwidth)
 
     flop_rate_dict = analyze_flop_rate(knl, avg_time, max_flop_rate=max_flop_rate, latency=None)
