@@ -13,6 +13,7 @@ from pebble.concurrent.process import _process_wrapper
 from concurrent.futures import TimeoutError
 import multiprocessing as mp
 import base64
+from func_timeout import func_timeout, FunctionTimedOut
 
 max_double = np.inf#np.finfo('d').max
 #from loopy.kernel.data import AddressSpace
@@ -752,18 +753,38 @@ def test_fn_wrapper(bus_id, knl, test_fn):
 
 def run_subprocess_with_timout(queue, knl, test_fn, timeout=np.inf):
     from pickle import dumps
-    from subprocess import run, TimeoutExpired, CalledProcessError
+    from subprocess import run, TimeoutExpired, CalledProcessError, Popen, PIPE, STDOUT
     pickled_knl = base64.b85encode(dumps(knl)).decode('ASCII')
     pickled_test_fn = base64.b85encode(dumps(test_fn)).decode('ASCII')
     bus_id = get_bus_id_from_queue(queue)
+
+    start = time.time()
+    proc = Popen(["python", "run_tests.py", str(bus_id), pickled_knl, pickled_test_fn],
+                            stdout=PIPE, stderr=STDOUT, text=True)
     try:
-        start = time.time()
-        completed = run(["python", "run_tests.py", str(bus_id), pickled_knl, pickled_test_fn],
-                        capture_output=True, check=True, timeout=timeout, text=True) 
-        end = time.time()
-        output = completed.stdout
+        output, err = proc.communicate(timeout=timeout)
+        if proc.returncode != 0:
+            raise CalledProcessError(proc.returncode, proc.args, output=output)
         split_output = output.split("|")
+        end = time.time()
         return float(split_output[-3]), float(split_output[-1]), end - start
+    except TimeoutExpired:
+        print("Subprocess timed out")
+        with proc:
+            proc.kill()
+        return max_double, max_double, 0
+
+    #out, err = proc.communicate()        
+
+    #try:
+    #    start = time.time()
+    #    #completed = run(["python", "run_tests.py", str(bus_id), pickled_knl, pickled_test_fn],
+    #    #                capture_output=True, check=True, timeout=timeout, text=True) 
+
+    #    end = time.time()
+    #    output = completed.stdout
+    #    split_output = output.split("|")
+    #    return float(split_output[-3]), float(split_output[-1]), end - start
     except TimeoutExpired as e:
         print("Subprocess timed out")
         return max_double, max_double, 0
@@ -813,7 +834,15 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=np.inf):
 
 
 def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=np.inf):
-    knl = apply_transformation_list(knl_base, trans_list)
+    # Timeout won't prevent applying transformations from hanging
+
+    transformed = True
+    try:
+        knl = func_timeout(timeout, apply_transformation_list, args=(knl_base, trans_list,))
+    except FunctionTimedOut as e:
+        print("Transformation timed out")
+        transformed = False
+        knl = knl_base
 
     local_sizes = set()
     for trans in trans_list:
@@ -843,7 +872,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     # Could also look at the amount of cache space used and forbid running those that spill 
 
     measured_latency = None 
-    if local_memory_used <= queue.device.local_mem_size and workitems <= max_work_group_size: # Don't allow complete filling of local memory
+    if local_memory_used <= queue.device.local_mem_size and workitems <= max_work_group_size and transformed: # Don't allow complete filling of local memory
 
         # Maybe not needed anymore?
         #knl_flops = get_knl_flops(knl)
