@@ -23,7 +23,10 @@ def k_inner_outer_options(n_in, k_inner_inner, sm_size,
     # Assumes a single DOF array. Additional pruning probably required
     # Assumes we prefetch all of the dofs in a strip of elements. This does not need to be the case
     # though. We could prefetch chunks (of length equal to the j_inner loop?) at a time.
-    options = np.arange(1, ((sm_size - 1) // (fp_bytes*k_inner_inner*n_in)) + 1)
+    #options = np.arange(1, ((sm_size - 1) // (fp_bytes*k_inner_inner*n_in)) + 1)
+
+    options = np.arange(1, (sm_size // (fp_bytes*k_inner_inner*n_in)) + 1)
+
 
     #Arbitrarily limit to at max 6 inline to limit search space
     ilp_limit = min(nelem // k_inner_inner, 6) if nelem is not None else 6
@@ -35,8 +38,6 @@ def k_inner_outer_options(n_in, k_inner_inner, sm_size,
 
 def i_inner_inner_options(n_out, k_inner_inner, max_work_group_size=1024, start_val=None):
     factors = np.arange(1, n_out+1)[(n_out % np.arange(1, n_out+1)) == 0]
-    # Fix for AMD
-    #factors = np.arange(3, n_out+1)[(n_out % np.arange(2, n_out+1)) == 0]
     # Ensure total number of workitems is less than maximum
     usable_factors = factors[factors*k_inner_inner <= max_work_group_size]
     options = sorted(usable_factors, reverse=True)
@@ -51,7 +52,9 @@ def i_inner_outer_options(n_out, i_inner_inner, start_val=None):
     
     # Loopy confused about the number of dimensions when 
     # i_outer, i_inner_outer, and i_inner_inner are all 1
-    inline = np.array([1]) if n_out == 1 else np.arange(2, (n_out // i_inner_inner) + 1)
+    #inline = np.array([1]) if n_out == 1 else np.arange(1, (n_out // i_inner_inner) + 1)
+
+    inline = np.arange(1, max(1,(n_out // i_inner_inner)) + 1)
     options = list(i_inner_inner*inline[n_out % (inline*i_inner_inner) == 0])
     start_ind = 0 if start_val is None else options.index(start_val)
     options = options[start_ind:]
