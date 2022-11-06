@@ -15,7 +15,7 @@ import multiprocessing as mp
 import base64
 from func_timeout import func_timeout, FunctionTimedOut
 
-max_double = np.inf#np.finfo('d').max
+max_double = np.finfo('f').max
 #from loopy.kernel.data import AddressSpace
 
 """
@@ -752,27 +752,38 @@ def test_fn_wrapper(bus_id, knl, test_fn):
 
 
 def run_subprocess_with_timout(queue, knl, test_fn, timeout=np.inf):
-    from pickle import dumps
+    import os
+    import uuid
+    from pickle import dump
     from subprocess import run, TimeoutExpired, CalledProcessError, Popen, PIPE, STDOUT
-    pickled_knl = base64.b85encode(dumps(knl)).decode('ASCII')
-    pickled_test_fn = base64.b85encode(dumps(test_fn)).decode('ASCII')
+   
+    #pickled_knl = base64.b85encode(dumps(knl)).decode('ASCII')
+    #pickled_test_fn = base64.b85encode(dumps(test_fn)).decode('ASCII')
     bus_id = get_bus_id_from_queue(queue)
 
+    filename = str(uuid.uuid4()) + ".tmp"
+    out_file = open(filename, "wb")
+    dump(tuple([knl, test_fn, bus_id]), out_file)
+    out_file.close()
+
+    #unpickle_and_run_test(filename)
+
     start = time.time()
-    proc = Popen(["python", "run_tests.py", str(bus_id), pickled_knl, pickled_test_fn],
-                            stdout=PIPE, stderr=STDOUT, text=True)
+    proc = Popen(["python", "run_tests.py", filename], stdout=PIPE, stderr=STDOUT, text=True)
     try:
         output, err = proc.communicate(timeout=timeout)
+        #print(output)
+        #exit()
         if proc.returncode != 0:
             raise CalledProcessError(proc.returncode, proc.args, output=output)
         split_output = output.split("|")
         end = time.time()
-        return float(split_output[-3]), float(split_output[-1]), end - start
+        retval = float(split_output[-3]), float(split_output[-1]), end - start
     except TimeoutExpired:
         print("Subprocess timed out")
         with proc:
             proc.kill()
-        return max_double, max_double, 0
+        retval = max_double, max_double, 0
 
     #out, err = proc.communicate()        
 
@@ -785,20 +796,29 @@ def run_subprocess_with_timout(queue, knl, test_fn, timeout=np.inf):
     #    output = completed.stdout
     #    split_output = output.split("|")
     #    return float(split_output[-3]), float(split_output[-1]), end - start
-    except TimeoutExpired as e:
-        print("Subprocess timed out")
-        return max_double, max_double, 0
+    #except TimeoutExpired as e:
+    #    print("Subprocess timed out")
+    #    return max_double, max_double, 0
     except CalledProcessError as e:
         print("Subprocess failed with the following output:")
         print(e.output)
+        os.remove(filename) 
         exit()
-        return max_double, max_double, 0
+        retval = max_double, max_double, 0
 
+    os.remove(filename) 
 
-def unpickle_and_run_test(bus_id, pickled_knl, pickled_test_fn):
-    from pickle import loads
-    knl = loads(base64.b85decode(pickled_knl.encode('ASCII')))
-    test_fn = loads(base64.b85decode(pickled_test_fn.encode('ASCII')))
+    return retval
+
+def unpickle_and_run_test(filename):
+    from pickle import load
+
+    in_file = open(filename, "rb")
+    knl, test_fn, bus_id = load(in_file)
+    in_file.close()
+    
+    #knl = loads(base64.b85decode(pickled_knl.encode('ASCII')))
+    #test_fn = loads(base64.b85decode(pickled_test_fn.encode('ASCII')))
     queue = get_queue_from_bus_id(int(bus_id))
     dev_arrays, avg_time, measured_latency = test_fn(queue, knl)
     
@@ -839,6 +859,8 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     transformed = True
     try:
         knl = func_timeout(timeout, apply_transformation_list, args=(knl_base, trans_list,))
+        #import pdb; pdb.set_trace()
+        #knl = func_timeout(np.inf, apply_transformation_list, args=(knl_base, trans_list,))
     except FunctionTimedOut as e:
         print("Transformation timed out")
         transformed = False
@@ -916,8 +938,9 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     data.update(bw_dict.items())
     data.update(flop_rate_dict.items())
 
-    frac_peak_bandwidth = bw / device_memory_bandwidth
-    data.update({"frac_peak_bandwidth": frac_peak_bandwidth,
+    if device_memory_bandwidth is not None:
+        frac_peak_bandwidth = bw / device_memory_bandwidth
+        data.update({"frac_peak_bandwidth": frac_peak_bandwidth,
                  "device_memory_bandwidth": device_memory_bandwidth})
 
     #if frac_peak_bandwidth  >= bandwidth_cutoff:  # noqa
@@ -926,8 +949,9 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     #    return choices
 
     # This is incorrect for general einsum kernels
-    frac_peak_flop_rate = flop_rate / max_flop_rate#analyze_FLOPS(knl, max_gflops, avg_time)
-    data.update({"frac_peak_flop_rate": frac_peak_flop_rate,
+    if max_flop_rate is not None:
+        frac_peak_flop_rate = flop_rate / max_flop_rate#analyze_FLOPS(knl, max_gflops, avg_time)
+        data.update({"frac_peak_flop_rate": frac_peak_flop_rate,
             "max_flop_rate": max_flop_rate})
 
     #if frac_peak_gflops >= gflops_cutoff:
@@ -935,16 +959,17 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     #    print("Performance is within tolerance of peak bandwith or flop rate. Terminating search")  # noqa
     #    return choices
 
-    roofline_flop_rate = get_knl_device_memory_roofline(knl, max_flop_rate,
+    if max_flop_rate is not None and device_memory_bandwidth is not None:
+        roofline_flop_rate = get_knl_device_memory_roofline(knl, max_flop_rate,
             measured_latency, device_memory_bandwidth)
-    frac_roofline_flop_rate = flop_rate / roofline_flop_rate
+        frac_roofline_flop_rate = flop_rate / roofline_flop_rate
 
-    print("Roofline GFLOP/s:", roofline_flop_rate*1e-9)
-    print()
+        print("Roofline GFLOP/s:", roofline_flop_rate*1e-9)
+        print()
 
-    data.update({"frac_roofline_flop_rate": frac_roofline_flop_rate,
-            "roofline_flop_rate": roofline_flop_rate})
-    
+        data.update({"frac_roofline_flop_rate": frac_roofline_flop_rate,
+                "roofline_flop_rate": roofline_flop_rate})
+        
 
     from frozendict import frozendict
     retval = frozendict({"transformations": trans_list, "data": data})

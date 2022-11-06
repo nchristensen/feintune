@@ -378,6 +378,8 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
         nbatches_dict[nbatches] = batch_size
     batch_size_list = sorted(nbatches_dict.values())
 
+    #batch_size_list = [sorted(nbatches_dict.values())[0]]
+
     # Very small batches tend to not run
     for batch_size in list(reversed(batch_size_list)):#range(3,4):#range(1, neinsums + 1):
 

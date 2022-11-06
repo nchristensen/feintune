@@ -8,7 +8,7 @@ from os.path import exists
 from utils import unique_program_id, convert, load_hjson, dump_hjson
 import hjson
 
-use_charm=False
+use_charm=True
 if use_charm:
     from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
     from charm4py.pool import PoolScheduler, Pool
@@ -838,7 +838,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                         autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
-                    elif not indirection and red_axes > 0 and total_axes <= 4 and einsum_count <= 3:
+                    elif not indirection and red_axes > 0 and total_axes <= 4 and einsum_count >= 100:
                         autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
                         #exit()
