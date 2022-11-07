@@ -446,7 +446,7 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
         batch_size, kio, kii, iio, iii, ji = params
 
         # TODO: Change this to a frozendict for easier legibility
-        if 0 not in params: # If there is a zero length dimension then don't transform
+        if not kio == 0 or iio == 0 or ji == 0 or iii == 0 or kii == 0: # If there is a zero length dimension then don't transform
             if kio != kii:
                 trans_list.append(("split_iname", (f"{e}", kio,),
                     (("outer_tag", "g.0",), ("slabs",(0,1,),),),))
