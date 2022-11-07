@@ -8,7 +8,7 @@ from os.path import exists
 from utils import unique_program_id, convert, load_hjson, dump_hjson
 import hjson
 
-use_charm=True
+use_charm=False
 if use_charm:
     from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
     from charm4py.pool import PoolScheduler, Pool
@@ -27,7 +27,7 @@ from run_tests import generic_test
 class IsDOFArray(Tag):
     pass
 
-# Map a domain to a tuple for its inames
+# Map a domain to a tuple of its inames
 def get_domain_list(tunit):
     domains = tunit.default_entrypoint.domains
     import islpy
@@ -36,6 +36,18 @@ def get_domain_list(tunit):
         #print(domain.get_var_names(islpy.dim_type.all))
         domain_names = frozenset([key.name for key in domain.get_id_dict().keys()])
         domain_list.append((domain_names, domain,))
+
+    #import islpy
+    #for domain_names, domain in domain_list:
+    #    print(domain_names, domain)
+    #    id_dict = domain.get_id_dict()
+    #    print(id_dict)
+    #    exit()
+    #    for dim in range(domain.n_dim()):
+    #        print(domain.dim_max(dim))
+            
+    #    #print(domain.drop_constraints_involving_dims(islpy.dim_type.all, 0, 1))
+    #    exit()
     return domain_list
 
 # Get the barriers to divide computation into phases
@@ -768,21 +780,13 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
     if save_path is None:
         save_path = "./hjson"
 
-    # Doesn't really matter if all of the processes do this,
-    # the rank 0 numbers will be used
-    # Would possibly be more accurate to use the minimum latency ever seen
-    # and the maximum bandwidth ever seen
     if True:
         if not use_charm:
             if comm.Get_rank() == 0:
+                # The latency is now obtained per-kernel so it probably needn't be obtained here.
+                # Bandwidth microbenchmark could be improved to handle asymmetric numbers of reads and
+                # writes.
                 device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
-                #import feinsum.empirical_roofline as er
-                #results_list = er.loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
-                #device_latency = er.get_min_device_latency(results_list)
-                #loopy_bw = er.get_latency_adjusted_max_device_memory_bandwidth(results_list)
-                #clpeak_bw = er.get_max_bandwidth_clpeak(queue=queue)
-                #clpeak_flop_rate = er.get_max_flop_rate_clpeak(np.float64, queue=queue)    
-                #device_memory_bandwidth = max(loopy_bw, clpeak_bw)
             else:
                 device_memory_bandwidth = None
                 device_latency = None
@@ -791,18 +795,8 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
             device_memory_bandwidth = comm.bcast(device_memory_bandwidth)
             device_latency = comm.bcast(device_latency)
             clpeak_flop_rate = comm.bcast(clpeak_flop_rate)
-
-            #device_latency, inverse_bandwidth = get_alpha_beta_model(results_list)
-            #device_memory_bandwidth = 1/inverse_bandwidth
         else:
             device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
-            #import feinsum.empirical_roofline as er
-            #results_list = er.loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
-            #device_latency = er.get_min_device_latency(results_list)
-            #loopy_bw = er.get_latency_adjusted_max_device_memory_bandwidth(results_list)
-            #clpeak_bw = er.get_max_bandwidth_clpeak(queue=queue)
-            #clpeak_flop_rate = er.get_max_flop_rate_clpeak(np.float64, queue=queue)    
-            #device_memory_bandwidth = max(loopy_bw, clpeak_bw)
     else:
         device_memory_bandwidth = None
         device_latency = None
@@ -838,29 +832,9 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                         autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
-                    elif not indirection and red_axes > 0 and total_axes <= 4 and einsum_count >= 100:
+                    elif not indirection and red_axes > 0 and total_axes <= 5 and einsum_count <= 2:
                         autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
-                        #exit()
-                        #print(add_batch_id(sk, 2))
-                        #batch_einsums(sk, 2)
-
-                        #print(sk)
-                        #try:
-                        #    feinsum_autotune(tunit, queue)
-                        #except:
-                        #    print(f"FAILURE: {pid} failed to with feinsum")
-                    #elif not indirection and out_axes == 2 and total_axes == 4
-                    elif False:#out_axes == 3 and total_axes == 5 and einsum_count > 0:
-                        print(sk)
-                        #feinsum_autotune(sk, queue)
-                        #try:
-                        #    feinsum_autotune(tunit, queue)
-                        #except:
-                        #    print(f"FAILURE: {pid} failed with feinsum")
-                            #print(lp.kernel.tools.show_dependency_graph(lp.preprocess_kernel(sk).default_entrypoint, sk.callables_table))
-                        #exit()
-   #test_feinsum_transforms(tunits)
 
 
 def test_default_transforms(sk_list, save_path=None):

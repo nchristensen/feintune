@@ -858,9 +858,14 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
 
     transformed = True
     try:
-        knl = func_timeout(timeout, apply_transformation_list, args=(knl_base, trans_list,))
+        #knl = func_timeout(timeout, apply_transformation_list, args=(knl_base, trans_list,))
+        start = time.time()
         #import pdb; pdb.set_trace()
-        #knl = func_timeout(np.inf, apply_transformation_list, args=(knl_base, trans_list,))
+        #knl = func_timeout(3600, apply_transformation_list, args=(knl_base, trans_list,))
+        knl = apply_transformation_list(knl_base, trans_list)
+        end = time.time()
+        print("Transformation required", end - start, "seconds")
+        #exit()
     except FunctionTimedOut as e:
         print("Transformation timed out")
         transformed = False
@@ -913,8 +918,10 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             print("Executing test with timeout of", timeout, "seconds") 
             avg_time, measured_latency, wall_clock_time = run_subprocess_with_timout(queue, knl, test_fn, timeout=timeout)
         else:
+            start = time.time()
             _, avg_time, measured_latency = test_fn(queue, knl)
-            wall_clock_time = timeout
+            end = time.time()
+            wall_clock_time = end - start
     else:
         print("Invalid kernel: too much local memory used")
         avg_time, wall_clock_time = max_double, max_double # Don't run and return return an infinite run time

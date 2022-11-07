@@ -380,8 +380,12 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
 
     #batch_size_list = [sorted(nbatches_dict.values())[0]]
 
-    # Very small batches tend to not run
+    # Very small batch sizes tend to not run because duplicate_inames increases in cost quadratically with the
+    # number of inames
     for batch_size in list(reversed(batch_size_list)):#range(3,4):#range(1, neinsums + 1):
+
+        if batch_size >= neinsums:
+            batch_size = 0
 
         if n_elem*n_out <= 1024:
             choices = (batch_size, n_elem, n_elem, n_out, n_out, n_in)
@@ -413,7 +417,6 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
                                 choices = (batch_size, kio, kii, iio, iii, ji)
                                 parameter_list.append(choices)
 
-
     # Hacky, is there a better way to get this?
     within_inames, r_inames = list(get_einsum_types(knl))[0]
     for iname in r_inames:
@@ -431,12 +434,10 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
         elif "idim" in iname:
             x = iname
 
+
     # Now create the list of transformations instructions with those parameters
 
     #print(parameter_list)
-
-    #exit()
-
 
     trans_list_list = []
     for params in parameter_list:
@@ -446,7 +447,6 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
 
         # TODO: Change this to a frozendict for easier legibility
         if 0 not in params: # If there is a zero length dimension then don't transform
-
             if kio != kii:
                 trans_list.append(("split_iname", (f"{e}", kio,),
                     (("outer_tag", "g.0",), ("slabs",(0,1,),),),))
@@ -471,11 +471,14 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
             if nr is not None:
                 trans_list.append(("tag_inames", (((f"{r}", "unr",),),),))
             if nx is not None:
-                trans_list.append(("tag_inames", (((f"{x}", "ilp",),),),))
+                if batch_size == 0:
+                    # Breaks with einsum batching
+                    trans_list.append(("tag_inames", (((f"{x}", "ilp",),),),))
+                else:
+                    trans_list.append(("tag_inames", (((f"{x}", "unr",),),),))
             if nf is not None:
                 trans_list.append(("tag_inames", (((f"{f}", "unr",),),),))
 
-            #"""
             # The more einsums the slower the prefetching becomes
             for arg in read_dof_arrays:
                 # Should only prefetch if there are no indirection arrays
@@ -495,7 +498,6 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
 
                 trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
                     (("temporary_name", f"{arg}f",), ("default_tag","l.auto",),),))
-            #"""
 
             trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag","for",),),))
 

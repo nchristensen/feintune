@@ -569,8 +569,11 @@ def get_alias_sets(batch_dict_list):
     
     return alias_sets
 
+from qprofile import qprofile
 
+@qprofile
 def batch_einsums(tunit, batch_size, **kwargs):
+
     if batch_size == 0:
         return tunit
 
@@ -621,12 +624,20 @@ def batch_einsums(tunit, batch_size, **kwargs):
                         if add_dep:
                             j = i - 1
                             knl = lp.add_dependency(knl, f"id:{fetch_rule}", f"id:batch_{j}*")
-                        
 
         # Create independent loops for each batch                
+
+        import time
         for i in range(0, nbatches): # Should we keep the first batch in the original set of loops
             # Can the we not duplicate the inames with global tags?
+            #start = time.time()
             knl = lp.duplicate_inames(knl, orig_nonglobal_inames, f"id:batch_{i}_*")
+            #end = time.time()
+            #if end - start > 20:
+                #import pdb; pdb.set_trace()
+                #return
+
+            #print(i+1, end - start)
             #knl = lp.duplicate_inames(knl, orig_inames, f"id:batch_{i}_*")
         # Transfer the tags to the new kernel
         iname_dict = knl.inames
@@ -703,7 +714,12 @@ def apply_transformation_list(knl, transformations):
         if len(t) > 1:
             args = args + list(t[1])
         kwargs = dict(t[2]) if len(t) > 2 else {}
-        knl = func(*args, **kwargs)
+        if t[0] == "batch_einsums":
+            #kwargs["profile"] = True
+            knl = func(*args, **kwargs)
+            #exit()
+        else:
+            knl = func(*args, **kwargs)
     end = time.time()
     print("ENDING TRANSFORMATION:", end - start, "seconds")
     return knl
