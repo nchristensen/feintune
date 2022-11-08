@@ -5,6 +5,7 @@ from meshmode.transform_metadata import FirstAxisIsElementsTag
 from grudge_tags import (IsDOFArray, IsSepVecDOFArray,
     IsOpArray, IsSepVecOpArray, IsFaceDOFArray, IsFaceMassOpArray,
     IsVecDOFArray, IsVecOpArray, IsFourAxisDOFArray)
+from pytools import memoize
 
 def k_inner_inner_options(start_val=None):
     #options = [8, 16, 4, 32]
@@ -283,7 +284,7 @@ def einsum3to2_kernel_tlist_generator(params, **kwargs):
 
 def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
 
-    from __init__ import get_einsum_types, get_einsums
+    from __init__ import get_einsums
     # Create the list of parameter values to try
 
     # Does not account for local memory usage due to register spilling
@@ -296,6 +297,8 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
     #max_work_group_size = queue.device.max_work_group_size
 
     # Find read dof arrays. These are the ones that will be prefetched
+
+    # A bunch of this is probably no longer needed
     read_deps = frozenset()
     write_deps = frozenset()
     for instr in knl.default_entrypoint.instructions:
@@ -311,9 +314,7 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
     print(write_deps)
     print(read_deps)
     n_elem = None
-    nx = None
-    nr = None
-    nf = None
+    nx = nr = nf = None
     sizes = frozenset()
     n_dof_arrays = 0
     for arg in list(arg_dict.values()):
@@ -337,28 +338,8 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
             n_dof_arrays += nf
             face_dof_arrays.append(arg.name)
             
-
-    # TODO: Enable prefetching of ndim x n_element array. Need to adjust
-    # how available local memory is calculated
-    # Or just don't prefetch and rely on caching to compensate
-
-    #print(n_elem, n_out, n_in)
-
-    """
-    if FirstAxisIsElementsTag() in arg.tags and len(arg.shape) == 2:
-        print("HERE")
-        dof_arrays.append(arg.name)
-        print(arg.name, read_deps)
-        if arg.name in read_deps:
-            print("HERE2")
-            n_elem, n_in = arg.shape
-            fp_bytes = arg.dtype.dtype.itemsize
-    elif len(arg.shape) == 2: # Not super robust
-        n_out, n_in = arg.shape
-    """
-
     read_dof_arrays = read_deps & frozenset(dof_arrays)
-    #n_dof_arrays = len(read_dof_arrays)
+
 
     start_param = (None, None, None, None, None)
     if start_param is not None:
@@ -383,7 +364,6 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
     # Very small batch sizes tend to not run because duplicate_inames increases in cost quadratically with the
     # number of inames
     for batch_size in list(reversed(batch_size_list)):#range(3,4):#range(1, neinsums + 1):
-
         if batch_size >= neinsums:
             batch_size = 0
 
@@ -391,7 +371,6 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
             choices = (batch_size, n_elem, n_elem, n_out, n_out, n_in)
             parameter_list.append(choices)
         else:
-
             for kii in k_inner_inner_options(start_val=kii_s):
                 # Might be easier to generate all of the entries and then prune those
                 # entries that use too much local memory.
@@ -417,8 +396,67 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
                                 choices = (batch_size, kio, kii, iio, iii, ji)
                                 parameter_list.append(choices)
 
+
+    # Now create the list of transformations instructions with those parameters
+    trans_list_list = [tuple(get_trans_list(knl,params)) for params in parameter_list]
+
+    print("Num trans to try: ", len(trans_list_list))
+
+    return trans_list_list
+
+def get_trans_list(knl, params):
+    from __init__ import get_einsum_types
+
+    @memoize
+    def get_args_and_arrays(knl):
+        # Find read dof arrays. These are the ones that will be prefetched
+        read_deps = frozenset()
+        write_deps = frozenset()
+        for instr in knl.default_entrypoint.instructions:
+            if isinstance(instr, lp.Assignment):
+                read_deps |= instr.read_dependency_names()
+                write_deps |= instr.write_dependency_names()
+
+        dof_arrays = []
+        face_dof_arrays = []
+        arg_dict = dict([(arg.name, arg) for arg in knl.default_entrypoint.args])
+        arg_dict.update(knl.default_entrypoint.temporary_variables)
+
+        #print(write_deps)
+        #print(read_deps)
+        n_elem = None
+        nx = nr = nf = None
+        sizes = frozenset()
+        n_dof_arrays = 0
+        for arg in list(arg_dict.values()):
+            if arg.name in write_deps and len(arg.shape) == 2:
+                n_elem, n_out = arg.shape
+                fp_bytes = arg.dtype.dtype.itemsize
+                break
+            elif arg.name in write_deps and len(arg.shape) == 3:
+                nx, n_elem, n_out = arg.shape
+                fp_bytes = arg.dtype.dtype.itemsize
+                break
+        for arg in list(arg_dict.values()):
+            if len(arg.shape) == 2 and arg.name in read_deps and arg.shape[0] == n_elem:
+                n_in = arg.shape[1]
+                dof_arrays.append(arg.name)
+                n_dof_arrays += 1
+            elif len(arg.shape) == 3 and arg.name in read_deps and arg.shape[-1] == n_elem:
+                _, nr, _ = arg.shape
+            elif len(arg.shape) == 3 and arg.name in read_deps and arg.shape[1] == n_elem:
+                nf, _, n_in = arg.shape
+                n_dof_arrays += nf
+                face_dof_arrays.append(arg.name)
+                
+        read_dof_arrays = read_deps & frozenset(dof_arrays)
+        return arg_dict, read_dof_arrays, face_dof_arrays
+    
+    arg_dict, read_dof_arrays, face_dof_arrays = get_args_and_arrays(knl)
+
     # Hacky, is there a better way to get this?
     within_inames, r_inames = list(get_einsum_types(knl))[0]
+    j = r = f = e = i = x = None
     for iname in r_inames:
         if "idof" in iname:
             j = iname
@@ -434,80 +472,68 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
         elif "idim" in iname:
             x = iname
 
+    trans_list = []
+    batch_size, kio, kii, iio, iii, ji = params
 
-    # Now create the list of transformations instructions with those parameters
+    # TODO: Change this to a frozendict for easier legibility
+    if not kio == 0 or iio == 0 or ji == 0 or iii == 0 or kii == 0: # If there is a zero length dimension then don't transform
+        if kio != kii:
+            trans_list.append(("split_iname", (f"{e}", kio,),
+                (("outer_tag", "g.0",), ("slabs",(0,1,),),),))
+            trans_list.append(("split_iname", (f"{e}_inner", kii,), 
+                (("outer_tag", "ilp",), ("inner_tag", "l.0",), ("slabs", (0,1,),),),))
+            prefetch_str = f"{j},{e}_inner_outer,{e}_inner_inner"
+        else:
+            trans_list.append(("split_iname", (f"{e}", kio,),
+                (("outer_tag", "g.0",), ("inner_tag", "l.0",), ("slabs",(0,0,),),),))
+            prefetch_str = f"{j},{e}_inner"    
+        if iio != iii:
+            trans_list.append(("split_iname", (f"{i}", iio,),
+                (("outer_tag", "g.1",), ("slabs",(0,0,),),),))
+            # In theory this should be (0,0)
+            trans_list.append(("split_iname", (f"{i}_inner", iii,), 
+                (("outer_tag", "ilp",), ("inner_tag","l.1",), ("slabs",(0,0,),),),))
+        else:
+            trans_list.append(("split_iname", (f"{i}", iio,), 
+                (("outer_tag", "g.1",), ("inner_tag", "l.1",), ("slabs",(0,0,),),),))
+        # Should the i loop have (0,1) slabs for both?
 
-    #print(parameter_list)
+        if r is not None:
+            trans_list.append(("tag_inames", (((f"{r}", "unr",),),),))
+        if x is not None:
+            if batch_size == 0:
+                # Breaks with einsum batching
+                trans_list.append(("tag_inames", (((f"{x}", "ilp",),),),))
+            else:
+                trans_list.append(("tag_inames", (((f"{x}", "unr",),),),))
+        if f is not None:
+            trans_list.append(("tag_inames", (((f"{f}", "unr",),),),))
 
-    trans_list_list = []
-    for params in parameter_list:
+        # The more einsums the slower the prefetching becomes
+        for arg in read_dof_arrays:
+            # Should only prefetch if there are no indirection arrays
+            strides = [dim_tag.stride for dim_tag in arg_dict[arg].dim_tags if isinstance(dim_tag, lp.kernel.array.FixedStrideArrayDimTag)]
+            order_str = "f,f" if strides[0] < strides[1] else "c,c"
+            trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
+                (("temporary_name", f"{arg}f",), ("default_tag","l.auto",),),))
+            trans_list.append(("tag_array_axes", (f"{arg}f", order_str,),))
 
-        trans_list = []
-        batch_size, kio, kii, iio, iii, ji = params
-
-        # TODO: Change this to a frozendict for easier legibility
-        if not kio == 0 or iio == 0 or ji == 0 or iii == 0 or kii == 0: # If there is a zero length dimension then don't transform
+        for arg in face_dof_arrays:
+            # Stick with the default ordering for now. For fortran ordering
+            # slap an order tag on it.
             if kio != kii:
-                trans_list.append(("split_iname", (f"{e}", kio,),
-                    (("outer_tag", "g.0",), ("slabs",(0,1,),),),))
-                trans_list.append(("split_iname", (f"{e}_inner", kii,), 
-                    (("outer_tag", "ilp",), ("inner_tag", "l.0",), ("slabs", (0,1,),),),))
-                prefetch_str = f"{j},{e}_inner_outer,{e}_inner_inner"
+                prefetch_str = f"{f},{j},{e}_inner_outer,{e}_inner_inner"
             else:
-                trans_list.append(("split_iname", (f"{e}", kio,),
-                    (("outer_tag", "g.0",), ("inner_tag", "l.0",), ("slabs",(0,0,),),),))
-                prefetch_str = f"{j},{e}_inner"    
-            if iio != iii:
-                trans_list.append(("split_iname", (f"{i}", iio,),
-                    (("outer_tag", "g.1",), ("slabs",(0,0,),),),))
-                # In theory this should be (0,0)
-                trans_list.append(("split_iname", (f"{i}_inner", iii,), 
-                    (("outer_tag", "ilp",), ("inner_tag","l.1",), ("slabs",(0,0,),),),))
-            else:
-                trans_list.append(("split_iname", (f"{i}", iio,), 
-                    (("outer_tag", "g.1",), ("inner_tag", "l.1",), ("slabs",(0,0,),),),))
-            # Should the i loop have (0,1) slabs for both?
+                prefetch_str = f"{f},{j},{e}_inner"    
 
-            if nr is not None:
-                trans_list.append(("tag_inames", (((f"{r}", "unr",),),),))
-            if nx is not None:
-                if batch_size == 0:
-                    # Breaks with einsum batching
-                    trans_list.append(("tag_inames", (((f"{x}", "ilp",),),),))
-                else:
-                    trans_list.append(("tag_inames", (((f"{x}", "unr",),),),))
-            if nf is not None:
-                trans_list.append(("tag_inames", (((f"{f}", "unr",),),),))
+            trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
+                (("temporary_name", f"{arg}f",), ("default_tag","l.auto",),),))
 
-            # The more einsums the slower the prefetching becomes
-            for arg in read_dof_arrays:
-                # Should only prefetch if there are no indirection arrays
-                strides = [dim_tag.stride for dim_tag in arg_dict[arg].dim_tags if isinstance(dim_tag, lp.kernel.array.FixedStrideArrayDimTag)]
-                order_str = "f,f" if strides[0] < strides[1] else "c,c"
-                trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
-                    (("temporary_name", f"{arg}f",), ("default_tag","l.auto",),),))
-                trans_list.append(("tag_array_axes", (f"{arg}f", order_str,),))
+        trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag","for",),),))
 
-            for arg in face_dof_arrays:
-                # Stick with the default ordering for now. For fortran ordering
-                # slap an order tag on it.
-                if kio != kii:
-                    prefetch_str = f"{f},{j},{e}_inner_outer,{e}_inner_inner"
-                else:
-                    prefetch_str = f"{f},{j},{e}_inner"    
-
-                trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
-                    (("temporary_name", f"{arg}f",), ("default_tag","l.auto",),),))
-
-            trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag","for",),),))
-
-        trans_list.append(("add_inames_for_unused_hw_axes",))
-        trans_list.append(("batch_einsums", (batch_size,),))
-        trans_list_list.append(tuple(trans_list))
-
-    print("Num trans to try: ", len(trans_list_list))
-
-    return trans_list_list
+    trans_list.append(("add_inames_for_unused_hw_axes",))
+    trans_list.append(("batch_einsums", (batch_size,),))
+    return trans_list
 
 
 # Is there any real reason to separate this from the tspace kernel. Why not
