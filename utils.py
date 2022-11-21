@@ -29,6 +29,8 @@ def unique_program_id(tunit):
     # The program name is not relevant for transformation purposes. 
     # (Neither are the variable names, but I'm not going to touch that)
     # Maybe feinsum has some capability for that?
+
     assert len(tunit.entrypoints) == 1 # Only works for tunits with one entrypoint at present
 
+    
     return kb(tunit.default_entrypoint.copy(name="loopy_kernel"))

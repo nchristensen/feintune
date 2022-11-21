@@ -6,11 +6,12 @@ from grudge_tags import (IsDOFArray, IsSepVecDOFArray,
     IsOpArray, IsSepVecOpArray, IsFaceDOFArray, IsFaceMassOpArray,
     IsVecDOFArray, IsVecOpArray, IsFourAxisDOFArray)
 from pytools import memoize
+from __init__ import get_einsums
 
 def k_inner_inner_options(start_val=None):
     #options = [8, 16, 4, 32]
     #options = [64, 32, 16, 8]
-    options = [32, 16, 8]
+    options = [64, 32, 16, 8]
     #options = [32, 16]
     start_ind = 0 if start_val is None else options.index(start_val)
     options = options[start_ind:]
@@ -37,7 +38,7 @@ def k_inner_outer_options(n_in, k_inner_inner, sm_size,
     options = options[start_ind:]
     return options
 
-def i_inner_inner_options(n_out, k_inner_inner, max_work_group_size=1024, start_val=None):
+def i_inner_inner_options(n_out, k_inner_inner=1, max_work_group_size=1024, start_val=None):
     factors = np.arange(1, n_out+1)[(n_out % np.arange(1, n_out+1)) == 0]
     # Ensure total number of workitems is less than maximum
     usable_factors = factors[factors*k_inner_inner <= max_work_group_size]
@@ -71,6 +72,20 @@ def j_inner_options(n_in, start_val=None):
     start_ind = 0 if start_val is None else factors.index(start_val)
     factors = factors[start_ind:]
     return factors
+
+
+def batch_size_options(knl):    
+    neinsums = len(get_einsums(knl))
+    batch_size_list = [(batch_size, int(np.ceil(neinsums/batch_size))) for batch_size in range(1, neinsums + 1)]
+    nbatches_dict = {}
+
+    # Do in reverse so we wind up with the smallest batch size that requires nbatches
+    for nbatches, batch_size in reversed(batch_size_list):
+        nbatches_dict[nbatches] = batch_size
+    batch_size_list = sorted(nbatches_dict.values())
+
+    return list(reversed(batch_size_list))
+
 
 # Creates a list containing tuples of search space parameters.
 # Will need to create separate ones of this for each einsum kernel
@@ -118,7 +133,7 @@ def gen_autotune_list(queue, knl, start_param=None):
         # arrays actually prefetched.
         for kio in k_inner_outer_options(n_in*nfaces, kii, local_mem_size // ndof_arrays, fp_bytes=fp_bytes,start_val=kio_s):
             kio_s = None # Set to None so will form the full set the next time around
-            for iii in i_inner_inner_options(n_out, kii,
+            for iii in i_inner_inner_options(n_out, k_inner_inner=kii,
                     max_work_group_size=max_work_group_size, start_val=iii_s):
                 iii_s = None
                 for iio in i_inner_outer_options(n_out, iii, start_val=iio_s):
@@ -216,7 +231,7 @@ def grudge_elementwise_sum_knl_pspace_generator(queue, knl, start_param=None):
         # Both jac and vec are prefetched so the available local_memory per prefetched array is halved
         for kio in k_inner_outer_options(n_in, kii, local_mem_size, fp_bytes=fp_bytes,start_val=kio_s):
             kio_s = None # Set to None so will form the full set the next time around
-            for iii in i_inner_inner_options(n_out, kii,
+            for iii in i_inner_inner_options(n_out, k_inner_inner=kii,
                     max_work_group_size=max_work_group_size, start_val=iii_s):
                 iii_s = None
                 for iio in i_inner_outer_options(n_out, iii, start_val=iio_s):
@@ -282,9 +297,155 @@ def einsum3to2_kernel_tlist_generator(params, **kwargs):
     trans_list.append(["add_inames_for_unused_hw_axes"]) 
     return trans_list 
 
+
+def createConfigSpace(queue, knl):
+    import ConfigSpace as cs
+
+    ## Gather some data from the knl and queue to bound the space 
+
+    local_mem_size = queue.device.local_mem_size
+    max_work_group_size = queue.device.max_work_item_sizes[0]
+
+    # Create the list of parameter values to try
+
+    # Does not account for local memory usage due to register spilling
+    # Need to reserve some amount for that
+    # Count number of constants and private memory objects 
+    # and subtract that from available local memory?
+    # Would need to multiply that number by the number of concurrent threads, including ilp
+    local_mem_size = queue.device.local_mem_size
+    max_work_group_size = queue.device.max_work_item_sizes[0]
+    #max_work_group_size = queue.device.max_work_group_size
+
+    # Find read dof arrays. These are the ones that will be prefetched
+
+    # A bunch of this is probably no longer needed
+    read_deps = frozenset()
+    write_deps = frozenset()
+    for instr in knl.default_entrypoint.instructions:
+        if isinstance(instr, lp.Assignment):
+            read_deps |= instr.read_dependency_names()
+            write_deps |= instr.write_dependency_names()
+
+    dof_arrays = []
+    face_dof_arrays = []
+    arg_dict = dict([(arg.name, arg) for arg in knl.default_entrypoint.args])
+    arg_dict.update(knl.default_entrypoint.temporary_variables)
+
+    print(write_deps)
+    print(read_deps)
+    n_elem = None
+    nx = nr = nf = None
+    sizes = frozenset()
+    n_dof_arrays = 0
+    for arg in list(arg_dict.values()):
+        if arg.name in write_deps and len(arg.shape) == 2:
+            n_elem, n_out = arg.shape
+            fp_bytes = arg.dtype.dtype.itemsize
+            break
+        elif arg.name in write_deps and len(arg.shape) == 3:
+            nx, n_elem, n_out = arg.shape
+            fp_bytes = arg.dtype.dtype.itemsize
+            break
+    for arg in list(arg_dict.values()):
+        if len(arg.shape) == 2 and arg.name in read_deps and arg.shape[0] == n_elem:
+            n_in = arg.shape[1]
+            dof_arrays.append(arg.name)
+            n_dof_arrays += 1
+        elif len(arg.shape) == 3 and arg.name in read_deps and arg.shape[-1] == n_elem:
+            _, nr, _ = arg.shape
+        elif len(arg.shape) == 3 and arg.name in read_deps and arg.shape[1] == n_elem:
+            nf, _, n_in = arg.shape
+            n_dof_arrays += nf
+            face_dof_arrays.append(arg.name)
+            
+    read_dof_arrays = read_deps & frozenset(dof_arrays)
+
+    ## End data gathering
+    
+
+    # Element axis
+    a_s = cs.ConfigurationSpace(name="autotuning_space")
+    kii = cs.OrdinalHyperparameter("kii", k_inner_inner_options())
+    a_s.add_hyperparameter(kii)
+    iii = cs.OrdinalHyperparameter("iii", i_inner_inner_options(n_out, max_work_group_size=max_work_group_size))
+    a_s.add_hyperparameter(iii)
+    ji = cs.OrdinalHyperparameter("ji", j_inner_options(n_in))
+    a_s.add_hyperparameter(ji)
+    
+    def work_group_limit(kii, iii):
+        return kii*iii > max_work_group_size
+
+    limit_work_groups = cs.ForbiddenCallableRelation(a_s["kii"], a_s["iii"],
+                            work_group_limit)
+
+    # This just gives the maximum number of allowed ilp blocks.
+    # Will need to calculate kii*kio for the transformations
+    kio = cs.OrdinalHyperparameter("kio", np.arange(1,7))
+    a_s.add_hyperparameter(kio)
+
+    def k_block_limit(kii, kio):
+        return (kii*kio > n_elem) and (kio > 1)
+    
+    avoid_pointless_k_blocks = cs.ForbiddenCallableRelation(a_s["kii"], a_s["kio"],
+                                k_block_limit)
+    # Assumes we don't have to create blocks on the DOF axis.
+    # This is only a rough estimate assuming one DOF array.
+    # A more stringent checkout would account for the total number of DOF
+    # arrays in use at once. However, this depends on, among other things,
+    # the batch size of the einsums and how many distinct DOF arrays
+    # each einsum needs. In any case, the test code will catch kernels
+    # that use too much local mememory and return a very large run time.
+    def local_memory_limit(kii, kio):
+        return fp_bytes*kio*kii*n_in > local_mem_size        
+
+    limit_local_memory_use = cs.ForbiddenCallableRelation(a_s["kii"], a_s["kio"],
+                            local_memory_limit)
+
+    # Assume we can anywhere from 1 block with all dofs to ndof blocks with one dof
+    iio = cs.OrdinalHyperparameter("iio", np.arange(1, max(1,n_out) + 1))        
+    a_s.add_hyperparameter(iio)
+
+    def i_block_limit(iii, iio):
+        return (iio*iii > n_out) and (iio > 1)
+
+    avoid_pointless_i_blocks = cs.ForbiddenCallableRelation(a_s["iii"], a_s["iio"],
+                                i_block_limit)
+
+    def is_not_factor_of_n_out(iii, iio):
+        return n_out % (iio*iii) != 0
+
+    enforce_factor_of_n_out = cs.ForbiddenCallableRelation(a_s["iii"], a_s["iio"],
+                                is_not_factor_of_n_out)
+
+    a_s.add_forbidden_clause(avoid_pointless_k_blocks)
+    a_s.add_forbidden_clause(limit_work_groups)
+    a_s.add_forbidden_clause(limit_local_memory_use)
+    a_s.add_forbidden_clause(avoid_pointless_i_blocks)
+    a_s.add_forbidden_clause(enforce_factor_of_n_out)
+
+    batch_sizes = cs.OrdinalHyperparameter("batch_size", batch_size_options(knl))
+    a_s.add_hyperparameter(batch_sizes)
+
+    #print(a_s)
+    #print(a_s.values())
+
+    # Select a number of inline blocks such that n_out % outer*inner == 0
+    # Bumping up the start of the range could reduce autotune time, but an empty
+    # autotune set might be returned if i < start value
+    
+    # Loopy confused about the number of dimensions when 
+    # i_outer, i_inner_outer, and i_inner_inner are all 1
+    #inline = np.array([1]) if n_out == 1 else np.arange(1, (n_out // i_inner_inner) + 1)
+
+    #inline = np.arange(1, max(1,(n_out // i_inner_inner)) + 1)
+    #options = list(i_inner_inner*inline[n_out % (inline*i_inner_inner) == 0])
+
+    return a_s
+
+
 def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
 
-    from __init__ import get_einsums
     # Create the list of parameter values to try
 
     # Does not account for local memory usage due to register spilling
@@ -341,6 +502,8 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
     read_dof_arrays = read_deps & frozenset(dof_arrays)
 
 
+    config_space = createConfigSpace(queue, knl)
+
     start_param = (None, None, None, None, None)
     if start_param is not None:
         kio_s, kii_s, iio_s, iii_s, ji_s = start_param
@@ -349,23 +512,17 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
 
     # Iterate over five search dimensions
     parameter_list = []
-    
-    neinsums = len(get_einsums(knl))
-    batch_size_list = [(batch_size, int(np.ceil(neinsums/batch_size))) for batch_size in range(1,neinsums + 1)]
-    nbatches_dict = {}
 
-    # Do in reverse so we wind up with the smallest batch size that requires nbatches
-    for nbatches, batch_size in reversed(batch_size_list):
-        nbatches_dict[nbatches] = batch_size
-    batch_size_list = sorted(nbatches_dict.values())
-
+    batch_sizes = batch_size_options(knl)
     #batch_size_list = [sorted(nbatches_dict.values())[0]]
 
     # Very small batch sizes tend to not run because duplicate_inames increases in cost quadratically with the
     # number of inames
-    for batch_size in list(reversed(batch_size_list)):#range(3,4):#range(1, neinsums + 1):
-        if batch_size >= neinsums:
-            batch_size = 0
+
+    #neinsums = len(get_einsums(knl))
+    for batch_size in batch_sizes:#range(3,4):#range(1, neinsums + 1):
+        #if batch_size >= neinsums:
+        #    batch_size = 0
 
         if n_elem*n_out <= 1024:
             choices = (batch_size, n_elem, n_elem, n_out, n_out, n_in)
@@ -386,7 +543,7 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
                 for kio in k_inner_outer_options(n_in, kii, local_mem_size,# // n_dof_arrays,
                             fp_bytes=fp_bytes,start_val=kio_s,nelem=n_elem):
                     kio_s = None # Set to None so will form the full set the next time around
-                    for iii in i_inner_inner_options(n_out, kii,
+                    for iii in i_inner_inner_options(n_out, k_inner_inner=kii,
                             max_work_group_size=max_work_group_size, start_val=iii_s):
                         iii_s = None
                         for iio in i_inner_outer_options(n_out, iii, start_val=iio_s):
@@ -581,7 +738,7 @@ def einsum3to2_kernel_pspace_generator(queue, knl, start_param=None):
             for kio in k_inner_outer_options(n_in, kii, local_mem_size // n_dof_arrays,
                         fp_bytes=fp_bytes,start_val=kio_s,nelem=n_elem):
                 kio_s = None # Set to None so will form the full set the next time around
-                for iii in i_inner_inner_options(n_out, kii,
+                for iii in i_inner_inner_options(n_out, k_inner_inner=kii,
                         max_work_group_size=max_work_group_size, start_val=iii_s):
                     iii_s = None
                     for iio in i_inner_outer_options(n_out, iii, start_val=iio_s):
@@ -628,7 +785,7 @@ def einsum2to2_kernel_tlist_generator_v2(queue, knl, start_param=None):
     for kii in k_inner_inner_options(start_val=kii_s):
         for kio in k_inner_outer_options(n_in, kii, local_mem_size, fp_bytes=fp_bytes,start_val=kio_s):
             kio_s = None # Set to None so will form the full set the next time around
-            for iii in i_inner_inner_options(n_out, kii,
+            for iii in i_inner_inner_options(n_out, k_inner_innner=kii,
                     max_work_group_size=max_work_group_size, start_val=iii_s):
                 iii_s = None
                 for iio in i_inner_outer_options(n_out, iii, start_val=iio_s):
@@ -759,7 +916,7 @@ def einsum2to2_kernel_pspace_generator(queue, knl, start_param=None):
     for kii in k_inner_inner_options(start_val=kii_s):
         for kio in k_inner_outer_options(n_in, kii, local_mem_size, fp_bytes=fp_bytes,start_val=kio_s):
             kio_s = None # Set to None so will form the full set the next time around
-            for iii in i_inner_inner_options(n_out, kii,
+            for iii in i_inner_inner_options(n_out, k_inner_inner=kii,
                     max_work_group_size=max_work_group_size, start_val=iii_s):
                 iii_s = None
                 for iio in i_inner_outer_options(n_out, iii, start_val=iio_s):
@@ -828,7 +985,7 @@ def einsum4to2_face_mass_kernel_pspace_generator(queue, knl, start_param=None):
         # Both inv_jac_t and vec are prefetched so the amount of available local memory per array is reduced
         for kio in k_inner_outer_options(n_in, kii, local_mem_size // (n_r + 1), fp_bytes=fp_bytes,start_val=kio_s):
             kio_s = None # Set to None so will form the full set the next time around
-            for iii in i_inner_inner_options(n_out, kii,
+            for iii in i_inner_inner_options(n_out, k_inner_inner=kii,
                     max_work_group_size=max_work_group_size, start_val=iii_s):
                 iii_s = None
                 for iio in i_inner_outer_options(n_out, iii, start_val=iio_s):
@@ -921,7 +1078,7 @@ def einsum4to2_kernel_pspace_generator(queue, knl, start_param=None):
         # Both inv_jac_t and vec are prefetched so the amount of available local memory per array is reduced
         for kio in k_inner_outer_options(n_in, kii, local_mem_size // lmem_divisor, fp_bytes=fp_bytes,start_val=kio_s):
             kio_s = None # Set to None so will form the full set the next time around
-            for iii in i_inner_inner_options(n_out, kii,
+            for iii in i_inner_inner_options(n_out, k_inner_inner=kii,
                     max_work_group_size=max_work_group_size, start_val=iii_s):
                 iii_s = None
                 for iio in i_inner_outer_options(n_out, iii, start_val=iio_s):
@@ -984,7 +1141,7 @@ def einsum5to3_kernel_pspace_generator(queue, knl, start_param=None):
         # Both inv_jac_t and vec are prefetched so the amount of available local memory per array is reduced
         for kio in k_inner_outer_options(n_in, kii, local_mem_size // (n_r*n_x + 1), fp_bytes=fp_bytes,start_val=kio_s):
             kio_s = None # Set to None so will form the full set the next time around
-            for iii in i_inner_inner_options(n_out, kii,
+            for iii in i_inner_inner_options(n_out, k_inner_inner=kii,
                     max_work_group_size=max_work_group_size, start_val=iii_s):
                 iii_s = None
                 for iio in i_inner_outer_options(n_out, iii, start_val=iio_s):

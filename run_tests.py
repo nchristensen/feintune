@@ -914,7 +914,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             # Occasionally all kernels time out so the returned answer is bad and ruins the roofline
             # statistics
             avg_time, measured_latency, wall_clock_time = run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=timeout) 
-        elif True:
+        elif False:
             print("Executing test with timeout of", timeout, "seconds") 
             avg_time, measured_latency, wall_clock_time = run_subprocess_with_timout(queue, knl, test_fn, timeout=timeout)
         else:

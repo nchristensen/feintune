@@ -8,7 +8,7 @@ from os.path import exists
 from utils import unique_program_id, convert, load_hjson, dump_hjson
 import hjson
 
-use_charm=False
+use_charm=True
 if use_charm:
     from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
     from charm4py.pool import PoolScheduler, Pool
@@ -373,6 +373,15 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
         print(est)
         raise(ValueError("Unhandled einsum type"))
 
+    from generators import createConfigSpace
+    input_space = createConfigSpace(queue, sk)
+
+
+    from ytopt_autotuning import offline_tuning
+    offline_tuning(sk, 0, input_space, max_flop_rate=max_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
+                     device_latency=device_latency, timeout=np.inf)
+
+    exit()
     tdict = parallel_autotune(sk, 0, trans_list_list, program_id=program_id, max_flop_rate=max_flop_rate, device_latency=device_latency,
             device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
     
@@ -780,7 +789,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
     if save_path is None:
         save_path = "./hjson"
 
-    if True:
+    if False:
         if not use_charm:
             if comm.Get_rank() == 0:
                 # The latency is now obtained per-kernel so it probably needn't be obtained here.
@@ -981,6 +990,13 @@ def main(arg):
                     #"./pickled_programs_prediction_order_3",
                     #"./pickled_programs_prediction_order_4"
                   ]
+    
+    # Could sort subkernels by dimensions, then use the maximum long axis
+    # for the kernels that share the other dimensions as the dimension
+    # length for tuning purposes. Then map the subkernels keys
+    # to that hjson file (or just duplicate the hjson file for each subkernel
+    # key). Need to count that the number of inames is the same though. And need to
+    # figure out the element iname
 
     for directory in directories:
         save_path = directory + "/hjson"
