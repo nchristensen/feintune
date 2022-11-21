@@ -379,7 +379,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
 
     from ytopt_autotuning import offline_tuning
     offline_tuning(sk, 0, input_space, max_flop_rate=max_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
-                     device_latency=device_latency, timeout=np.inf)
+                     device_latency=device_latency, timeout=None)
 
     exit()
     tdict = parallel_autotune(sk, 0, trans_list_list, program_id=program_id, max_flop_rate=max_flop_rate, device_latency=device_latency,

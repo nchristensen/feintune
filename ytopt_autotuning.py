@@ -107,7 +107,7 @@ class ObjectiveFunction(object):
     max_flop_rate: numeric_type = np.inf
     device_memory_bandwidth: numeric_type = np.inf
     device_latency: numeric_type = 0
-    timeout: numeric_type = np.inf
+    timeout: Optional[numeric_type] = None
 
     @property
     def __name__(self):
@@ -152,7 +152,7 @@ class ObjectiveFunction(object):
 
 
 def offline_tuning(knl, platform_id, input_space, max_flop_rate=np.inf, device_memory_bandwidth=np.inf,
-                     device_latency=0, timeout=np.inf):
+                     device_latency=0, timeout=None):
 
     print(input_space)
     output_space = Space([Real(0.0, inf, name="avg_time")])

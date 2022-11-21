@@ -751,7 +751,7 @@ def test_fn_wrapper(bus_id, knl, test_fn):
     return avg_time
 
 
-def run_subprocess_with_timout(queue, knl, test_fn, timeout=np.inf):
+def run_subprocess_with_timeout(queue, knl, test_fn, timeout=None):
     import os
     import uuid
     from pickle import dump
@@ -825,7 +825,7 @@ def unpickle_and_run_test(filename):
     print("|Average execution time|", avg_time, "|Average execution latency|", measured_latency)
 
 
-def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=np.inf):
+def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=None):
 
      
     wrapped_fn = _process_wrapper(test_fn_wrapper, timeout, None, None, mp_context) 
@@ -853,7 +853,7 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=np.inf):
     return result, wall_clock_time
 
 
-def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=np.inf):
+def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None):
     # Timeout won't prevent applying transformations from hanging
 
     transformed = True
@@ -914,9 +914,9 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             # Occasionally all kernels time out so the returned answer is bad and ruins the roofline
             # statistics
             avg_time, measured_latency, wall_clock_time = run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=timeout) 
-        elif False:
+        elif True:
             print("Executing test with timeout of", timeout, "seconds") 
-            avg_time, measured_latency, wall_clock_time = run_subprocess_with_timout(queue, knl, test_fn, timeout=timeout)
+            avg_time, measured_latency, wall_clock_time = run_subprocess_with_timeout(queue, knl, test_fn, timeout=timeout)
         else:
             start = time.time()
             _, avg_time, measured_latency = test_fn(queue, knl)
