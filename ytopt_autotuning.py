@@ -21,29 +21,16 @@ from random import shuffle
 
 
 queue = None
-def set_queue(pe_num, platform_num):
+def set_queue(exec_id, platform_num):
+
     global queue
     if queue is not None:
         raise ValueError("queue is already set")
     platforms = cl.get_platforms()
-    # This is semi-broken because we aren't assured the device list is always
-    # ordered the same, needs to order the devices by some pci_id first
+
     gpu_devices = platforms[platform_num].get_devices(device_type=cl.device_type.GPU)
-    ctx = cl.Context(devices=[gpu_devices[pe_num % len(gpu_devices)]])
+    ctx = cl.Context(devices=[gpu_devices[exec_id % len(gpu_devices)]])
     queue = cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
-
-def get_queue(pe_num, platform_num):
-    #global queue
-    #if queue is not None:
-    #    raise ValueError("queue is already set")
-
-    import pyopencl as cl
-    platforms = cl.get_platforms()
-    gpu_devices = platforms[platform_num].get_devices(device_type=cl.device_type.GPU)
-    ctx = cl.Context(devices=[gpu_devices[pe_num % len(gpu_devices)]])
-    queue = cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
-    return queue
-
 
 
 def get_test_id(tlist):
@@ -63,24 +50,28 @@ def test(args):
     #print("EVAL STR:", eval_str)
 
     if queue is None:
+        # Maybe can just pass a function as an arg
         print("Queue is none. Initializing queue")
+        # This is semi-broken because we aren't assured the device list is always
+        # ordered the same, needs to order the devices by some pci_id first
+        # Also, are pids contiguous?
         if eval_str == "mpi_comm_executor" or eval_str == "mpi_pool_executor":
             import mpi4py.MPI as MPI
             comm = MPI.COMM_WORLD
-            set_queue(comm.Get_rank(), platform_id)
+            exec_id = comm.Get_rank()
         elif eval_str == "charm4py_pool_executor":
             from charm4py import charm
-            set_queue(charm.myPe(), platform_id)
+            exec_id = charm.myPe()
         elif eval_str == "processpool":
             from os import get_pid
-            set_queue(get_pid(), platform_id)
+            exec_id = get_pid
         elif eval_str == "threadpool":
             from threading import get_native_id
-            set_queue(get_native_id(), platform_id)
-        #elif eval_str == "ray":
-        # 
-        else:    
-            set_queue(0, platform_id)
+            exec_id = get_native_id()
+        else:
+            exec_id = 0
+
+        set_queue(exec_id, platform_id)
         
         assert queue is not None
 
@@ -146,19 +137,29 @@ class ObjectiveFunction(object):
         #results = run_single_param_set_v2(queue, knl, tlist, max_flop_rate=max_flop_rate,
         #            device_memory_bandwidth=device_memory_bandwidth, device_latency=device_latency, timeout=timeout)
         
+        # Would be helpful if could return all of the data instead of only avg_time 
         return result["data"]["avg_time"]
 
 
 
 
-def offline_tuning(knl, platform_id, input_space, max_flop_rate=np.inf, device_memory_bandwidth=np.inf,
-                     device_latency=0, timeout=None):
+def offline_tuning(knl, platform_id, input_space, program_id=None, max_flop_rate=np.inf, device_memory_bandwidth=np.inf,
+                     device_latency=0, timeout=None, save_path=None):
+
+    if program_id is None:
+        from utils import unique_program_id
+        pid = unique_program_id(knl)
+    else:
+        pid = program_id
+
+    if save_path is None:
+        save_path = "./"
 
     print(input_space)
     output_space = Space([Real(0.0, inf, name="avg_time")])
-    #eval_str = "mpi_comm_executor"
+    eval_str = "mpi_comm_executor"
     #eval_str = "mpi_pool_executor"
-    eval_str = "charm4py_pool_executor"
+    #eval_str = "charm4py_pool_executor"
     #eval_str = "threadpool"
     #eval_str = "processpool"
     #eval_str = "ray"
@@ -186,5 +187,48 @@ def offline_tuning(knl, platform_id, input_space, max_flop_rate=np.inf, device_m
     #searcher = AsyncSearch(problem=at_problem, evaluator="ray")
     #from mpi4py import MPI
     #comm = MPI.COMM_WORLD
-    searcher = AMBS(problem=at_problem, evaluator=eval_str)
+    output_file_base = save_path + "/" +  pid 
+    searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base)
     searcher.main()
+
+    # Write best result to hjson file
+    import csv
+    csv_file_str = output_file_base + ".csv"
+    best_result = None
+
+    global queue
+
+    with open(csv_file_str) as csvfile:
+        row_list = list(csv.reader(csvfile))
+        row_list.sort(key=lambda row: row[-2])
+        best_result = [int(item) for item in row_list[0][0:-2]]
+        from generators import get_trans_list
+        trans_list = get_trans_list(knl, best_result)
+
+        test_id = get_test_id(trans_list)
+        args = frozendict({"timeout": timeout,
+                "cur_test": None,
+                "total_tests": None,
+                "test_id": test_id,
+                "platform_id": platform_id,
+                "knl": knl,
+                "tlist": trans_list,
+                "test_fn": generic_test,
+                "max_flop_rate": max_flop_rate,
+                "device_latency": device_latency,
+                "device_memory_bandwidth": device_memory_bandwidth,
+                "eval_str": eval_str
+                })
+
+        test_id, tdict = test(args)
+
+        # Re-run to obtain performance data and null-kernel latency
+        #tdict = run_single_param_set_v2(queue, knl, trans_list, generic_test,
+        #            max_flop_rate=max_flop_rate,
+        #            device_memory_bandwidth=device_memory_bandwidth,
+        #            device_latency=device_latency,
+        #            timeout=timeout)
+        
+        from utils import dump_hjson
+        hjson_file_str = save_path + "/" + pid + ".hjson"
+        dump_hjson(hjson_file_str, tdict)

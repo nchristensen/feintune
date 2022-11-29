@@ -8,7 +8,7 @@ from os.path import exists
 from utils import unique_program_id, convert, load_hjson, dump_hjson
 import hjson
 
-use_charm=True
+use_charm=False
 if use_charm:
     from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
     from charm4py.pool import PoolScheduler, Pool
@@ -374,19 +374,22 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
         raise(ValueError("Unhandled einsum type"))
 
     from generators import createConfigSpace
-    input_space = createConfigSpace(queue, sk)
-
-
     from ytopt_autotuning import offline_tuning
-    offline_tuning(sk, 0, input_space, max_flop_rate=max_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
-                     device_latency=device_latency, timeout=None)
+    input_space = createConfigSpace(queue, sk)
+    #print(save_path)
+    #from time import sleep
+    #sleep(5)
+    offline_tuning(sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
+                     device_latency=device_latency, timeout=30, save_path=save_path)
 
-    exit()
+    #exit()
+    """
     tdict = parallel_autotune(sk, 0, trans_list_list, program_id=program_id, max_flop_rate=max_flop_rate, device_latency=device_latency,
             device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
     
     transformations = tdict["transformations"]
     return transformations
+    """
 
     #return list(trans_list_list[0])
 
@@ -979,6 +982,18 @@ def collect_subkernels(tunits):
 
     return out_list, pid_counts
 
+
+def assemble_kernel_transformations(tunit, args, save_path):
+    
+    subkernels = get_subkernels(tunit, args)
+    transform_dict = {"transformations": []}
+    for sk in subkernels:
+        pid = unique_program_id(sk)
+        hjson_file_str = save_path + "/" + pid + ".hjson"
+        hjson = load_hjson(hjson_file_str) 
+        transform_dict["transformations"].extend(hjson["transformations"])
+    
+    return transform_dict
 
 
 def main(arg):

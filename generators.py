@@ -55,7 +55,6 @@ def i_inner_outer_options(n_out, i_inner_inner, start_val=None):
     # Loopy confused about the number of dimensions when 
     # i_outer, i_inner_outer, and i_inner_inner are all 1
     #inline = np.array([1]) if n_out == 1 else np.arange(1, (n_out // i_inner_inner) + 1)
-
     inline = np.arange(1, max(1,(n_out // i_inner_inner)) + 1)
     options = list(i_inner_inner*inline[n_out % (inline*i_inner_inner) == 0])
     start_ind = 0 if start_val is None else options.index(start_val)
@@ -80,8 +79,11 @@ def batch_size_options(knl):
     nbatches_dict = {}
 
     # Do in reverse so we wind up with the smallest batch size that requires nbatches
-    for nbatches, batch_size in reversed(batch_size_list):
-        nbatches_dict[nbatches] = batch_size
+    for batch_size, nbatches in reversed(batch_size_list):
+        if nbatches in nbatches_dict and batch_size < nbatches_dict[nbatches]:
+            nbatches_dict[nbatches] = batch_size
+        else:
+            nbatches_dict[nbatches] = batch_size
     batch_size_list = sorted(nbatches_dict.values())
 
     return list(reversed(batch_size_list))
@@ -362,17 +364,22 @@ def createConfigSpace(queue, knl):
     read_dof_arrays = read_deps & frozenset(dof_arrays)
 
     ## End data gathering
-    
 
     # Element axis
     a_s = cs.ConfigurationSpace(name="autotuning_space")
-    kii = cs.OrdinalHyperparameter("kii", k_inner_inner_options())
+    if n_elem*n_out > 1024:
+        kii = cs.OrdinalHyperparameter("kii", k_inner_inner_options())
+        iii = cs.OrdinalHyperparameter("iii", i_inner_inner_options(n_out, max_work_group_size=max_work_group_size))
+        ji  = cs.OrdinalHyperparameter("ji", j_inner_options(n_in))
+    else:
+        kii = cs.OrdinalHyperparameter("kii", [n_elem])
+        iii = cs.OrdinalHyperparameter("iii", [n_out])
+        ji  = cs.OrdinalHyperparameter("ji", [n_in])
+
     a_s.add_hyperparameter(kii)
-    iii = cs.OrdinalHyperparameter("iii", i_inner_inner_options(n_out, max_work_group_size=max_work_group_size))
     a_s.add_hyperparameter(iii)
-    ji = cs.OrdinalHyperparameter("ji", j_inner_options(n_in))
     a_s.add_hyperparameter(ji)
-    
+
     def work_group_limit(kii, iii):
         return kii*iii > max_work_group_size
 
@@ -417,6 +424,9 @@ def createConfigSpace(queue, knl):
 
     enforce_factor_of_n_out = cs.ForbiddenCallableRelation(a_s["iii"], a_s["iio"],
                                 is_not_factor_of_n_out)
+
+
+
 
     a_s.add_forbidden_clause(avoid_pointless_k_blocks)
     a_s.add_forbidden_clause(limit_work_groups)

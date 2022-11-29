@@ -856,13 +856,14 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=None):
 def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None):
     # Timeout won't prevent applying transformations from hanging
 
+    print("BEGINNING KERNEL TRANSFORMATION")
     transformed = True
     try:
         #knl = func_timeout(timeout, apply_transformation_list, args=(knl_base, trans_list,))
         start = time.time()
         #import pdb; pdb.set_trace()
-        #knl = func_timeout(3600, apply_transformation_list, args=(knl_base, trans_list,))
-        knl = apply_transformation_list(knl_base, trans_list)
+        knl = func_timeout(timeout, apply_transformation_list, args=(knl_base, trans_list,))
+        #knl = apply_transformation_list(knl_base, trans_list)
         end = time.time()
         print("Transformation required", end - start, "seconds")
         #exit()
@@ -898,6 +899,8 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
 
     # Could also look at the amount of cache space used and forbid running those that spill 
 
+    print("BEGINNING KERNEL EXECUTION")
+
     measured_latency = None 
     if local_memory_used <= queue.device.local_mem_size and workitems <= max_work_group_size and transformed: # Don't allow complete filling of local memory
 
@@ -914,7 +917,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             # Occasionally all kernels time out so the returned answer is bad and ruins the roofline
             # statistics
             avg_time, measured_latency, wall_clock_time = run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=timeout) 
-        elif True:
+        elif False:
             print("Executing test with timeout of", timeout, "seconds") 
             avg_time, measured_latency, wall_clock_time = run_subprocess_with_timeout(queue, knl, test_fn, timeout=timeout)
         else:
@@ -925,6 +928,9 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     else:
         print("Invalid kernel: too much local memory used")
         avg_time, wall_clock_time = max_double, max_double # Don't run and return return an infinite run time
+
+
+
 
     if measured_latency is None:
         measured_latency = device_latency
