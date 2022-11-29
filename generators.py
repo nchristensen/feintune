@@ -11,7 +11,7 @@ from __init__ import get_einsums
 def k_inner_inner_options(start_val=None):
     #options = [8, 16, 4, 32]
     #options = [64, 32, 16, 8]
-    options = [64, 32, 16, 8]
+    options = [8, 16, 32, 64]
     #options = [32, 16]
     start_ind = 0 if start_val is None else options.index(start_val)
     options = options[start_ind:]
@@ -42,7 +42,7 @@ def i_inner_inner_options(n_out, k_inner_inner=1, max_work_group_size=1024, star
     factors = np.arange(1, n_out+1)[(n_out % np.arange(1, n_out+1)) == 0]
     # Ensure total number of workitems is less than maximum
     usable_factors = factors[factors*k_inner_inner <= max_work_group_size]
-    options = sorted(usable_factors, reverse=True)
+    options = sorted(usable_factors, reverse=False)
     start_ind = 0 if start_val is None else options.index(start_val)
     options = options[start_ind:]
     return options
