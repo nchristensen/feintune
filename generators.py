@@ -371,68 +371,75 @@ def createConfigSpace(queue, knl):
         kii = cs.OrdinalHyperparameter("kii", k_inner_inner_options())
         iii = cs.OrdinalHyperparameter("iii", i_inner_inner_options(n_out, max_work_group_size=max_work_group_size))
         ji  = cs.OrdinalHyperparameter("ji", j_inner_options(n_in))
+
+        a_s.add_hyperparameter(kii)
+        a_s.add_hyperparameter(iii)
+        a_s.add_hyperparameter(ji)
+
+        def work_group_limit(kii, iii):
+            return kii*iii > max_work_group_size
+
+        limit_work_groups = cs.ForbiddenCallableRelation(a_s["kii"], a_s["iii"],
+                                work_group_limit)
+
+        # This just gives the maximum number of allowed ilp blocks.
+        # Will need to calculate kii*kio for the transformations
+        kio = cs.OrdinalHyperparameter("kio", np.arange(1,7))
+        a_s.add_hyperparameter(kio)
+
+        def k_block_limit(kii, kio):
+            return (kii*kio > n_elem) and (kio > 1)
+        
+        avoid_pointless_k_blocks = cs.ForbiddenCallableRelation(a_s["kii"], a_s["kio"],
+                                    k_block_limit)
+        # Assumes we don't have to create blocks on the DOF axis.
+        # This is only a rough estimate assuming one DOF array.
+        # A more stringent checkout would account for the total number of DOF
+        # arrays in use at once. However, this depends on, among other things,
+        # the batch size of the einsums and how many distinct DOF arrays
+        # each einsum needs. In any case, the test code will catch kernels
+        # that use too much local mememory and return a very large run time.
+        def local_memory_limit(kii, kio):
+            return fp_bytes*kio*kii*n_in > local_mem_size        
+
+        limit_local_memory_use = cs.ForbiddenCallableRelation(a_s["kii"], a_s["kio"],
+                                local_memory_limit)
+
+        # Assume we can anywhere from 1 block with all dofs to ndof blocks with one dof
+        iio = cs.OrdinalHyperparameter("iio", np.arange(1, max(1,n_out) + 1))        
+        a_s.add_hyperparameter(iio)
+
+        def i_block_limit(iii, iio):
+            return (iio*iii > n_out) and (iio > 1)
+
+        avoid_pointless_i_blocks = cs.ForbiddenCallableRelation(a_s["iii"], a_s["iio"],
+                                    i_block_limit)
+
+        def is_not_factor_of_n_out(iii, iio):
+            return n_out % (iio*iii) != 0
+
+        enforce_factor_of_n_out = cs.ForbiddenCallableRelation(a_s["iii"], a_s["iio"],
+                                    is_not_factor_of_n_out)
+
+        a_s.add_forbidden_clause(avoid_pointless_k_blocks)
+        a_s.add_forbidden_clause(limit_work_groups)
+        a_s.add_forbidden_clause(limit_local_memory_use)
+        a_s.add_forbidden_clause(avoid_pointless_i_blocks)
+        a_s.add_forbidden_clause(enforce_factor_of_n_out)
+
     else:
+
         kii = cs.OrdinalHyperparameter("kii", [n_elem])
         iii = cs.OrdinalHyperparameter("iii", [n_out])
+        kio = cs.OrdinalHyperparameter("kio", [n_elem])
+        iio = cs.OrdinalHyperparameter("iio", [n_out])
         ji  = cs.OrdinalHyperparameter("ji", [n_in])
 
-    a_s.add_hyperparameter(kii)
-    a_s.add_hyperparameter(iii)
-    a_s.add_hyperparameter(ji)
-
-    def work_group_limit(kii, iii):
-        return kii*iii > max_work_group_size
-
-    limit_work_groups = cs.ForbiddenCallableRelation(a_s["kii"], a_s["iii"],
-                            work_group_limit)
-
-    # This just gives the maximum number of allowed ilp blocks.
-    # Will need to calculate kii*kio for the transformations
-    kio = cs.OrdinalHyperparameter("kio", np.arange(1,7))
-    a_s.add_hyperparameter(kio)
-
-    def k_block_limit(kii, kio):
-        return (kii*kio > n_elem) and (kio > 1)
-    
-    avoid_pointless_k_blocks = cs.ForbiddenCallableRelation(a_s["kii"], a_s["kio"],
-                                k_block_limit)
-    # Assumes we don't have to create blocks on the DOF axis.
-    # This is only a rough estimate assuming one DOF array.
-    # A more stringent checkout would account for the total number of DOF
-    # arrays in use at once. However, this depends on, among other things,
-    # the batch size of the einsums and how many distinct DOF arrays
-    # each einsum needs. In any case, the test code will catch kernels
-    # that use too much local mememory and return a very large run time.
-    def local_memory_limit(kii, kio):
-        return fp_bytes*kio*kii*n_in > local_mem_size        
-
-    limit_local_memory_use = cs.ForbiddenCallableRelation(a_s["kii"], a_s["kio"],
-                            local_memory_limit)
-
-    # Assume we can anywhere from 1 block with all dofs to ndof blocks with one dof
-    iio = cs.OrdinalHyperparameter("iio", np.arange(1, max(1,n_out) + 1))        
-    a_s.add_hyperparameter(iio)
-
-    def i_block_limit(iii, iio):
-        return (iio*iii > n_out) and (iio > 1)
-
-    avoid_pointless_i_blocks = cs.ForbiddenCallableRelation(a_s["iii"], a_s["iio"],
-                                i_block_limit)
-
-    def is_not_factor_of_n_out(iii, iio):
-        return n_out % (iio*iii) != 0
-
-    enforce_factor_of_n_out = cs.ForbiddenCallableRelation(a_s["iii"], a_s["iio"],
-                                is_not_factor_of_n_out)
-
-
-
-
-    a_s.add_forbidden_clause(avoid_pointless_k_blocks)
-    a_s.add_forbidden_clause(limit_work_groups)
-    a_s.add_forbidden_clause(limit_local_memory_use)
-    a_s.add_forbidden_clause(avoid_pointless_i_blocks)
-    a_s.add_forbidden_clause(enforce_factor_of_n_out)
+        a_s.add_hyperparameter(kii)
+        a_s.add_hyperparameter(iii)
+        a_s.add_hyperparameter(ji)
+        a_s.add_hyperparameter(kio)
+        a_s.add_hyperparameter(iio)
 
     batch_sizes = cs.OrdinalHyperparameter("batch_size", batch_size_options(knl))
     a_s.add_hyperparameter(batch_sizes)
@@ -450,6 +457,8 @@ def createConfigSpace(queue, knl):
 
     #inline = np.arange(1, max(1,(n_out // i_inner_inner)) + 1)
     #options = list(i_inner_inner*inline[n_out % (inline*i_inner_inner) == 0])
+
+
 
     return a_s
 
