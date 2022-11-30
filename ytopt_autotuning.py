@@ -64,8 +64,8 @@ def test(args):
             from charm4py import charm
             exec_id = charm.myPe()
         elif eval_str == "processpool":
-            from os import get_pid
-            exec_id = get_pid
+            from os import getpid
+            exec_id = getpid()
         elif eval_str == "threadpool":
             from threading import get_native_id
             exec_id = get_native_id()
@@ -166,11 +166,11 @@ def offline_tuning(in_queue, knl, platform_id, input_space, program_id=None, max
 
     print(input_space)
     output_space = Space([Real(0.0, inf, name="avg_time")])
-    eval_str = "mpi_comm_executor"
+    #eval_str = "mpi_comm_executor"
     #eval_str = "mpi_pool_executor"
     #eval_str = "charm4py_pool_executor"
     #eval_str = "threadpool"
-    #eval_str = "processpool"
+    eval_str = "processpool"
     #eval_str = "ray"
 
     obj_func = ObjectiveFunction(knl, eval_str=eval_str, platform_id=platform_id, max_flop_rate=max_flop_rate,
@@ -199,6 +199,8 @@ def offline_tuning(in_queue, knl, platform_id, input_space, program_id=None, max
     output_file_base = save_path + "/" +  pid 
     searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base)
     searcher.main()
+
+    print("======FINISHING SEARCHING========")
 
     # Write best result to hjson file
     import csv
@@ -251,3 +253,7 @@ def offline_tuning(in_queue, knl, platform_id, input_space, program_id=None, max
             from utils import dump_hjson
             hjson_file_str = save_path + "/" + pid + ".hjson"
             dump_hjson(hjson_file_str, tdict)
+
+    print("======RETURNING FROM SEARCH========")
+
+    return True
