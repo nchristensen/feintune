@@ -170,8 +170,8 @@ def offline_tuning(in_queue, knl, platform_id, input_space, program_id=None, max
     #eval_str = "mpi_pool_executor"
     #eval_str = "charm4py_pool_executor"
     #eval_str = "threadpool"
-    eval_str = "processpool"
-    #eval_str = "ray"
+    #eval_str = "processpool"
+    eval_str = "ray"
 
     obj_func = ObjectiveFunction(knl, eval_str=eval_str, platform_id=platform_id, max_flop_rate=max_flop_rate,
                                     device_memory_bandwidth=device_memory_bandwidth, device_latency=device_latency,
@@ -214,14 +214,21 @@ def offline_tuning(in_queue, knl, platform_id, input_space, program_id=None, max
             # The results in the csv file aren't directly transformation
             # parameters. They kio and iio need to be changed.
             row_list = list(csv.reader(csvfile))
-            row_list.sort(key=lambda row: row[-2])
+            column_names = row_list[0]
+            rows = list(row_list)[1:]
+            rows.sort(key=lambda row: row[-2])
             #batch_size,iii,iio,ji,kii,kio,objective,elapsed_sec
-            best_result = [int(item) for item in row_list[0][0:-2]]
-            best_result[2] *= best_result[1]
-            best_result[5] *= best_result[4]
+            p = dict(zip(column_names, [int(item) for item in rows[0][:-2]]))
+            
+            params = (p["batch_size"],
+                      p["kio"]*p["kii"],
+                      p["kii"],
+                      p["iio"]*p["iii"],
+                      p["iii"],
+                      p["ji"],)
 
             from generators import get_trans_list
-            trans_list = get_trans_list(knl, best_result)
+            trans_list = get_trans_list(knl, params)
 
 
             """
