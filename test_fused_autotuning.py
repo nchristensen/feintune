@@ -383,7 +383,8 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
     offline_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
                      device_latency=device_latency, timeout=30, save_path=save_path)
 
-    #exit()
+    # For some reason it freezes sometime before it starts the next one
+    exit()
     """
     tdict = parallel_autotune(sk, 0, trans_list_list, program_id=program_id, max_flop_rate=max_flop_rate, device_latency=device_latency,
             device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
@@ -1001,10 +1002,10 @@ def main(arg):
 
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directories = [ "./pickled_programs_prediction_order_1",
+    directories = [ #"./pickled_programs_prediction_order_1",
                     #"./pickled_programs_prediction_order_2",
                     #"./pickled_programs_prediction_order_3",
-                    #"./pickled_programs_prediction_order_4"
+                    "./pickled_programs_prediction_order_4"
                   ]
     
     # Could sort subkernels by dimensions, then use the maximum long axis
