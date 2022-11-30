@@ -367,7 +367,7 @@ def createConfigSpace(queue, knl):
 
     # Element axis
     a_s = cs.ConfigurationSpace(name="autotuning_space")
-    if n_elem*n_out > 1024:
+    if True:#n_elem*n_out > 1024:
         kii = cs.OrdinalHyperparameter("kii", k_inner_inner_options())
         iii = cs.OrdinalHyperparameter("iii", i_inner_inner_options(n_out, max_work_group_size=max_work_group_size))
         ji  = cs.OrdinalHyperparameter("ji", j_inner_options(n_in))

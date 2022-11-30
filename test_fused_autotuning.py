@@ -7,6 +7,9 @@ import os
 from os.path import exists
 from utils import unique_program_id, convert, load_hjson, dump_hjson
 import hjson
+from generators import createConfigSpace
+from ytopt_autotuning import offline_tuning
+
 
 use_charm=False
 if use_charm:
@@ -373,13 +376,11 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
         print(est)
         raise(ValueError("Unhandled einsum type"))
 
-    from generators import createConfigSpace
-    from ytopt_autotuning import offline_tuning
     input_space = createConfigSpace(queue, sk)
     #print(save_path)
     #from time import sleep
     #sleep(5)
-    offline_tuning(sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
+    offline_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
                      device_latency=device_latency, timeout=30, save_path=save_path)
 
     #exit()
@@ -844,7 +845,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                         autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
-                    elif not indirection and red_axes > 0 and total_axes <= 5 and einsum_count <= 2:
+                    elif not indirection and red_axes > 0 and total_axes <= 5 and einsum_count == 2:
                         autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
@@ -1000,10 +1001,10 @@ def main(arg):
 
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directories = [ #"./pickled_programs_prediction_order_1",
+    directories = [ "./pickled_programs_prediction_order_1",
                     #"./pickled_programs_prediction_order_2",
                     #"./pickled_programs_prediction_order_3",
-                    "./pickled_programs_prediction_order_4"
+                    #"./pickled_programs_prediction_order_4"
                   ]
     
     # Could sort subkernels by dimensions, then use the maximum long axis
