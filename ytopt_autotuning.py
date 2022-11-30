@@ -208,11 +208,19 @@ def offline_tuning(in_queue, knl, platform_id, input_space, program_id=None, max
     if exec_id == 0:
 
         with open(csv_file_str) as csvfile:
+
+            # The results in the csv file aren't directly transformation
+            # parameters. They kio and iio need to be changed.
             row_list = list(csv.reader(csvfile))
             row_list.sort(key=lambda row: row[-2])
+            #batch_size,iii,iio,ji,kii,kio,objective,elapsed_sec
             best_result = [int(item) for item in row_list[0][0:-2]]
+            best_result[2] *= best_result[1]
+            best_result[5] *= best_result[4]
+
             from generators import get_trans_list
             trans_list = get_trans_list(knl, best_result)
+
 
             """
             test_id = get_test_id(trans_list)

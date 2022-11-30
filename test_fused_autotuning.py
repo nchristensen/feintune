@@ -845,7 +845,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                         autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
-                    elif not indirection and red_axes > 0 and total_axes <= 5 and einsum_count == 2:
+                    elif not indirection and red_axes > 0 and total_axes <= 5 and einsum_count <= 2:
                         autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
