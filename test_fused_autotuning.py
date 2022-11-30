@@ -383,8 +383,12 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
     offline_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
                      device_latency=device_latency, timeout=30, save_path=save_path)
 
+
+    #exit()
+
+    return True
+
     # For some reason it freezes sometime before it starts the next one
-    exit()
     """
     tdict = parallel_autotune(sk, 0, trans_list_list, program_id=program_id, max_flop_rate=max_flop_rate, device_latency=device_latency,
             device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)

@@ -169,9 +169,9 @@ def offline_tuning(in_queue, knl, platform_id, input_space, program_id=None, max
     #eval_str = "mpi_comm_executor"
     #eval_str = "mpi_pool_executor"
     #eval_str = "charm4py_pool_executor"
-    #eval_str = "threadpool"
+    eval_str = "threadpool"
     #eval_str = "processpool"
-    eval_str = "ray"
+    #eval_str = "ray"
 
     obj_func = ObjectiveFunction(knl, eval_str=eval_str, platform_id=platform_id, max_flop_rate=max_flop_rate,
                                     device_memory_bandwidth=device_memory_bandwidth, device_latency=device_latency,
