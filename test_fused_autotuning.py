@@ -792,7 +792,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
     if save_path is None:
         save_path = "./hjson"
 
-    if False:
+    if True:
         if not use_charm:
             if comm.Get_rank() == 0:
                 # The latency is now obtained per-kernel so it probably needn't be obtained here.
@@ -1000,10 +1000,10 @@ def main(arg):
 
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directories = [ "./pickled_programs_prediction_order_1",
+    directories = [ #"./pickled_programs_prediction_order_1",
                     #"./pickled_programs_prediction_order_2",
                     #"./pickled_programs_prediction_order_3",
-                    #"./pickled_programs_prediction_order_4"
+                    "./pickled_programs_prediction_order_4"
                   ]
     
     # Could sort subkernels by dimensions, then use the maximum long axis

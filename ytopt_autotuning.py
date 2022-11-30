@@ -36,9 +36,10 @@ def set_queue(exec_id, platform_num):
 def get_test_id(tlist):
     return md5(str(tlist).encode()).hexdigest()
 
-
+exec_id = None
 def test(args):
     global queue
+    global exec_id
     print(args)
     #timeout, ((cur_test, total_tests,), (test_id, platform_id, knl, tlist, test_fn, max_flop_rate, device_latency, device_memory_bandwidth,),eval_str) = args
     #comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
@@ -75,10 +76,13 @@ def test(args):
         
         assert queue is not None
 
+
+    print("EXECUTOR ID", exec_id)
+
     cur_test = args["cur_test"]
     total_tests = args["total_tests"]
 
-    print(f"\nExecuting test {cur_test} of {total_tests}\n")
+    #print(f"\nExecuting test {cur_test} of {total_tests}\n")
     result = run_single_param_set_v2(queue, args["knl"], args["tlist"], args["test_fn"],
             max_flop_rate=args["max_flop_rate"],
             device_memory_bandwidth=args["device_memory_bandwidth"],
