@@ -384,7 +384,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
                      device_latency=device_latency, timeout=30, save_path=save_path)
 
 
-    #exit()
+    exit()
 
     return True
 
@@ -846,11 +846,8 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                     out_axes = total_axes - red_axes
                     
                     print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
-                    if False:#not indirection and out_axes == 3 and total_axes == 5 and einsum_count > 0:
-                        autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
-                                device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
-                    elif not indirection and red_axes > 0 and total_axes <= 5 and einsum_count <= 2:
+                    if not indirection and red_axes > 0 and total_axes == 4 and einsum_count <= 4:
                         autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
@@ -1008,8 +1005,8 @@ def main(arg):
     #directory = "./pickled_programs_prediction"
     directories = [ #"./pickled_programs_prediction_order_1",
                     #"./pickled_programs_prediction_order_2",
-                    #"./pickled_programs_prediction_order_3",
-                    "./pickled_programs_prediction_order_4"
+                    "./pickled_programs_prediction_order_3",
+                    #"./pickled_programs_prediction_order_4"
                   ]
     
     # Could sort subkernels by dimensions, then use the maximum long axis
@@ -1020,7 +1017,7 @@ def main(arg):
     # figure out the element iname
 
     for directory in directories:
-        save_path = directory + "/hjson"
+        save_path = directory + "/four_axis_hjson_gbrt"
         tunits = get_pickled_tunits(directory)
         # ID changes based on whether python was run with -O
         sk_list, pid_dict = collect_subkernels(tunits)

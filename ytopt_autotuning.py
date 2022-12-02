@@ -166,10 +166,10 @@ def offline_tuning(in_queue, knl, platform_id, input_space, program_id=None, max
 
     print(input_space)
     output_space = Space([Real(0.0, inf, name="avg_time")])
-    #eval_str = "mpi_comm_executor"
+    eval_str = "mpi_comm_executor"
     #eval_str = "mpi_pool_executor"
     #eval_str = "charm4py_pool_executor"
-    eval_str = "threadpool"
+    #eval_str = "threadpool"
     #eval_str = "processpool"
     #eval_str = "ray"
 
@@ -197,7 +197,13 @@ def offline_tuning(in_queue, knl, platform_id, input_space, program_id=None, max
     #from mpi4py import MPI
     #comm = MPI.COMM_WORLD
     output_file_base = save_path + "/" +  pid 
-    searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base)
+    #learner = "DUMMY"
+    #learner = "RF"
+    #learner = "ET"
+    learner = "GBRT"
+    #learner = "GP" # Doesn't work with ConfigSpace
+    seed = 12345
+    searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner, set_seed=seed)
     searcher.main()
 
     print("======FINISHING SEARCHING========")
