@@ -444,21 +444,12 @@ def createConfigSpace(queue, knl):
     batch_sizes = cs.OrdinalHyperparameter("batch_size", batch_size_options(knl))
     a_s.add_hyperparameter(batch_sizes)
 
-    #print(a_s)
-    #print(a_s.values())
-
-    # Select a number of inline blocks such that n_out % outer*inner == 0
-    # Bumping up the start of the range could reduce autotune time, but an empty
-    # autotune set might be returned if i < start value
-    
-    # Loopy confused about the number of dimensions when 
-    # i_outer, i_inner_outer, and i_inner_inner are all 1
-    #inline = np.array([1]) if n_out == 1 else np.arange(1, (n_out // i_inner_inner) + 1)
-
-    #inline = np.arange(1, max(1,(n_out // i_inner_inner)) + 1)
-    #options = list(i_inner_inner*inline[n_out % (inline*i_inner_inner) == 0])
-
-
+    # Hyperparameter for the number of elements. This is set to be a constant, but
+    # should allow the tests of kernels with different element counts to inform
+    # the selection.
+    # Maybe set upper based on maximum memory size?
+    num_elements = cs.NormalIntegerHyperparameter(name="num_elements", mu=n_elem, sigma=0, lower=0, upper=1e8, default_value=n_elem)
+    a_s.add_hyperparameter(num_elements)
 
     return a_s
 

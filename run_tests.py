@@ -10,10 +10,11 @@ from pyopencl.tools import ImmediateAllocator, MemoryPool
 from frozendict import frozendict
 from pebble import concurrent, ProcessExpired
 from pebble.concurrent.process import _process_wrapper
-from concurrent.futures import TimeoutError
+from concurrent.futures import TimeoutError, BrokenExecutor
 import multiprocessing as mp
 import base64
 from func_timeout import func_timeout, FunctionTimedOut
+from multiprocessing import shared_memory
 
 max_double = np.finfo('f').max
 #from loopy.kernel.data import AddressSpace
@@ -710,6 +711,7 @@ def run_single_param_set(queue, knl_base, tlist_generator, params, test_fn, max_
     return retval
 
 
+# Useful elsewhere. Maybe move to utils or as a utility function in pyopencl
 def get_queue_from_bus_id(bus_id):
     for platform in cl.get_platforms():
         for d in platform.get_devices():
@@ -725,9 +727,10 @@ def get_queue_from_bus_id(bus_id):
                 my_queue = cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
                 return my_queue
 
-    raise ValueError(f"No device with bus_id {bus_id} found")
+    raise RuntimeError(f"No device with bus_id {bus_id} found")
 
 
+# Useful elsewhere. Maybe move to utils or as a utility function in pyopencl
 def get_bus_id_from_queue(queue):
     d = queue.device
     if "NVIDIA" in d.vendor:
@@ -739,41 +742,35 @@ def get_bus_id_from_queue(queue):
     return d_bus_id
 
 
-# Cuda initialization fails if try to fork rather than spawn
-mp_context = mp.get_context('spawn')
-
-# Need to change the timeout so can't use this decorate (and can't decorating
-# a function while using 'spawn' is not support inside another function)
-#@concurrent.process(context=mp.get_context('spawn'), timeout=autotune_timeout)
-def test_fn_wrapper(bus_id, knl, test_fn):
-    queue = get_queue_from_bus_id(bus_id)
-    dev_arrays, avg_time = test_fn(queue,knl)
-    return avg_time
-
 
 def run_subprocess_with_timeout(queue, knl, test_fn, timeout=None):
     import os
     import uuid
-    from pickle import dump
+    from pickle import dump, dumps
     from subprocess import run, TimeoutExpired, CalledProcessError, Popen, PIPE, STDOUT
-   
+  
     #pickled_knl = base64.b85encode(dumps(knl)).decode('ASCII')
     #pickled_test_fn = base64.b85encode(dumps(test_fn)).decode('ASCII')
     bus_id = get_bus_id_from_queue(queue)
 
-    filename = str(uuid.uuid4()) + ".tmp"
-    out_file = open(filename, "wb")
-    dump(tuple([knl, test_fn, bus_id]), out_file)
-    out_file.close()
+    #filename = str(uuid.uuid4()) + ".tmp"
+    #out_file = open(filename, "wb")
+    #dump(tuple([knl, test_fn, bus_id]), out_file)
+    #out_file.close()
+
+    pickled_data = dumps([knl, test_fn, bus_id])
+    shm = shared_memory.SharedMemory(create=True, size=len(pickled_data))
+    shm.buf[:] = pickled_data[:]
+    
 
     #unpickle_and_run_test(filename)
 
     start = time.time()
-    proc = Popen(["python", "run_tests.py", filename], stdout=PIPE, stderr=STDOUT, text=True)
+    proc = Popen(["python", "run_tests.py", shm.name], stdout=PIPE, stderr=STDOUT, text=True)
+    shm.close()
+    #proc = Popen(["python", "run_tests.py", filename], stdout=PIPE, stderr=STDOUT, text=True)
     try:
         output, err = proc.communicate(timeout=timeout)
-        #print(output)
-        #exit()
         if proc.returncode != 0:
             raise CalledProcessError(proc.returncode, proc.args, output=output)
         split_output = output.split("|")
@@ -781,8 +778,9 @@ def run_subprocess_with_timeout(queue, knl, test_fn, timeout=None):
         retval = float(split_output[-3]), float(split_output[-1]), end - start
     except TimeoutExpired:
         print("Subprocess timed out")
-        with proc:
-            proc.kill()
+        proc.kill()
+        #with proc:
+        #    proc.kill()
         retval = max_double, None, 0
 
     #out, err = proc.communicate()        
@@ -802,14 +800,37 @@ def run_subprocess_with_timeout(queue, knl, test_fn, timeout=None):
     except CalledProcessError as e:
         print("Subprocess failed with the following output:")
         print(e.output)
-        os.remove(filename) 
-        exit()
+        #os.remove(filename) 
+        proc.kill()
         retval = max_double, None, 0
 
-    os.remove(filename) 
+        exit()
+
+    #os.remove(filename) 
 
     return retval
 
+def unpickle_and_run_test(sh_mem_name):
+    from pickle import loads
+    
+    sh_mem = shared_memory.SharedMemory(sh_mem_name)
+    knl, test_fn, bus_id = loads(sh_mem.buf) 
+    sh_mem.close()
+    sh_mem.unlink()
+    
+    #in_file = open(filename, "rb")
+    #knl, test_fn, bus_id = load(in_file)
+    #in_file.close()
+    
+    #knl = loads(base64.b85decode(pickled_knl.encode('ASCII')))
+    #test_fn = loads(base64.b85decode(pickled_test_fn.encode('ASCII')))
+    queue = get_queue_from_bus_id(int(bus_id))
+    dev_arrays, avg_time, measured_latency = test_fn(queue, knl)
+    
+    print("|Average execution time|", avg_time, "|Average execution latency|", measured_latency)
+
+
+"""
 def unpickle_and_run_test(filename):
     from pickle import load
 
@@ -823,43 +844,70 @@ def unpickle_and_run_test(filename):
     dev_arrays, avg_time, measured_latency = test_fn(queue, knl)
     
     print("|Average execution time|", avg_time, "|Average execution latency|", measured_latency)
+"""
+
+# Need to change the timeout so can't use this decorate (and can't decorating
+# a function while using 'spawn' is not support inside another function)
+#@concurrent.process(context=mp.get_context('spawn'), timeout=autotune_timeout)
+def test_fn_wrapper(bus_id, knl, test_fn):
+    queue = get_queue_from_bus_id(bus_id)
+    dev_arrays, avg_time, measured_latency = test_fn(queue,knl)
+    return avg_time, measured_latency
 
 
-def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=None):
+#mp_context = mp.get_context('spawn')
+mp_context = mp.get_context('forkserver')
+def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=None, method="threadpool"):
 
-     
-    wrapped_fn = _process_wrapper(test_fn_wrapper, timeout, None, None, mp_context) 
+    # Cuda initialization fails with fork, but spawn and forkserver may also not play well with mpi
+
     bus_id = get_bus_id_from_queue(queue)
+
+    if method == "pebble":
+        wrapped_fn = _process_wrapper(test_fn_wrapper, timeout, None, None, mp_context) 
+        future = wrapped_fn(bus_id, knl, test_fn)
+        executor = None
+    else:
+        if method == "processpool":
+            from concurrent.futures import ProcessPoolExecutor as Executor
+            executor = Executor(max_workers=1, mp_context=mp_context)
+        else:
+            from concurrent.futures import ThreadPoolExecutor as Executor
+            executor = Executor(max_workers=1)
+       
+        future = executor.submit(test_fn_wrapper, bus_id, knl, test_fn) 
+
     start = time.time()
-    future = wrapped_fn(bus_id, knl, test_fn)
-
-    #future = test_fn_wrapper(bus_id, knl, test_fn)
-
     try:
-        result = future.result()
+        avg_time, measured_latency = future.result(timeout=timeout)
     except TimeoutError as error:
         print("Test function timed out. Time limit %f seconds. Returning null result" % float(error.args[1]))
-        result = max_double
+        avg_time, measured_latency = max_double, 0
+    except BrokenExecutor as error:
+        print("Executor broke. This may be due to the GPU code crashing the process.")
+        print(error)
+        avg_time, measured_latency = max_double, 0
     except ProcessExpired as error:
         print("%s. Exit code: %d" % (error, error.exitcode))
-        result = max_double
+        avg_time, measured_latency = max_double, 0
     except Exception as error:    
         print("Test function raised %s" % error)
         print(error.traceback)  # traceback of the function
-
     end = time.time()
-    wall_clock_time = end - start if result != max_double else max_double
 
-    return result, wall_clock_time
+    if executor is not None:    
+        executor.shutdown(wait=True, cancel_futures=True)
 
+    wall_clock_time = end - start if avg_time != max_double else max_double
 
-def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None):
+    return avg_time, measured_latency, wall_clock_time
+
+def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, method="thread"):
     # Timeout won't prevent applying transformations from hanging
 
     print("BEGINNING KERNEL TRANSFORMATION")
     transformed = True
     try:
-        #knl = func_timeout(timeout, apply_transformation_list, args=(knl_base, trans_list,))
         start = time.time()
         #import pdb; pdb.set_trace()
         knl = func_timeout(timeout, apply_transformation_list, args=(knl_base, trans_list,))
@@ -904,32 +952,30 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     measured_latency = None 
     if local_memory_used <= queue.device.local_mem_size and workitems <= max_work_group_size and transformed: # Don't allow complete filling of local memory
 
-        # Maybe not needed anymore?
-        #knl_flops = get_knl_flops(knl)
-        #if device_latency is not None and device_memory_bandwidth is not None and max_flop_rate is not None:
-        #    roofline_flop_rate = get_knl_device_memory_roofline(knl, max_flop_rate,
-        #            device_latency, device_memory_bandwidth)
-        #    roofline_execution_time = knl_flops/roofline_flop_rate
-        #    timeout = max(timeout, 1000*roofline_execution_time)
-
-        if False:
-            # Breaks with certain MPI implementations
-            # Occasionally all kernels time out so the returned answer is bad and ruins the roofline
-            # statistics
-            avg_time, measured_latency, wall_clock_time = run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=timeout) 
-        elif True:
-            print("Executing test with timeout of", timeout, "seconds") 
-            avg_time, measured_latency, wall_clock_time = run_subprocess_with_timeout(queue, knl, test_fn, timeout=timeout)
-        else:
+        # Should check what the performance difference is between None, subprocess, and thread
+        if method is None:
             start = time.time()
             _, avg_time, measured_latency = test_fn(queue, knl)
             end = time.time()
             wall_clock_time = end - start
+        elif method == "subprocess":
+            print("Executing test with timeout of", timeout, "seconds") 
+            avg_time, measured_latency, wall_clock_time = run_subprocess_with_timeout(queue, knl, test_fn, timeout=timeout)
+        elif method == "thread":
+            # Concurrent futures with threads should do the same thing
+            try:
+                start = time.time()
+                _, avg_time, measured_latency = func_timeout(timeout, test_fn, args=(queue, knl,))
+                end = time.time()
+                wall_clock_time = end - start
+            except FunctionTimedOut as e:
+                print("Execution timed out")
+                avg_time, wall_clock_time = max_double, max_double # Don't run and return return an infinite run time
+        else: # processpool and pebble concurrent processes will break with MPI, use subprocess instead
+            avg_time, measured_latency, wall_clock_time = run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=timeout, method=method) 
     else:
         print("Invalid kernel: too much local memory used")
         avg_time, wall_clock_time = max_double, max_double # Don't run and return return an infinite run time
-
-
 
 
     if measured_latency is None:

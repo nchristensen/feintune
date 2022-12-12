@@ -2,8 +2,10 @@ from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
 from charm4py.pool import PoolScheduler, Pool, PoolExecutor
 from charm4py.charm import Charm, CharmRemote
 import numpy as np
+from time import sleep
 
 def multiply(a,b):
+    sleep(10*np.random.rand())
     return a*b
 
 def main(arg):
@@ -19,23 +21,26 @@ def main(arg):
 
     from concurrent.futures import wait
     from time import time, sleep
+    futures[0].set_running_or_notify_cancel()
 
     for future in futures:
-        future.set_running_or_notify_cancel()
+        print(future._state)
+        #future.set_running_or_notify_cancel()
         #future.deposit(5)
+        #future.send(result=5)
 
     #futures[0].get()
 
-    while(True):
-        for future in futures:
-            #print("Called GET at time", time())
-            print(future.gotvalues)
-            #print(future)
-            #future.cancel()
-            #future()
-            #print(future)
+
+    for future in futures:
+        #print("Called GET at time", time())
+        print(future.values)
+        #print(future.gotvalues)
+        #print(future)
+        #future.cancel()
+        #future()
+        #print(future)
     """
-    from time import sleep
     for future in futures:
         #print(future._state)
         future.set_running_or_notify_cancel()

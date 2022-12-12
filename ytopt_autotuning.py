@@ -109,6 +109,8 @@ class ObjectiveFunction(object):
         return self.__repr__()
 
     def __call__(self, p):
+        # num_elements is only used for training the model,
+        # not for running the tests
         params = (p["batch_size"],
                   p["kio"]*p["kii"],
                   p["kii"],
@@ -150,8 +152,7 @@ class ObjectiveFunction(object):
 
 
 
-def offline_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_flop_rate=np.inf, device_memory_bandwidth=np.inf,
-                     device_latency=0, timeout=None, save_path=None):
+def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, save_path=None):
 
     global exec_id
 
@@ -177,6 +178,15 @@ def offline_tuning(in_queue, knl, platform_id, input_space, program_id=None, max
                                     device_memory_bandwidth=device_memory_bandwidth, device_latency=device_latency,
                                     timeout=timeout)
 
+    # If want to time step (advance simulation) while tuning, need to use the actual kernel and data, so each node is
+    # independent... but maybe the results can be unified after kernel execution? Each rank should have a different
+    # seed then. But if the tuning is done in a different process then the results won't be available anyway, at
+    # least not without piping it to the main process or saving it to a file, which would require saving it off the
+    # the GPU or somehow sharing the buffer between processes (which is impossible).
+
+    # Could have the arg sizes be a parameter and then fix the sizes for the kernel that must be run
+    # (slightly different config space for each rank)
+
     at_problem = TuningProblem(
         task_space=None,
         input_space=input_space,
@@ -190,12 +200,6 @@ def offline_tuning(in_queue, knl, platform_id, input_space, program_id=None, max
     #    print(p)
     #    print(obj_func(p))
      
-    # Not quite certain what the difference is between
-    # these but AsyncSearch seems to support MPI. Can't find NeuralNetworksDropoutRegressor
-    # or any of the other dependencies. Why is this included?
-    #searcher = AsyncSearch(problem=at_problem, evaluator="ray")
-    #from mpi4py import MPI
-    #comm = MPI.COMM_WORLD
     output_file_base = save_path + "/" +  pid 
     #learner = "DUMMY"
     #learner = "RF"
@@ -203,22 +207,42 @@ def offline_tuning(in_queue, knl, platform_id, input_space, program_id=None, max
     learner = "GBRT"
     #learner = "GP" # Doesn't work with ConfigSpace
     seed = 12345
-    searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner, set_seed=seed)
+
+    import csv
+    csv_file_str = output_file_base + ".csv"
+
+    initial_observations = []
+
+    if exists(csv_file_str):
+        print(f"Loading saved data from {csv_file_str}")
+        with open(csv_file_str) as csvfile:
+            row_list = list(csv.reader(csvfile))
+            column_names = row_list[0]
+            for row in row_list[1:]:
+                p = dict(zip(column_names, [int(item) for item in row[:-2]]))
+                initial_observations.append((p, float(row[-2]),))
+        num_random = 0
+    else:
+        print("No saved data found.")
+        num_random = 1
+
+    max_evals=len(initial_observations) + 5
+
+    # Note that the initial observations count toward max_evals
+    searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner, set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations)
     searcher.main()
 
     print("======FINISHING SEARCHING========")
 
-    # Write best result to hjson file
-    import csv
-    csv_file_str = output_file_base + ".csv"
     best_result = None
 
     if exec_id == 0:
 
+        # Write best result to hjson file
         with open(csv_file_str) as csvfile:
 
             # The results in the csv file aren't directly transformation
-            # parameters. They kio and iio need to be changed.
+            # parameters. The kio and iio need to be changed.
             row_list = list(csv.reader(csvfile))
             column_names = row_list[0]
             rows = list(row_list)[1:]
@@ -268,5 +292,5 @@ def offline_tuning(in_queue, knl, platform_id, input_space, program_id=None, max
             dump_hjson(hjson_file_str, tdict)
 
     print("======RETURNING FROM SEARCH========")
-
+    #exit()
     return True

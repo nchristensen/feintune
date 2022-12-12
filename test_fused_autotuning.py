@@ -8,7 +8,7 @@ from os.path import exists
 from utils import unique_program_id, convert, load_hjson, dump_hjson
 import hjson
 from generators import createConfigSpace
-from ytopt_autotuning import offline_tuning
+from ytopt_autotuning import ytopt_tuning
 
 
 use_charm=False
@@ -380,11 +380,11 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
     #print(save_path)
     #from time import sleep
     #sleep(5)
-    offline_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
+    ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
                      device_latency=device_latency, timeout=30, save_path=save_path)
 
 
-    exit()
+    #exit()
 
     return True
 
@@ -738,13 +738,14 @@ def get_lazy_einsum_info(tunits, hjson_dir=None):
         sks = get_subkernels(tunit, args)
         for sk, csk in sks:
 
-            pid = unique_program_id(sk)
 
             #einsum_types = list(get_einsum_types(sk))
             einsum_counts = list(get_einsum_counts(sk).items())
-            indirection = len(get_indirection_arrays(sk)) > 0
             internal_deps = has_internal_einsum_dependencies(sk)
             #print_internal_einsum_dependencies(sk)
+
+            indirection = len(get_indirection_arrays(sk)) > 0
+            pid = unique_program_id(sk)
 
             #print(einsum_counts)
             if len(einsum_counts) > 1:
@@ -798,7 +799,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
     if save_path is None:
         save_path = "./hjson"
 
-    if True:
+    if False:
         if not use_charm:
             if comm.Get_rank() == 0:
                 # The latency is now obtained per-kernel so it probably needn't be obtained here.
@@ -832,6 +833,8 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                 print(f"A TUNE PROFILE ALREADY EXISTS: {hjson_file}")
             else:
                 print(f"A TUNE PROFILE EXISTS NOT: {hjson_file}")
+
+            if True:
                 einsum_counts = list(get_einsum_counts(sk).items())
                 indirection = len(get_indirection_arrays(sk)) > 0
                 if len(einsum_counts) > 0:
@@ -847,7 +850,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                     
                     print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
 
-                    if not indirection and red_axes > 0 and total_axes == 4 and einsum_count <= 4:
+                    if not indirection and red_axes > 0 and total_axes <= 5 and einsum_count <= 1:
                         autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
@@ -972,7 +975,7 @@ def collect_subkernels(tunits):
         sks = get_subkernels(tunit, args)
 
         for sk, csk in sks:
-            # This changes the identifier so needs to be set beforehand
+            # This may change the identifier so needs to be set beforehand
             assert sk.default_entrypoint.options.no_numpy
             assert sk.default_entrypoint.options.return_dict
             pid = unique_program_id(sk)
@@ -985,12 +988,13 @@ def collect_subkernels(tunits):
 
     return out_list, pid_counts
 
-
+# FIXME: Needs to look at the csv file instead of the hjson file
 def assemble_kernel_transformations(tunit, args, save_path):
     
     subkernels = get_subkernels(tunit, args)
     transform_dict = {"transformations": []}
     for sk in subkernels:
+        indirection = len(get_indirection_arrays(sk)) > 0
         pid = unique_program_id(sk)
         hjson_file_str = save_path + "/" + pid + ".hjson"
         hjson = load_hjson(hjson_file_str) 
@@ -1003,9 +1007,9 @@ def main(arg):
 
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directories = [ #"./pickled_programs_prediction_order_1",
+    directories = [ "./pickled_programs_prediction_order_1",
                     #"./pickled_programs_prediction_order_2",
-                    "./pickled_programs_prediction_order_3",
+                    #"./pickled_programs_prediction_order_3",
                     #"./pickled_programs_prediction_order_4"
                   ]
     
@@ -1017,7 +1021,7 @@ def main(arg):
     # figure out the element iname
 
     for directory in directories:
-        save_path = directory + "/four_axis_hjson_gbrt"
+        save_path = directory + "/hjson_gbrt"
         tunits = get_pickled_tunits(directory)
         # ID changes based on whether python was run with -O
         sk_list, pid_dict = collect_subkernels(tunits)
