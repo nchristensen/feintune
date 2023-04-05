@@ -66,7 +66,8 @@ def get_barriers(tunit):
 
 
 # Get the barriers to divide computation into phases
-def get_phases(tunit, barriers, domain_list):
+def get_phases(tunit, barriers):
+
 
     # Should a phase be an object
     phase_lists = [{"domains": frozenset(), "instructions": [], "args": frozenset()} for i in range(len(barriers) + 1)]
@@ -89,6 +90,7 @@ def get_phases(tunit, barriers, domain_list):
 
 
     # Replace the text domain names with the actual domain objects
+    domain_list = get_domain_list(tunit)
     for dbarrier in barriers:
         
         domain_ids = phases[dbarrier]["domains"]
@@ -364,14 +366,17 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
 
     est = einsum_types[0]
 
-    if len(est[0]) == 2 and len(est[1]) == 1:
+    handled_pairs = set([(2,1,),(3,2,),(2,2,)])
+    if (len(est[0]), len(est[1]),) in handled_pairs:
         trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
-    elif len(est[0]) == 3 and len(est[1]) == 2:
-        # Modified to handle the 5to3 reduction, but it might not be the fastest
-        trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
-    elif len(est[0]) == 2 and len(est[1]) == 2:
-        # Modified to handle the 5to3 reduction, but it might not be the fastest
-        trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
+    #if len(est[0]) == 2 and len(est[1]) == 1:
+    #    trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
+    #elif len(est[0]) == 3 and len(est[1]) == 2:
+    #    # Modified to handle the 5to3 reduction, but it might not be the fastest
+    #    trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
+    #elif len(est[0]) == 2 and len(est[1]) == 2:
+    #    # Modified to handle the 5to3 reduction, but it might not be the fastest
+    #    trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
     else:
         print(est)
         raise(ValueError("Unhandled einsum type"))
@@ -380,19 +385,21 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
     #print(save_path)
     #from time import sleep
     #sleep(5)
-    ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
-                     device_latency=device_latency, timeout=30, save_path=save_path)
 
-
-    #exit()
+    if False:
+        ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate,
+                         device_memory_bandwidth=device_memory_bandwidth,
+                         device_latency=device_latency, timeout=30, save_path=save_path)
+    else:
+        tdict = parallel_autotune(sk, 0, trans_list_list, program_id=program_id,
+                    max_flop_rate=max_flop_rate, device_latency=device_latency,
+                    device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
     return True
 
     # For some reason it freezes sometime before it starts the next one
     """
-    tdict = parallel_autotune(sk, 0, trans_list_list, program_id=program_id, max_flop_rate=max_flop_rate, device_latency=device_latency,
-            device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
-    
+   
     transformations = tdict["transformations"]
     return transformations
     """
@@ -520,9 +527,8 @@ def get_subkernels(tunit, args):
 
     ### End tag application
 
-    domain_list = get_domain_list(tunit)
     barriers = get_barriers(tunit)
-    phases = get_phases(tunit, barriers, domain_list)
+    phases = get_phases(tunit, barriers)
     cum_subkernels = generate_cumulative_subkernels(tunit, barriers, phases)
     subkernels = generate_subkernels(tunit, barriers, phases)
 
@@ -850,7 +856,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                     
                     print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
 
-                    if not indirection and red_axes > 0 and total_axes <= 5 and einsum_count <= 1:
+                    if not indirection and red_axes > 0 and total_axes <= 5 and einsum_count >= 100:
                         autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
@@ -1007,7 +1013,8 @@ def main(arg):
 
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directories = [ "./pickled_programs_prediction_order_1",
+    directories = [ "./pickled_programs_wave",
+                    #"./pickled_programs_prediction_order_1",
                     #"./pickled_programs_prediction_order_2",
                     #"./pickled_programs_prediction_order_3",
                     #"./pickled_programs_prediction_order_4"
@@ -1026,11 +1033,11 @@ def main(arg):
         # ID changes based on whether python was run with -O
         sk_list, pid_dict = collect_subkernels(tunits)
 
-        #get_lazy_einsum_info(tunits, hjson_dir=save_path)
+        get_lazy_einsum_info(tunits, hjson_dir=save_path)
 
         #test_default_transforms(sk_list, save_path=directory + "/default_transforms_hjson")
 
-        autotune_standalone_subkernels(sk_list, save_path=save_path)
+        #autotune_standalone_subkernels(sk_list, save_path=save_path)
 
         #compare_weighted_avg_frac_rooflines(directory, pid_dict)
 
