@@ -51,4 +51,6 @@ def unique_program_id(tunit, attempt_normalization=True):
     else:
         key = kb(tunit.default_entrypoint.copy(name="loopy_kernel"))
 
+    key = kb(tunit.default_entrypoint.copy(name="loopy_kernel"))
+
     return key

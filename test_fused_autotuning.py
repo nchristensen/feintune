@@ -1,7 +1,8 @@
 import pickle
 import loopy as lp
 from pytools.tag import Tag
-from meshmode.array_context import EinsumTag
+from meshmode.array_context import FEMEinsumTag, EinsumTag
+einsum_classes = tuple([EinsumTag])
 import pyopencl as cl
 import os
 from os.path import exists
@@ -62,17 +63,17 @@ def get_barriers(tunit):
         #    print(str(instr))
         if isinstance(instr, lp.BarrierInstruction) and instr.synchronization_kind == "global":
             barriers.append(instr.id)
+    #print("Number of global barriers", len(barriers))
     return barriers
 
 
 # Get the barriers to divide computation into phases
 def get_phases(tunit, barriers, domain_list):
 
-    # Should a phase be an object
-    phase_lists = [{"domains": frozenset(), "instructions": [], "args": frozenset()} for i in range(len(barriers) + 1)]
+    # Should a phase be an object?
+    phase_lists = [{"domains": frozenset(), "within_inames": frozenset(), "instructions": [], "args": frozenset()} for i in range(len(barriers) + 1)]
     phases = dict(zip(barriers, phase_lists))
     #print(phases)
-
     for instr in tunit.default_entrypoint.instructions:
 
         #print(instr.within_inames)
@@ -85,21 +86,21 @@ def get_phases(tunit, barriers, domain_list):
                 break
 
         phases[dbarrier]["instructions"].append(instr)
-        phases[dbarrier]["domains"] = instr.within_inames | phases[dbarrier]["domains"]
+        phases[dbarrier]["within_inames"] = instr.within_inames | phases[dbarrier]["within_inames"]
 
-
-    # Replace the text domain names with the actual domain objects
+    # Determine the domain objects from the inames
     for dbarrier in barriers:
         
-        domain_ids = phases[dbarrier]["domains"]
+        within_inames = phases[dbarrier]["within_inames"]
         phases[dbarrier]["domains"] = []
 
-        for domain_names_set, domain in domain_list:
-            if domain_ids <= domain_names_set:
+        for inames_set, domain in domain_list:
+            if within_inames <= inames_set:
                 phases[dbarrier]["domains"].append(domain)
 
+        print(len(phases[dbarrier]["domains"]))
+    #exit()
 
-        #print(phases[dbarrier]["domains"])
     return phases
 
 # Strip off the dependencies on global barriers and other phases
@@ -223,6 +224,12 @@ def generate_subkernels(tunit, barriers, phases):
 
         new_args += new_temp_args
         name = tunit.default_entrypoint.name + f"_{cur_phase}"
+        #print("DOMAINS")
+        #print(domains)
+        #for domain in domains:
+        #    print(domain)
+        #for instruction in instructions:
+        #    print(instruction)
         knl = lp.make_kernel(domains, instructions, kernel_data=new_args, name=name)
         knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
         subkernels.append(knl)
@@ -522,9 +529,13 @@ def get_subkernels(tunit, args):
 
     domain_list = get_domain_list(tunit)
     barriers = get_barriers(tunit)
-    phases = get_phases(tunit, barriers, domain_list)
-    cum_subkernels = generate_cumulative_subkernels(tunit, barriers, phases)
-    subkernels = generate_subkernels(tunit, barriers, phases)
+    if len(barriers) > 1:
+        phases = get_phases(tunit, barriers, domain_list)
+        cum_subkernels = generate_cumulative_subkernels(tunit, barriers, phases)
+        subkernels = generate_subkernels(tunit, barriers, phases)
+    else:
+        subkernels = [tunit]
+        cum_subkernels = [tunit]
 
     return list(zip(subkernels, cum_subkernels))
 
@@ -669,7 +680,7 @@ def contains_indirection(tunit):
 """
 
 def has_internal_einsum_dependencies(tunit):
-    einsum_dict = {instr.id: instr for instr in tunit.default_entrypoint.instructions if any([isinstance(tag, EinsumTag) for tag in instr.tags])}
+    einsum_dict = {instr.id: instr for instr in tunit.default_entrypoint.instructions if any([isinstance(tag, einsum_classes) for tag in instr.tags])}
     instr_dict = {instr.id: instr for instr in tunit.default_entrypoint.instructions}
     for esid, einsum in einsum_dict.items():
         es_deps = set(einsum.depends_on)
@@ -683,7 +694,7 @@ def has_internal_einsum_dependencies(tunit):
     return False 
 
 def print_internal_einsum_dependencies(tunit):
-    einsum_dict = {instr.id: instr for instr in tunit.default_entrypoint.instructions if any([isinstance(tag, EinsumTag) for tag in instr.tags])}
+    einsum_dict = {instr.id: instr for instr in tunit.default_entrypoint.instructions if any([isinstance(tag, einsum_classes) for tag in instr.tags])}
     instr_dict = {instr.id: instr for instr in tunit.default_entrypoint.instructions}
     for esid, einsum in einsum_dict.items():
         deps = []
@@ -699,25 +710,30 @@ def print_internal_einsum_dependencies(tunit):
 
 def get_pickled_tunits(directory):
     files = os.listdir(directory)
-    tunits = []
+    tunit_dicts = []
     for num, filename in list(enumerate(sorted(files))):
         #print(num, filename)
         f = os.path.join(directory, filename)
         # Skip the massive kernel for now
         if os.path.isfile(f) and filename.startswith("prefeinsum") and (filename.endswith(".pickle") or filename.endswith(".pkl")):
             f = open(f, "rb")
-            tunit, args = pickle.load(f)
+            fdict = pickle.load(f)
+            #print(fdict["tunit"])
+            tunit_dicts.append((filename,fdict,))
 
-            tunits.append((filename, tunit, args,))
+            #tunits.append((filename, tunit, args,))
             #tunit, args = pickle.load(f)
-            f.close()
+            #f.close()
+
+    #exit()
+    return tunit_dicts
 
 
-    return tunits
-
-
-def get_lazy_einsum_info(tunits, hjson_dir=None):
-    for filename, tunit, args in tunits:
+def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
+    for filename, tunit_dict in tunit_dicts:
+        tunit = tunit_dict["tunit"]
+        print(tunit)
+        args = tunit_dict["args"]
         sks = get_subkernels(tunit, args)
         #print(tunit.default_entrypoint)
         #contains_indirection(tunit)
@@ -729,53 +745,96 @@ def get_lazy_einsum_info(tunits, hjson_dir=None):
         #einsums = get_einsum_types(tunit)
         #for einsum in einsums:
         #    print("    ", einsum)
+    #exit()
 
     # Count number of subkernels of each einsum type
     subkernel_counts = {}
     print("\nSubkernel information")
-    pid_dict = {}
-    for filename, tunit, args in tunits:
-        sks = get_subkernels(tunit, args)
-        for sk, csk in sks:
+    pid_set = set()
+    streaming_pid = set()
+    einsum_3_to_2_pid = set()
+    einsum_4_to_2_pid = set()
+    einsum_5_to_3_pid = set()
+    einsum_5_to_2_pid = set()
+    other_einsum_pid = set()
 
+    for filename, tunit_dict in tunit_dicts:
 
-            #einsum_types = list(get_einsum_types(sk))
-            einsum_counts = list(get_einsum_counts(sk).items())
-            internal_deps = has_internal_einsum_dependencies(sk)
-            #print_internal_einsum_dependencies(sk)
+        # Restrict output to zero rank
+        if "_0.pickle" in filename:
+            tunit = tunit_dict["tunit"]
+            args = tunit_dict["args"]
+            sks = get_subkernels(tunit, args)
+            #print("Number of subkernels", len(sks))
 
-            indirection = len(get_indirection_arrays(sk)) > 0
-            pid = unique_program_id(sk)
+            for sk, csk in sks:
 
-            #print(einsum_counts)
-            if len(einsum_counts) > 1:
-                raise ValueError("There should not be multiple einsum types within a single subkernel")
-            if len(einsum_counts) > 0:
-                einsum_type, count = einsum_counts[0]
-                non_red_axes = len(einsum_type[0])
-                red_axes = len(einsum_type[1])
-                total_axes = non_red_axes + red_axes
-                out_axes = total_axes - red_axes
-                key = (total_axes, out_axes, red_axes, count, indirection, internal_deps)
+                #einsum_types = list(get_einsum_types(sk))
+                einsum_counts = list(get_einsum_counts(sk).items())
+                print("Einsum counts", einsum_counts)
+                internal_deps = has_internal_einsum_dependencies(sk)
+                #print_internal_einsum_dependencies(sk)
 
-                data = None
-                if hjson_dir is not None:
-                    fn = hjson_dir + f"/{pid}.hjson"
-                    if exists(fn):
-                        print(fn)
-                        od = load_hjson(fn)
-                        data = od["data"]["frac_roofline_flop_rate"]
-                print(pid, key, data)
+                indirection = len(get_indirection_arrays(sk)) > 0
+                pid = unique_program_id(sk)
+                pid_set |= {pid}
 
-                if key in subkernel_counts:
-                    subkernel_counts[key][0] += 1
-                    subkernel_counts[key][1] |= set([sk.default_entrypoint.name])
-                else:
-                    subkernel_counts[key] = [1, set([sk.default_entrypoint.name])]
+                #print(einsum_counts)
+                if len(einsum_counts) > 1:
+                    raise ValueError("There should not be multiple einsum types within a single subkernel")
+                if len(einsum_counts) > 0:
+                    einsum_type, count = einsum_counts[0]
+                    non_red_axes = len(einsum_type[0])
+                    red_axes = len(einsum_type[1])
+                    total_axes = non_red_axes + red_axes
+                    out_axes = total_axes - red_axes
+                    key = (total_axes, out_axes, red_axes, count, indirection, internal_deps)
+
+                    #if total_axes == 5 and non_red_axes == 2:
+                    #    print(sk)
+                    #    exit()
+                    if red_axes == 0:
+                        streaming_pid |= {pid}
+                    elif total_axes == 3 and non_red_axes == 2:
+                        einsum_3_to_2_pid |= {pid}
+                    elif total_axes == 4 and non_red_axes == 2:
+                        einsum_4_to_2_pid |= {pid}
+                    elif total_axes == 5 and non_red_axes == 2:
+                        einsum_5_to_2_pid |= {pid}
+                    elif total_axes == 5 and non_red_axes == 3:
+                        einsum_5_to_3_pid |= {pid}
+                    else:
+                        other_einsum_pid |= {pid}
+
+                    data = None
+                    if hjson_dir is not None:
+                        fn = hjson_dir + f"/{pid}.hjson"
+                        if exists(fn):
+                            print(fn)
+                            od = load_hjson(fn)
+                            data = od["data"]["frac_roofline_flop_rate"]
+                    print(pid, key, data)
+
+                    if key in subkernel_counts:
+                        subkernel_counts[key][0] += 1
+                        subkernel_counts[key][1] |= set([sk.default_entrypoint.name])
+                    else:
+                        subkernel_counts[key] = [1, set([sk.default_entrypoint.name])]
+
+    print("Rank zero info")
 
     print("\nSubkernel summary information")
     for key, val in subkernel_counts.items():
         print(key, val)
+
+    print("Number of distinct subkernels", len(pid_set))
+    print("Number of distinct streaming subkernels", len(streaming_pid))
+    print("Number of distinct 3 to 2 einsums", len(einsum_3_to_2_pid))
+    print("Number of distinct 4 to 2 einsums", len(einsum_4_to_2_pid))
+    print("Number of distinct 5 to 2 einsums", len(einsum_5_to_2_pid))
+    print("Number of distinct 5 to 3 einsums", len(einsum_5_to_3_pid))
+    print("Number of distinct other einsums", len(other_einsum_pid))
+
 
 def get_device_roofline_data(queue):
     import feinsum.empirical_roofline as er
@@ -966,25 +1025,30 @@ def compare_weighted_avg_frac_rooflines(directory, pid_dict):
     print(len(overlapping_files), len(untuned_files), untuned_frac_roofline, tuned_frac_roofline)
 
 
-def collect_subkernels(tunits):
+def collect_subkernels(tunit_dicts):
 
     out_list = []
     pid_counts = {}
-    for filename, tunit, args in tunits:
+    for filename, fdict in tunit_dicts:
+        tunit = fdict["tunit"]
+        args = fdict["args"]
         print(f"OBTAINING SUBKERNELS FROM: {filename}")
         sks = get_subkernels(tunit, args)
+
+        #print(tunit)
 
         for sk, csk in sks:
             # This may change the identifier so needs to be set beforehand
             assert sk.default_entrypoint.options.no_numpy
             assert sk.default_entrypoint.options.return_dict
             pid = unique_program_id(sk)
+            #print(sk)
             out_list.append((pid, sk, csk,))
             if pid in pid_counts:
                 pid_counts[pid] += 1
             else:
                 pid_counts[pid] = 1
-   
+            #exit()
 
     return out_list, pid_counts
 
@@ -1007,7 +1071,7 @@ def main(arg):
 
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directories = [ "./pickled_programs_prediction_order_1",
+    directories = [ "./pickled_programs_y3_prediction_order_1",
                     #"./pickled_programs_prediction_order_2",
                     #"./pickled_programs_prediction_order_3",
                     #"./pickled_programs_prediction_order_4"
@@ -1022,15 +1086,17 @@ def main(arg):
 
     for directory in directories:
         save_path = directory + "/hjson_gbrt"
-        tunits = get_pickled_tunits(directory)
+        tunit_dicts = get_pickled_tunits(directory)
+        print("Done collecting tunits")
         # ID changes based on whether python was run with -O
-        sk_list, pid_dict = collect_subkernels(tunits)
+        sk_list, pid_dict = collect_subkernels(tunit_dicts)
+        print("Done collecting subkernels")
 
-        #get_lazy_einsum_info(tunits, hjson_dir=save_path)
+        get_lazy_einsum_info(tunit_dicts, hjson_dir=save_path)
 
         #test_default_transforms(sk_list, save_path=directory + "/default_transforms_hjson")
 
-        autotune_standalone_subkernels(sk_list, save_path=save_path)
+        #autotune_standalone_subkernels(sk_list, save_path=save_path)
 
         #compare_weighted_avg_frac_rooflines(directory, pid_dict)
 
