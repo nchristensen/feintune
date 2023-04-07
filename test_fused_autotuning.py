@@ -10,7 +10,7 @@ from utils import unique_program_id, convert, load_hjson, dump_hjson
 import hjson
 from generators import createConfigSpace
 from ytopt_autotuning import ytopt_tuning
-
+from time import time
 
 use_charm=False
 if use_charm:
@@ -256,7 +256,6 @@ def dump_subkernels_from_pickled(arg):
         if os.path.isfile(f) and filename.startswith("prefeinsum") and (filename.endswith(".pickle") or filename.endswith(".pkl")):
             f = open(f, "rb")
             tunit, args = pickle.load(f)
-            #tunit, args = pickle.load(f)
             f.close()
             sks = get_subkernels(tunit, args)
             if len(sks) == 1:
@@ -365,47 +364,60 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
         save_path = "./hjson"
 
     einsum_types = list(get_einsum_types(sk))    
-
     if len(einsum_types) > 1:
         raise(ValueError("Cannot currently handle multiple einsum types in same subkernel"))
 
-    est = einsum_types[0]
+    use_ytopt = False
 
-    if len(est[0]) == 2 and len(est[1]) == 1:
-        trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
-    elif len(est[0]) == 3 and len(est[1]) == 2:
-        # Modified to handle the 5to3 reduction, but it might not be the fastest
-        trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
-    elif len(est[0]) == 2 and len(est[1]) == 2:
-        # Modified to handle the 5to3 reduction, but it might not be the fastest
-        trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
-    else:
-        print(est)
-        raise(ValueError("Unhandled einsum type"))
-
-    input_space = createConfigSpace(queue, sk)
-    #print(save_path)
-    #from time import sleep
-    #sleep(5)
-    ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
+    if use_ytopt:
+        input_space = createConfigSpace(queue, sk)
+        ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
                      device_latency=device_latency, timeout=30, save_path=save_path)
+        # For some reason it freezes sometimes before it starts the next one
+        #return True
+    else:
+        est = einsum_types[0]
 
+        if len(est[0]) == 2 and len(est[1]) == 1:
+            trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
+        elif len(est[0]) == 3 and len(est[1]) == 2:
+            # Modified to handle the 5to3 reduction, but it might not be the fastest
+            trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
+        elif len(est[0]) == 2 and len(est[1]) == 2:
+            # Modified to handle the 5to3 reduction, but it might not be the fastest
+            trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
+        else:
+            print(est)
+            raise(ValueError("Unhandled einsum type"))
 
-    #exit()
+        #print(save_path)
+        #from time import sleep
+        #sleep(5)
 
-    return True
+        #print(len(trans_list_list))
+        #exit()
 
-    # For some reason it freezes sometime before it starts the next one
-    """
-    tdict = parallel_autotune(sk, 0, trans_list_list, program_id=program_id, max_flop_rate=max_flop_rate, device_latency=device_latency,
-            device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
-    
-    transformations = tdict["transformations"]
-    return transformations
-    """
+        print(sk)
+
+        # 0 length array dimensions are still problematic. Maybe those just shouldn't be autotuned.
+
+        print("Artificially limiting kernel tuning")
+        if len(trans_list_list) > 600:
+
+            ts = time()
+            tdict = parallel_autotune(sk, 0, trans_list_list, program_id=program_id, max_flop_rate=max_flop_rate, device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
+            te = time()
+            print("Autotuning time", te - ts)
+            exit()
+
+        #transformations = tdict["transformations"]
+        #return transformations
 
     #return list(trans_list_list[0])
 
+    # Should this return the transformations or just save them?
+
+    return True
 
 #def autotune_dependent_subkernel(subkernel, queue):
 
@@ -631,7 +643,6 @@ class MyDepMapper(DependencyMapper):
         #print("MAP CONSTANT", expr)
         #return frozenset()
 
-
 tunit = lp.make_kernel(
     "{[i, j]: 0<=i,j<10}",
     """
@@ -647,7 +658,6 @@ result = set()
 for insn in knl.instructions:
     result.update(dep_mapper(insn.expression, should_record=False))
 print("RHS index deps are:", result)
-
 
 def get_index_deps(tunit):
     knl = tunit.default_entrypoint
@@ -711,6 +721,22 @@ def print_internal_einsum_dependencies(tunit):
 def get_pickled_tunits(directory):
     files = os.listdir(directory)
     tunit_dicts = []
+
+    '''
+    # Doesn't seem to capture the true call count
+    call_count_dict = {}
+    for filename in list(sorted(files)):
+        if filename.startswith("call_count_") and (filename.endswith(".pickle") or filename.endswith(".pkl")):
+            f = os.path.join(directory,filename)
+            f = open(f, "rb")
+            fdict = pickle.load(f)
+            f.close()
+            call_count_dict = fdict | call_count_dict # Give rank 0 the priority
+
+    print(call_count_dict)
+    exit()
+    '''
+
     for num, filename in list(enumerate(sorted(files))):
         #print(num, filename)
         f = os.path.join(directory, filename)
@@ -718,18 +744,22 @@ def get_pickled_tunits(directory):
         if os.path.isfile(f) and filename.startswith("prefeinsum") and (filename.endswith(".pickle") or filename.endswith(".pkl")):
             f = open(f, "rb")
             fdict = pickle.load(f)
+            #pid = filename.split("_")[1]
             #print(fdict["tunit"])
+
             tunit_dicts.append((filename,fdict,))
+            #tunit_dicts.append((filename,fdict,call_count_dict[pid]))
 
             #tunits.append((filename, tunit, args,))
             #tunit, args = pickle.load(f)
-            #f.close()
+            f.close()
 
     #exit()
     return tunit_dicts
 
 
 def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
+
     for filename, tunit_dict in tunit_dicts:
         tunit = tunit_dict["tunit"]
         print(tunit)
@@ -909,7 +939,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                     
                     print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
 
-                    if not indirection and red_axes > 0 and total_axes <= 5 and einsum_count <= 1:
+                    if not indirection and red_axes == 1 and total_axes >= 3 and einsum_count <= 1:
                         autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
@@ -1071,7 +1101,8 @@ def main(arg):
 
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directories = [ "./pickled_programs_y3_prediction_order_1",
+    directories = [ #"./pickled_programs_y3_prediction_order_1",
+                    "./pickled_programs_y3_prediction_order_3",
                     #"./pickled_programs_prediction_order_2",
                     #"./pickled_programs_prediction_order_3",
                     #"./pickled_programs_prediction_order_4"
@@ -1092,11 +1123,11 @@ def main(arg):
         sk_list, pid_dict = collect_subkernels(tunit_dicts)
         print("Done collecting subkernels")
 
-        get_lazy_einsum_info(tunit_dicts, hjson_dir=save_path)
+        #get_lazy_einsum_info(tunit_dicts, hjson_dir=save_path)
 
         #test_default_transforms(sk_list, save_path=directory + "/default_transforms_hjson")
 
-        #autotune_standalone_subkernels(sk_list, save_path=save_path)
+        autotune_standalone_subkernels(sk_list, save_path=save_path)
 
         #compare_weighted_avg_frac_rooflines(directory, pid_dict)
 
