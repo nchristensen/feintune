@@ -515,7 +515,7 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
     read_dof_arrays = read_deps & frozenset(dof_arrays)
 
 
-    config_space = createConfigSpace(queue, knl)
+    #config_space = createConfigSpace(queue, knl)
 
     start_param = (None, None, None, None, None)
     if start_param is not None:
@@ -671,8 +671,10 @@ def get_trans_list(knl, params):
     ilp = "ilp"
     """
 
-    # TODO: Change this to a frozendict for easier legibility
+    # TODO: Change this to a frozendict or immutable map for easier legibility
     slabs = (0,0) #(0,1)
+    # For some reason this isn't correctly seeing a j=0 case.
+    # It probably isn't even worth tuning those kernels...
     if not kio == 0 or iio == 0 or ji == 0 or iii == 0 or kii == 0: # If there is a zero length dimension then don't transform
         if kio != kii:
             trans_list.append(("split_iname", (f"{e}", kio,),

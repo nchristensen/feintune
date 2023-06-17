@@ -10,7 +10,7 @@ from utils import unique_program_id, convert, load_hjson, dump_hjson, get_domain
 import hjson
 from generators import createConfigSpace
 from ytopt_autotuning import ytopt_tuning
-
+from time import time
 
 use_charm=False
 if use_charm:
@@ -228,7 +228,6 @@ def dump_subkernels_from_pickled(arg):
         if os.path.isfile(f) and filename.startswith("prefeinsum") and (filename.endswith(".pickle") or filename.endswith(".pkl")):
             f = open(f, "rb")
             tunit, args = pickle.load(f)
-            #tunit, args = pickle.load(f)
             f.close()
             sks = get_subkernels(tunit, args)
             if len(sks) == 1:
@@ -337,11 +336,11 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
         save_path = "./hjson"
 
     einsum_types = list(get_einsum_types(sk))    
-
     if len(einsum_types) > 1:
         raise(ValueError("Cannot currently handle multiple einsum types in same subkernel"))
-
     est = einsum_types[0]
+
+    use_ytopt = False
 
     handled_pairs = set([(2,1,),(3,2,),(2,2,)])
     if (len(est[0]), len(est[1]),) in handled_pairs:
@@ -353,7 +352,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
         #elif len(est[0]) == 2 and len(est[1]) == 2:
         #    # Modified to handle the 5to3 reduction, but it might not be the fastest
         #    trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
-        if False:
+        if use_ytopt:
             input_space = createConfigSpace(queue, sk)
             ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate,
                              device_memory_bandwidth=device_memory_bandwidth,
@@ -367,22 +366,11 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
         print(est)
         raise(ValueError("Unhandled einsum type"))
 
-    #print(save_path)
-    #from time import sleep
-    #sleep(5)
-
-
-    return True
-
-    # For some reason it freezes sometime before it starts the next one
-    """
-   
-    transformations = tdict["transformations"]
-    return transformations
-    """
-
     #return list(trans_list_list[0])
 
+    # Should this return the transformations or just save them?
+
+    return True
 
 #def autotune_dependent_subkernel(subkernel, queue):
 
@@ -607,7 +595,6 @@ class MyDepMapper(DependencyMapper):
         #print("MAP CONSTANT", expr)
         #return frozenset()
 
-
 tunit = lp.make_kernel(
     "{[i, j]: 0<=i,j<10}",
     """
@@ -623,7 +610,6 @@ result = set()
 for insn in knl.instructions:
     result.update(dep_mapper(insn.expression, should_record=False))
 print("RHS index deps are:", result)
-
 
 def get_index_deps(tunit):
     knl = tunit.default_entrypoint
@@ -687,6 +673,22 @@ def print_internal_einsum_dependencies(tunit):
 def get_pickled_tunits(directory):
     files = os.listdir(directory)
     tunit_dicts = []
+
+    '''
+    # Doesn't seem to capture the true call count
+    call_count_dict = {}
+    for filename in list(sorted(files)):
+        if filename.startswith("call_count_") and (filename.endswith(".pickle") or filename.endswith(".pkl")):
+            f = os.path.join(directory,filename)
+            f = open(f, "rb")
+            fdict = pickle.load(f)
+            f.close()
+            call_count_dict = fdict | call_count_dict # Give rank 0 the priority
+
+    print(call_count_dict)
+    exit()
+    '''
+
     for num, filename in list(enumerate(sorted(files))):
         #print(num, filename)
         f = os.path.join(directory, filename)
@@ -694,18 +696,22 @@ def get_pickled_tunits(directory):
         if os.path.isfile(f) and filename.startswith("prefeinsum") and (filename.endswith(".pickle") or filename.endswith(".pkl")):
             f = open(f, "rb")
             fdict = pickle.load(f)
+            #pid = filename.split("_")[1]
             #print(fdict["tunit"])
+
             tunit_dicts.append((filename,fdict,))
+            #tunit_dicts.append((filename,fdict,call_count_dict[pid]))
 
             #tunits.append((filename, tunit, args,))
             #tunit, args = pickle.load(f)
-            #f.close()
+            f.close()
 
     #exit()
     return tunit_dicts
 
 
 def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
+
     for filename, tunit_dict in tunit_dicts:
         tunit = tunit_dict["tunit"]
         print(tunit)
@@ -885,7 +891,6 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                     
                     print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
 
-                    # einsum_count=4 has code generation errors
                     if not indirection and red_axes > 0 and total_axes >= 3 and einsum_count >= 100:#9:
                         autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
@@ -1051,6 +1056,7 @@ def main(arg):
     directories = [ "./pickled_programs_wave",
                     #"./pickled_programs_prediction_order_1",
                     #"./pickled_programs_y3_prediction_order_1",
+                    #"./pickled_programs_y3_prediction_order_3",
                     #"./pickled_programs_prediction_order_2",
                     #"./pickled_programs_prediction_order_3",
                     #"./pickled_programs_prediction_order_4"
