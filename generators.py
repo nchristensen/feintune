@@ -86,7 +86,10 @@ def batch_size_options(knl):
             nbatches_dict[nbatches] = batch_size
     batch_size_list = sorted(nbatches_dict.values())
 
-    return list(reversed(batch_size_list))
+    #return list(reversed(batch_size_list))
+    #return list(batch_size_list)
+    print("Forcing batch size to be one")
+    return [1]#[117]
 
 
 # Creates a list containing tuples of search space parameters.
@@ -419,7 +422,7 @@ def createConfigSpace(queue, knl):
             return n_out % (iio*iii) != 0
 
         enforce_factor_of_n_out = cs.ForbiddenCallableRelation(a_s["iii"], a_s["iio"],
-                                    is_not_factor_of_n_out)
+                                    lambda iii, iio: n_out % (iio*iii) != 0)#is_not_factor_of_n_out)
 
         a_s.add_forbidden_clause(avoid_pointless_k_blocks)
         a_s.add_forbidden_clause(limit_work_groups)
@@ -440,7 +443,7 @@ def createConfigSpace(queue, knl):
         a_s.add_hyperparameter(ji)
         a_s.add_hyperparameter(kio)
         a_s.add_hyperparameter(iio)
-
+    
     batch_sizes = cs.OrdinalHyperparameter("batch_size", batch_size_options(knl))
     a_s.add_hyperparameter(batch_sizes)
 
@@ -574,6 +577,9 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
 def get_trans_list(knl, params):
     from __init__ import get_einsum_types
 
+    #print(knl)
+    #exit()
+
     @memoize
     def get_args_and_arrays(knl):
         # Find read dof arrays. These are the ones that will be prefetched
@@ -589,8 +595,6 @@ def get_trans_list(knl, params):
         arg_dict = dict([(arg.name, arg) for arg in knl.default_entrypoint.args])
         arg_dict.update(knl.default_entrypoint.temporary_variables)
 
-        #print(write_deps)
-        #print(read_deps)
         n_elem = None
         nx = nr = nf = None
         sizes = frozenset()
@@ -641,65 +645,174 @@ def get_trans_list(knl, params):
 
     trans_list = []
     batch_size, kio, kii, iio, iii, ji = params
+    neinsums = len(get_einsums(knl))
+    nbatches = int(np.ceil(neinsums / batch_size))
+    if batch_size == 0:
+        batch_size = neinsums
+        nbatches = 1
+
+    # Helpful if need to temporarily change this for debugging
+
+    g0 = "for"
+    l0 = "for"
+    g1 = "for"
+    l1 = "for"
+    unr = "for"#"unr"
+    prefetch_tag = None#"for"#"l.auto"
+    ilp = "for" #"ilp"
+
+    """
+    g0 = "g.0"
+    g1 = "g.1"
+    l0 = "l.0"
+    l1 = "l.1"
+    unr = "for"#"unr"
+    prefetch_tag = "l.auto"
+    ilp = "ilp"
+    """
 
     # TODO: Change this to a frozendict for easier legibility
+    slabs = (0,0) #(0,1)
     if not kio == 0 or iio == 0 or ji == 0 or iii == 0 or kii == 0: # If there is a zero length dimension then don't transform
         if kio != kii:
             trans_list.append(("split_iname", (f"{e}", kio,),
-                (("outer_tag", "g.0",), ("slabs",(0,1,),),),))
+                (("outer_tag", g0,), ("slabs",slabs,),),))
             trans_list.append(("split_iname", (f"{e}_inner", kii,), 
-                (("outer_tag", "ilp",), ("inner_tag", "l.0",), ("slabs", (0,1,),),),))
-            prefetch_str = f"{j},{e}_inner_outer,{e}_inner_inner"
+                (("outer_tag", ilp,), ("inner_tag", l0,), ("slabs",slabs,),),))
+            #prefetch_str = f"{j},{e}_inner_outer,{e}_inner_inner"
         else:
             trans_list.append(("split_iname", (f"{e}", kio,),
-                (("outer_tag", "g.0",), ("inner_tag", "l.0",), ("slabs",(0,0,),),),))
-            prefetch_str = f"{j},{e}_inner"    
-        if iio != iii:
+                (("outer_tag", g0,), ("inner_tag", l0,), ("slabs",(0,0,),),),))
+            #prefetch_str = f"{j},{e}_inner"    
+        if iio != iii:  
             trans_list.append(("split_iname", (f"{i}", iio,),
-                (("outer_tag", "g.1",), ("slabs",(0,0,),),),))
+                (("outer_tag", g1,), ("slabs",(0,0,),),),))
             # In theory this should be (0,0)
+            # The ilp tag can be problematic with multiple independent blocks https://github.com/inducer/loopy/issues/418
+            # TODO: Fix ilp on this axis.
             trans_list.append(("split_iname", (f"{i}_inner", iii,), 
-                (("outer_tag", "ilp",), ("inner_tag","l.1",), ("slabs",(0,0,),),),))
+                (("outer_tag", ilp,), ("inner_tag", l1,), ("slabs",(0,0,),),),))
         else:
             trans_list.append(("split_iname", (f"{i}", iio,), 
-                (("outer_tag", "g.1",), ("inner_tag", "l.1",), ("slabs",(0,0,),),),))
+                (("outer_tag", g1,), ("inner_tag", l1,), ("slabs",(0,0,),),),))
+
+
         # Should the i loop have (0,1) slabs for both?
 
+        print("Splitting reduction iname disabled. Re-enable when finished debugging")
+        #trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag","for",),),))
+
         if r is not None:
-            trans_list.append(("tag_inames", (((f"{r}", "unr",),),),))
+            trans_list.append(("tag_inames", (((f"{r}", unr,),),),))
         if x is not None:
             if batch_size == 0:
                 # Breaks with einsum batching
-                trans_list.append(("tag_inames", (((f"{x}", "ilp",),),),))
+                trans_list.append(("tag_inames", (((f"{x}", ilp,),),),))
             else:
-                trans_list.append(("tag_inames", (((f"{x}", "unr",),),),))
+                trans_list.append(("tag_inames", (((f"{x}", unr,),),),))
         if f is not None:
-            trans_list.append(("tag_inames", (((f"{f}", "unr",),),),))
+            trans_list.append(("tag_inames", (((f"{f}", unr,),),),))
 
+        #trans_list.append(("add_inames_for_unused_hw_axes",))
+        #trans_list.append(("batch_einsums", (batch_size,),))
+        #trans_list.append(("add_inames_for_unused_hw_axes",))
+        # Should only prefetch inside the batches it appears in
+
+        #"""
+        #if batch_size > 0: # Need to rename the axes to account for the batching
         # The more einsums the slower the prefetching becomes
-        for arg in read_dof_arrays:
-            # Should only prefetch if there are no indirection arrays
-            strides = [dim_tag.stride for dim_tag in arg_dict[arg].dim_tags if isinstance(dim_tag, lp.kernel.array.FixedStrideArrayDimTag)]
-            order_str = "f,f" if strides[0] < strides[1] else "c,c"
-            trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
-                (("temporary_name", f"{arg}f",), ("default_tag","l.auto",),),))
-            trans_list.append(("tag_array_axes", (f"{arg}f", order_str,),))
+        # This will need to occur after batching
+        # For some reason this is failing when more than one einsum is placed in a batch.
 
-        for arg in face_dof_arrays:
-            # Stick with the default ordering for now. For fortran ordering
-            # slap an order tag on it.
-            if kio != kii:
-                prefetch_str = f"{f},{j},{e}_inner_outer,{e}_inner_inner"
-            else:
-                prefetch_str = f"{f},{j},{e}_inner"    
+        # Problem: Not every variable is needed in every batch. Need to identify if the variable is used
+        # in batch i and, if so, add the prefetch command and tag_array_axes command. The issue is that
+        # the batch_ids haven't been added to the instructions at this point, so we'll have to re-write
+        # the prefetching and tagging commands after they are assigned.
+        '''
+        for b in range(nbatches):
+            for arg in read_dof_arrays:
+                # Should only prefetch if there are no indirection arrays
+                strides = [dim_tag.stride for dim_tag in arg_dict[arg].dim_tags if isinstance(dim_tag, lp.kernel.array.FixedStrideArrayDimTag)]
+                order_str = "f,f" if strides[0] < strides[1] else "c,c"
+                if kio != kii:
+                    prefetch_str = f"{j}_b{b},{e}_inner_outer_b{b},{e}_inner_inner_b{b}"
+                    #prefetch_str = f"{j}_outer_b{b},{j}_inner_b{b},{e}_inner_outer_b{b},{e}_inner_inner_b{b}"
+                else:
+                    prefetch_str = f"{j}_b{b},{e}_inner_b{b}"    
+        
+                    #prefetch_str = f"{j}_b{b},{e}_inner_outer_b{b},{e}_inner_inner_b{b}"
+                    #prefetch_str = f"{j}_outer_b{b},{j}_inner_b{b},{e}_inner_b{b}"    
 
-            trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
-                (("temporary_name", f"{arg}f",), ("default_tag","l.auto",),),))
+                trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
+                    (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
+                trans_list.append(("tag_array_axes", (f"{arg}_f", order_str,),))
 
-        trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag","for",),),))
+                trans_list.append(("add_inames_for_unused_hw_axes",))
 
-    trans_list.append(("add_inames_for_unused_hw_axes",))
-    trans_list.append(("batch_einsums", (batch_size,),))
+                print(prefetch_str)
+            for arg in face_dof_arrays:
+                # Stick with the default ordering for now. For fortran ordering
+                # slap an order tag on it.
+                if kio != kii:
+                    prefetch_str = f"{f},{j}_b{b},{e}_inner_outer_b{b},{e}_inner_inner_b{b}"
+                    #prefetch_str = f"{f},{j}_outer_b{b},{j}_inner_b{b},{e}_inner_outer_b{b},{e}_inner_inner_b{b}"
+                else:
+                    prefetch_str = f"{f},{j}_b{b},{e}_inner_b{b}"
+                    #prefetch_str = f"{f},{j}_outer_b{b},{j}_inner_b{b},{e}_inner_b{b}"
+
+                trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
+                    (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
+
+                print(prefetch_str)
+
+                trans_list.append(("add_inames_for_unused_hw_axes",))
+        #exit()
+        '''
+        #else:
+        # The more einsums the slower the prefetching becomes
+        # This will need to occur after batching
+        if True: # Turn off prefetching until can assign a batch number
+            for arg in read_dof_arrays:
+                # Should only prefetch if there are no indirection arrays
+                strides = [dim_tag.stride for dim_tag in arg_dict[arg].dim_tags if isinstance(dim_tag, lp.kernel.array.FixedStrideArrayDimTag)]
+                order_str = "f,f" if strides[0] < strides[1] else "c,c"
+                if kio != kii:
+                    prefetch_str = f"{j},{e}_inner_outer,{e}_inner_inner"
+                    #prefetch_str = f"{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
+                else:        
+                    prefetch_str = f"{j},{e}_inner"    
+                    #prefetch_str = f"{j},{e}_inner_outer"    
+                    #prefetch_str = f"{j}_outer,{j}_inner,{e}_inner"    
+
+                trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
+                    (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
+                # Should be c,c by default. Maybe try to re-add this capability later
+                #trans_list.append(("tag_array_axes", (f"{arg}_f", order_str,),))
+                print(prefetch_str)
+
+            for arg in face_dof_arrays:
+                # Stick with the default ordering for now. For fortran ordering
+                # slap an order tag on it.
+                if kio != kii:
+                    prefetch_str = f"{f},{j},{e}_inner_outer,{e}_inner_inner"
+                    #prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
+                else:
+                    prefetch_str = f"{f},{j},{e}_inner"
+
+                    #prefetch_str = f"{f},{j},{e}_inner_outer"
+                    #prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner"
+
+                trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
+                    (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
+                print(prefetch_str)
+            #exit()
+
+        trans_list.append(("add_inames_for_unused_hw_axes",))
+
+        trans_list.append(("batch_einsums", (batch_size,),))
+        
+
+
     return trans_list
 
 
@@ -819,14 +932,15 @@ def einsum2to2_kernel_tlist_generator_v2(queue, knl, start_param=None):
         trans_list = []
         kio, kii, iio, iii = params
         #knl = kwargs["knl"]
+        slabs = None #(0,1,)
 
         if 0 not in params: # If there is a zero length dimension then don't transform
 
             if kio != kii:
                 trans_list.append(("split_iname", (f"{e}", kio,),
-                    (("outer_tag", "g.0",), ("slabs",(0,1,),),),))
+                    (("outer_tag", "g.0",), ("slabs",slabs,),),))
                 trans_list.append(("split_iname", (f"{e}_inner", kii,),
-                    (("outer_tag", "ilp",), ("inner_tag", "l.0",), ("slabs", (0,1,),),),))
+                    (("outer_tag", "ilp",), ("inner_tag", "l.0",), ("slabs", slabs,),),))
             else:
                 trans_list.append(("split_iname", (f"{e}", kio,),
                     (("outer_tag", "g.0",), ("inner_tag", "l.0",), ("slabs",(0,0,),),),))
@@ -834,7 +948,7 @@ def einsum2to2_kernel_tlist_generator_v2(queue, knl, start_param=None):
                 trans_list.append(("split_iname", (f"{i}", iio,),
                     (("outer_tag", "g.1",), ("slabs",(0,0,),),),))
                 trans_list.append(("split_iname", (f"{i}_inner", iii,),
-                    (("outer_tag", "ilp",), ("inner_tag","l.1",), ("slabs",(0,1,),),),))
+                    (("outer_tag", "ilp",), ("inner_tag","l.1",), ("slabs",slabs,),),))
             else:
                 trans_list.append(("split_iname", (f"{i}", iio,),
                     (("outer_tag", "g.1",), ("inner_tag", "l.1",), ("slabs",(0,0,),),),))

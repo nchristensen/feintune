@@ -240,7 +240,11 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
                 # Get new result segment
                 args_segment = args[start_ind:end_ind]
                 args_segment_with_timeout = [(timeout, arg,) for arg in args_segment]
-                if True: #"Spectrum" in MPI.get_vendor()[0] or comm.Get_size() == 0:
+                if True:
+                    for entry in args_segment_with_timeout:
+                        results.append(test(entry))
+
+                elif False: #"Spectrum" in MPI.get_vendor()[0] or comm.Get_size() == 0:
                     with MPICommExecutor(comm, root=0) as mypool:
                         if mypool is not None:
                             #results = list(mypool.map(test, args, chunksize=1))

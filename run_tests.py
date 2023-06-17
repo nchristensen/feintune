@@ -902,23 +902,35 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=None, method="
 
     return avg_time, measured_latency, wall_clock_time
 
-def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, method="thread"):
+def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, method=None):#, method="thread"):
     # Timeout won't prevent applying transformations from hanging
+
+    print("PRINTING 1")
+    print(knl_base)
 
     print("BEGINNING KERNEL TRANSFORMATION")
     transformed = True
-    try:
-        start = time.time()
-        #import pdb; pdb.set_trace()
-        knl = func_timeout(timeout, apply_transformation_list, args=(knl_base, trans_list,))
-        #knl = apply_transformation_list(knl_base, trans_list)
-        end = time.time()
-        print("Transformation required", end - start, "seconds")
-        #exit()
-    except FunctionTimedOut as e:
-        print("Transformation timed out")
-        transformed = False
-        knl = knl_base
+
+    if True:
+        knl = apply_transformation_list(knl_base, trans_list)
+    else:
+        try:
+            start = time.time()
+            #import pdb; pdb.set_trace()
+            knl = func_timeout(timeout, apply_transformation_list, args=(knl_base, trans_list,))
+            #knl = apply_transformation_list(knl_base, trans_list)
+            end = time.time()
+            print("Transformation required", end - start, "seconds")
+            #exit()
+        except FunctionTimedOut as e:
+            print("Transformation timed out")
+            transformed = False
+            knl = knl_base
+
+    print("PRINTING 2")
+    print(knl)
+    exit()
+
 
     local_sizes = set()
     for trans in trans_list:
