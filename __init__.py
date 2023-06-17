@@ -538,19 +538,14 @@ def get_batch_temporaries_by_size(tunit, batches):
     return batch_dict_list
 """
 
-# Make address_space a required argument.
-def get_batch_temporaries_by_size(tunit, nbatches, address_spaces=None):
+# TODO: Make data type an argument and only alias for a single data type at a time.
+# For now, assume all temporaries have the same data type.
+def get_batch_temporaries_by_size(tunit, nbatches, address_space):
 
     # Assumes all of the temporaries are in local or private memory
-    #for key, val in tunit.default_entrypoint.temporary_variables.items():
-    #    print(key, val.address_space)
+    temp_dict = {key: val for key, val in tunit.default_entrypoint.temporary_variables.items() if val.address_space==address_space}
+    #print("Temp dict:", temp_dict)
     #exit()
-    if address_spaces is None:
-        temp_dict = tunit.default_entrypoint.temporary_variables
-    else:
-        temp_dict = {key: val for key, val in tunit.default_entrypoint.temporary_variables.items()}# if val.address_space in address_spaces}
-    print("Temp dict:", temp_dict)
-    exit()
     batch_dict_list = [] # A list of dictionaries (keyed by size, one for each batch) of sets of temporary ids
 
     # Inefficient
@@ -560,11 +555,11 @@ def get_batch_temporaries_by_size(tunit, nbatches, address_spaces=None):
             if f"batch_{batch_num}" in instr.id:
                 for dep in instr.dependency_names():
                     if dep in temp_dict:
-                        shape = temp_dict[dep].shape
-                        if shape not in batch_dict:
-                            batch_dict[shape] = set([dep])
+                        size = np.product(temp_dict[dep].shape)
+                        if size not in batch_dict:
+                            batch_dict[size] = set([dep])
                         else:
-                            batch_dict[shape] |= set([dep])
+                            batch_dict[size] |= set([dep])
                            
         batch_dict_list.append(batch_dict)
 
@@ -615,6 +610,7 @@ def get_alias_sets(batch_dict_list):
             alias_sets.append(set(arg_array[:,col]) - set([None]))
     
     return alias_sets
+
 
 from qprofile import qprofile, qinstrument
 
@@ -833,9 +829,10 @@ def batch_einsums(tunit, batch_size, **kwargs):
             '''
         """
         # Enforcing an ordering may or may not reduce scheduling time
-        #for i in range(1, nbatches):
-        #    j = i - 1
-        #    knl = lp.add_dependency(knl, f"id:batch_{i}_*", f"id:batch_{j}_*")
+        # Actually, is needed for aliasing
+        for i in range(1, nbatches):
+            j = i - 1
+            knl = lp.add_dependency(knl, f"id:batch_{i}_*", f"id:batch_{j}_*")
 
         #print(knl)
         #exit()
@@ -998,23 +995,29 @@ def batch_einsums(tunit, batch_size, **kwargs):
         # yes, because their memory spaces are lp.auto, need to preprocess to obtain them
         #"""
 
-        if False:
+        if True:
             from loopy.transform.realize_reduction import realize_reduction
 
-            b_tunit = lp.preprocess_program(tunit.with_kernel(knl)) # Realizes the reductions so we can access the accumulators
+            pp_tunit = lp.preprocess_program(tunit.with_kernel(knl)) # Realizes the reductions so we can access the accumulators
             # realize_reduction doesn't fill in lp.auto memory spaces
-            #b_tunit = realize_reduction(tunit.with_kernel(knl), unknown_types_ok=True)
-            knl = b_tunit.default_entrypoint
+            #pp_tunit = realize_reduction(tunit.with_kernel(knl), unknown_types_ok=True)
+            #knl = b_tunit.default_entrypoint
 
             # This needs to be fixed. It prevents finding a successful schedule
             # Need to separate by address space. Or maybe just call twice?
-            batch_temps_by_size = get_batch_temporaries_by_size(b_tunit, nbatches, address_spaces=[lp.AddressSpace.LOCAL]) 
+
+            batch_temps_by_size = get_batch_temporaries_by_size(pp_tunit, nbatches, lp.AddressSpace.LOCAL) 
             alias_sets = get_alias_sets(batch_temps_by_size)
-            #print(alias_sets)
-            #exit()
-            knl = b_tunit.default_entrypoint
             for s in alias_sets:
                 knl = lp.alias_temporaries(knl, list(s))
+
+            # Doesn't seem to do anything for OpenCL but for other targets it might do something
+            batch_temps_by_size = get_batch_temporaries_by_size(pp_tunit, nbatches, lp.AddressSpace.PRIVATE) 
+            alias_sets = get_alias_sets(batch_temps_by_size)
+            for s in alias_sets:
+                knl = lp.alias_temporaries(knl, list(s))
+
+
 
         """
         print("Old kernel")
