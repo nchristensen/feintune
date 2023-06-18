@@ -757,6 +757,8 @@ def batch_einsums(tunit, batch_size, **kwargs):
 
     additional_inames_to_duplicate = set(tunit.default_entrypoint.inames.keys()) - within_inames
 
+    
+
     # Need to rename this variable
     #print(non_fetch_rule_inames)
     #inames_to_duplicate = sorted([iname for iname in tunit.default_entrypoint.inames.keys() if not "actx_" in iname])
@@ -965,6 +967,9 @@ def batch_einsums(tunit, batch_size, **kwargs):
         #"""
 
         print("Duplicating inames")
+        # Can perhaps do another decompose -> transform -> recompose for creating the loop nests.
+        # Essentially rename the inames and then add each set of inames as a separate domain
+        # to the recomposed kernel.
         for i in range(0, nbatches): # Should we keep the first batch in the original set of loops?
             start = time.time()
             before_inames_dict = knl.inames.copy()
@@ -1117,6 +1122,29 @@ def batch_einsums(tunit, batch_size, **kwargs):
             for s in alias_sets:
                 knl = lp.alias_temporaries(knl, list(s), synchronize_for_exclusive_use=False)
 
+        if False:
+
+            # Using global barriers helps, but not by much. It still takes minutes
+            # to generate the code.
+
+            for i in range(1, nbatches):
+                j = i - 1
+                knl = lp.add_dependency(knl, f"id:batch_{i}_*", f"id:batch_{j}_*")
+           
+            store_insns = ["id:"+instr.id for instr in tunit.default_entrypoint.instructions if "_store" in instr.id]
+            fetch_insns = ["id:"+instr.id for instr in tunit.default_entrypoint.instructions if "_fetch" in instr.id]
+            print("STORE INSTRUCTIONS")
+            print(store_insns)
+            print("FETCH INSTRUCTIONS")
+            print(fetch_insns)
+            #exit()
+            for i in range(1,nbatches,1):
+                knl = lp.add_barrier(knl, insn_before=store_insns[i-1], insn_after=fetch_insns[i])
+            
+        
+        #print(knl)
+        #exit()
+        
         """
         print("Old kernel")
         for name, iname in tunit.default_entrypoint.inames.items():
@@ -1131,8 +1159,9 @@ def batch_einsums(tunit, batch_size, **kwargs):
 
         #knl = decouple_domain(knl, knl.inames, frozenset())
         #return b_tunit.with_kernel(knl)
-        return tunit.with_kernel(knl)
-
+        out_tunit = tunit.with_kernel(knl)
+        #return lp.save_and_reload_temporaries(out_tunit)
+        return out_tunit
 
 
     b_tunit = linearize_batches(b_tunit, batches)
@@ -1140,10 +1169,13 @@ def batch_einsums(tunit, batch_size, **kwargs):
     print(b_tunit.default_entrypoint)
     #exit()
     #kern = b_tunit.copy(target=lp.CTarget())
-    kern = b_tunit.copy(target=lp.OpenCLTarget())
+    #kern = b_tunit.copy(target=lp.OpenCLTarget())
+    kern = b_tunit
+    start = time.time()
     code = lp.generate_code_v2(kern).device_code()
+    end = time.time()
     print(code)
-    exit()
+    print("Codegen time:", end-start)
     session = profiler.stop()
     #print(profiler.output_flame())
 
@@ -1586,8 +1618,11 @@ def apply_transformation_list(tunit, transformations):
 
     print(tunit.default_entrypoint)
     kern = tunit.default_entrypoint.copy(target=lp.OpenCLTarget())
+    start = time.time()
     code = lp.generate_code_v2(kern).device_code()
+    end = time.time()
     print(code)
 
+    print("Codegen time:", end-start)
     exit()
     return knl

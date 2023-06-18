@@ -95,7 +95,7 @@ def batch_size_options(knl):
     #return list(reversed(batch_size_list))
     #return list(batch_size_list)
     print("Forcing batch size to be one")
-    return [2]#[117]
+    return [1]#[117]
 
 
 # Creates a list containing tuples of search space parameters.
