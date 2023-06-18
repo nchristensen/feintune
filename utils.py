@@ -62,7 +62,7 @@ def get_domain_list(tunit):
     domain_list = []
     for domain in domains:
         #print(domain.get_var_names(islpy.dim_type.all))
-        domain_names = set([key.name for key in domain.get_id_dict().keys()])
+        domain_names = {key.name for key in domain.get_id_dict().keys()}
         domain_list.append((domain_names, domain,))
 
     #import islpy
