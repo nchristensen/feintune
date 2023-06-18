@@ -79,6 +79,9 @@ def batch_size_options(knl):
     nbatches_dict = {}
 
     # Do in reverse so we wind up with the smallest batch size that requires nbatches
+    # Is this really valid though? Who can say if processing 100 einsums in batches of size 33,33,33,1
+    # is slower than batches of size 25,25,25,25?
+    # Realistically, we want the biggest batch size that the local memory can handle.
     for batch_size, nbatches in reversed(batch_size_list):
         if nbatches in nbatches_dict and batch_size < nbatches_dict[nbatches]:
             nbatches_dict[nbatches] = batch_size
@@ -86,10 +89,13 @@ def batch_size_options(knl):
             nbatches_dict[nbatches] = batch_size
     batch_size_list = sorted(nbatches_dict.values())
 
+    # Could also just use this.
+    #batch_size_list = list(range(1,neinsums + 1))
+
     #return list(reversed(batch_size_list))
     #return list(batch_size_list)
     print("Forcing batch size to be one")
-    return [1]#[117]
+    return [2]#[117]
 
 
 # Creates a list containing tuples of search space parameters.
@@ -661,15 +667,15 @@ def get_trans_list(knl, params):
     prefetch_tag = None#"for"#"l.auto"
     ilp = "for" #"ilp"
 
-    """
+    #"""
     g0 = "g.0"
     g1 = "g.1"
     l0 = "l.0"
     l1 = "l.1"
     unr = "for"#"unr"
     prefetch_tag = "l.auto"
-    ilp = "ilp"
-    """
+    ilp = "for"#"ilp"
+    #"""
 
     # TODO: Change this to a frozendict or immutable map for easier legibility
     slabs = (0,0) #(0,1)
@@ -691,7 +697,6 @@ def get_trans_list(knl, params):
                 (("outer_tag", g1,), ("slabs",(0,0,),),),))
             # In theory this should be (0,0)
             # The ilp tag can be problematic with multiple independent blocks https://github.com/inducer/loopy/issues/418
-            # TODO: Fix ilp on this axis.
             trans_list.append(("split_iname", (f"{i}_inner", iii,), 
                 (("outer_tag", ilp,), ("inner_tag", l1,), ("slabs",(0,0,),),),))
         else:

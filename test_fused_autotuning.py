@@ -891,7 +891,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                     
                     print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
 
-                    if not indirection and red_axes > 0 and total_axes >= 3 and einsum_count >= 100:#9:
+                    if not indirection and red_axes > 0 and total_axes >= 3 and einsum_count >= 100:
                         autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 

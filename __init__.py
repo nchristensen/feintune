@@ -567,6 +567,9 @@ def get_batch_temporaries_by_size(tunit, nbatches, address_space):
 
 
 def get_alias_sets(batch_dict_list):
+    from itertools import combinations
+    import copy
+
     sizes = set()
     for batch_dict in batch_dict_list:
         sizes |= set(batch_dict.keys())
@@ -574,15 +577,22 @@ def get_alias_sets(batch_dict_list):
     alias_sets = []
     for size in sizes:
         arg_lists = []
-        for batch_dict in batch_dict_list:
+        arg_sets = []
+        for i, batch_dict in enumerate(batch_dict_list):
             arg_lists.append(sorted(batch_dict[size]))
+            arg_sets.append((i,set(batch_dict[size],)))
 
-        max_len = 0
+        #max_len = 0
+        #for l in arg_lists:
+        #    max_len = max(len(l), max_len)
+
+        
+
+        max_len = np.max([len(l) for l in arg_lists])
         for l in arg_lists:
-            max_len = max(len(l), max_len)
-        for l in arg_lists:
-            while len(l) < max_len:
-                l.append(None) # Pad with None so can slice columns
+            l += [None]*(max_len - len(l)) # Pad with None so can slice columns
+            #while len(l) < max_len:
+            #    l.append(None) # Pad with None so can slice columns
 
         # This needs to be a bit more robust, we want a variable to alias with itself.
         # We also can't allow two tempories to alias if they occur in the same block (row)
@@ -591,20 +601,105 @@ def get_alias_sets(batch_dict_list):
         # except if the value is self
         # Permute so self is in current column as much as possible
         # For now just assert to verify this is not the case, don't attempt to fix
+
         arg_array = np.array(arg_lists)
+        #print(arg_array)
 
-        flat_arg_array = arg_array.flatten()
-        nonzero_entries = flat_arg_array[np.flatnonzero(flat_arg_array)]
-        unique_entries = np.unique(nonzero_entries)
-        print(unique_entries)
-        print(nonzero_entries)
-        assert len(unique_entries) == len(nonzero_entries)
+        moved = []
 
-        for col in range(arg_array.shape[1]):
-            col_set = set(arg_array[:,col].flatten())
-            for row in range(arg_array.shape[0]):
-                row_set = set(arg_array[row,:].flatten())
-                assert col_set & row_set == set([arg_array[row,col]])
+        # See if any two batches share any temporaries
+        set_combo_iterator = combinations(arg_sets,2)
+        for (row1, set1), (row2, set2) in set_combo_iterator:
+            intersection = set1 & set2
+            for temporary in intersection:
+                # Find the column indices of the shared temporaries
+                col1 = list(arg_array[row1,:]).index(temporary)
+                col2 = list(arg_array[row2,:]).index(temporary)
+                moved.append(temporary)
+
+                if col1 != col2:
+                    #print((row1,col1), (row2,col2))
+
+                    # Use row1 as the pivot row and swap the col1 and col2 in
+                    # the rest of the rows. Need to apply to all rows
+                    # except pivot to avoid undoing any prior pairings
+        
+
+                    # Attempting to do this using slicing and boolean
+                    # arrays didn't work, so doing this manually.
+                    #print(temporary, (row1,col1), (row2, col2))
+
+                    #print("BEFORE")
+                    #print(arg_array[:,[col1,col2]])
+
+                    for row in np.arange(0, arg_array.shape[0]):
+
+                        # Only exchange column values when necessary.
+                        if row != row1 and arg_array[row1,col1] == arg_array[row,col2]:
+                            holder = arg_array[row, col1]
+                            arg_array[row,col1] = arg_array[row,col2]              
+                            arg_array[row,col2] = holder
+
+
+                    #print("AFTER")
+                    """
+                    # Check that nothing already aligned came out of alignment
+                    subarray = arg_array[:,[col1,col2]]
+                    for entry in subarray.flatten():
+                        if entry is not None:
+                            print(entry)
+                            indices = np.argwhere(subarray == entry)
+                            if entry in moved:
+                                assert indices.shape[0] > 1
+                                print(indices)
+                                print(subarray)
+                                assert np.all(indices[:,1] == indices[0,1])
+                    """
+        
+            
+
+                    #arg_array[selected_rows,col1][:] = arg_array[selected_rows,col2][:]
+                    #arg_array[selected_rows,col2][:] = holder[:]
+
+                    #print("AFTER")
+                    #print(arg_array[selected_rows,col1][:])
+                    #print(arg_array[selected_rows,col2][:])
+
+                    #print(arg_array[row1,:])
+                    #print(arg_array[row2,:])
+
+        
+                    #arg_array[selected_rows,col1], arg_array[selected_rows,col2] = copy.deepcopy(arg_array[selected_rows, col2]), copy.deepcopy(arg_array[selected_rows,col1])
+
+                    # Check that the re-arrangement was done properly
+                    #assert arg_array[row1, col1] == arg_array[row2, col1]
+                    #assert arg_array[row1, col1] != arg_array[row2, col2]
+                    
+                    #exit()
+        """
+        # Check that everything is properly aligned.
+        for entry in arg_array.flatten():
+            if entry is not None:
+                print(entry)
+                indices = np.argwhere(arg_array == entry)
+                print(indices)
+                assert np.all(indices[:,1] == indices[0,1])
+        """
+ 
+
+        #flat_arg_array = arg_array.flatten()
+        #nonzero_entries = flat_arg_array[np.flatnonzero(flat_arg_array)]
+        #unique_entries = np.unique(nonzero_entries)
+        #print(unique_entries)
+        #print(nonzero_entries)
+        # Should be fixed now so this check can be disabled
+        #assert len(unique_entries) == len(nonzero_entries)
+
+        #for col in range(arg_array.shape[1]):
+        #    col_set = set(arg_array[:,col].flatten())
+        #    for row in range(arg_array.shape[0]):
+        #        row_set = set(arg_array[row,:].flatten())
+        #        assert col_set & row_set == set([arg_array[row,col]])
 
         for col in range(arg_array.shape[1]):
             alias_sets.append(set(arg_array[:,col]) - set([None]))
@@ -1016,8 +1111,6 @@ def batch_einsums(tunit, batch_size, **kwargs):
             alias_sets = get_alias_sets(batch_temps_by_size)
             for s in alias_sets:
                 knl = lp.alias_temporaries(knl, list(s))
-
-
 
         """
         print("Old kernel")
@@ -1459,7 +1552,7 @@ def apply_transformation_list(tunit, transformations):
             args = args + list(t[1])
         kwargs = dict(t[2]) if len(t) > 2 else {}
         if t[0] == "batch_einsums":
-            kwargs["profile"] = True
+            kwargs["profile"] = False
             tunit = func(*args, **kwargs)
             #exit()
         # Assumes all prefetches are together in the list of transformations
