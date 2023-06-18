@@ -678,7 +678,7 @@ def get_trans_list(knl, params):
     #"""
 
     # TODO: Change this to a frozendict or immutable map for easier legibility
-    slabs = (0,0) #(0,1)
+    slabs = (0,1) if nbatches == 1 else (0,0)
     # For some reason this isn't correctly seeing a j=0 case.
     # It probably isn't even worth tuning those kernels...
     if not kio == 0 or iio == 0 or ji == 0 or iii == 0 or kii == 0: # If there is a zero length dimension then don't transform
