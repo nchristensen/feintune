@@ -925,9 +925,9 @@ def batch_einsums(tunit, batch_size, **kwargs):
         """
         # Enforcing an ordering may or may not reduce scheduling time
         # Actually, is needed for aliasing
-        for i in range(1, nbatches):
-            j = i - 1
-            knl = lp.add_dependency(knl, f"id:batch_{i}_*", f"id:batch_{j}_*")
+        #for i in range(1, nbatches):
+        #    j = i - 1
+        #    knl = lp.add_dependency(knl, f"id:batch_{i}_*", f"id:batch_{j}_*")
 
         #print(knl)
         #exit()
@@ -1091,7 +1091,11 @@ def batch_einsums(tunit, batch_size, **kwargs):
         #"""
 
         if True:
-            from loopy.transform.realize_reduction import realize_reduction
+            #from loopy.transform.realize_reduction import realize_reduction
+
+            for i in range(1, nbatches):
+                j = i - 1
+                knl = lp.add_dependency(knl, f"id:batch_{i}_*", f"id:batch_{j}_*")
 
             pp_tunit = lp.preprocess_program(tunit.with_kernel(knl)) # Realizes the reductions so we can access the accumulators
             # realize_reduction doesn't fill in lp.auto memory spaces
@@ -1104,13 +1108,14 @@ def batch_einsums(tunit, batch_size, **kwargs):
             batch_temps_by_size = get_batch_temporaries_by_size(pp_tunit, nbatches, lp.AddressSpace.LOCAL) 
             alias_sets = get_alias_sets(batch_temps_by_size)
             for s in alias_sets:
-                knl = lp.alias_temporaries(knl, list(s))
+                # Synchronizing for exclusive use make loopy fall back to the slow scheduler
+                knl = lp.alias_temporaries(knl, list(s), synchronize_for_exclusive_use=False)
 
             # Doesn't seem to do anything for OpenCL but for other targets it might do something
             batch_temps_by_size = get_batch_temporaries_by_size(pp_tunit, nbatches, lp.AddressSpace.PRIVATE) 
             alias_sets = get_alias_sets(batch_temps_by_size)
             for s in alias_sets:
-                knl = lp.alias_temporaries(knl, list(s))
+                knl = lp.alias_temporaries(knl, list(s), synchronize_for_exclusive_use=False)
 
         """
         print("Old kernel")

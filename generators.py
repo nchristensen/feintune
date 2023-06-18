@@ -674,7 +674,7 @@ def get_trans_list(knl, params):
     l1 = "l.1"
     unr = "for"#"unr"
     prefetch_tag = "l.auto"
-    ilp = "for"#"ilp"
+    ilp = "ilp"
     #"""
 
     # TODO: Change this to a frozendict or immutable map for easier legibility
