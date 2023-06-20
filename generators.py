@@ -672,7 +672,7 @@ def get_trans_list(knl, params):
     g1 = "g.1"
     l0 = "l.0"
     l1 = "l.1"
-    unr = "for"#"unr"
+    unr = "unr"
     prefetch_tag = "l.auto"
     ilp = "ilp"
     #"""
@@ -707,7 +707,7 @@ def get_trans_list(knl, params):
         # Should the i loop have (0,1) slabs for both?
 
         print("Splitting reduction iname disabled. Re-enable when finished debugging")
-        #trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag","for",),),))
+        #trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag",unr,),),))
 
         if r is not None:
             trans_list.append(("tag_inames", (((f"{r}", unr,),),),))
