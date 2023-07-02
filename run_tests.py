@@ -200,6 +200,8 @@ def test_face_mass_merged(kern, backend="OPENCL", nruns=10, warmup=True):
 
 def measure_execution_time(queue, tunit, arg_dict, nruns, warmup_runs):
     print("Warming up")
+    #print(tunit)
+    #exit()
     for i in range(warmup_runs):
         tunit(queue, **arg_dict)
     #queue.finish()
@@ -231,7 +233,10 @@ def measure_execution_latency(queue, tunit, arg_dict, nruns, warmup_runs):
 
     otunit = lp.set_argument_order(tunit, arg_names)
     code = lp.generate_code_v2(otunit).device_code()
-    
+   
+    #print(code)
+    #exit()
+    # This isn't generally true actually. Some kernels define helper functions within them.
     null_kernel_code = code.split("{")[0] + "{}"
     search_str = "reqd_work_group_size("
     start_ind = null_kernel_code.index(search_str) + len(search_str)
@@ -409,7 +414,8 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup_runs=2):
         print("STARTING EXECUTION")
         start = time.time()
 
-        measured_latency = measure_execution_latency(queue, kern, arg_dict, nruns, warmup_runs)
+        print("Setting execution latency to zero")
+        measured_latency = 0#measure_execution_latency(queue, kern, arg_dict, nruns, warmup_runs)
         avg_time = measure_execution_time(queue, kern, arg_dict, nruns, warmup_runs) 
 
         end = time.time()
