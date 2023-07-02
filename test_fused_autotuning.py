@@ -760,6 +760,9 @@ def get_pickled_tunits(directory):
 
 def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
 
+    # Should probably move this to utilities or something
+    from run_tests import get_knl_flops 
+
     for filename, tunit_dict in tunit_dicts:
         tunit = tunit_dict["tunit"]
         print(tunit)
@@ -782,11 +785,17 @@ def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
     print("\nSubkernel information")
     pid_set = set()
     streaming_pid = set()
+    streaming_flops = 0
     einsum_3_to_2_pid = set()
+    einsum_3_to_2_flops = 0
     einsum_4_to_2_pid = set()
+    einsum_4_to_2_flops = 0
     einsum_5_to_3_pid = set()
+    einsum_5_to_3_flops = 0
     einsum_5_to_2_pid = set()
+    einsum_5_to_2_flops = 0
     other_einsum_pid = set()
+    other_einsum_flops = 0
 
     for filename, tunit_dict in tunit_dicts:
 
@@ -823,18 +832,25 @@ def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
                     #if total_axes == 5 and non_red_axes == 2:
                     #    print(sk)
                     #    exit()
+                    flops = get_knl_flops(sk)
                     if red_axes == 0:
                         streaming_pid |= {pid}
+                        streaming_flops += flops 
                     elif total_axes == 3 and non_red_axes == 2:
                         einsum_3_to_2_pid |= {pid}
+                        einsum_3_to_2_flops += flops
                     elif total_axes == 4 and non_red_axes == 2:
                         einsum_4_to_2_pid |= {pid}
+                        einsum_4_to_2_flops += flops
                     elif total_axes == 5 and non_red_axes == 2:
                         einsum_5_to_2_pid |= {pid}
+                        einsum_5_to_2_flops += flops
                     elif total_axes == 5 and non_red_axes == 3:
                         einsum_5_to_3_pid |= {pid}
+                        einsum_5_to_3_flops += flops
                     else:
                         other_einsum_pid |= {pid}
+                        other_einsum_flops += flops
 
                     data = None
                     if hjson_dir is not None:
@@ -858,12 +874,12 @@ def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
         print(key, val)
 
     print("Number of distinct subkernels", len(pid_set))
-    print("Number of distinct streaming subkernels", len(streaming_pid))
-    print("Number of distinct 3 to 2 einsums", len(einsum_3_to_2_pid))
-    print("Number of distinct 4 to 2 einsums", len(einsum_4_to_2_pid))
-    print("Number of distinct 5 to 2 einsums", len(einsum_5_to_2_pid))
-    print("Number of distinct 5 to 3 einsums", len(einsum_5_to_3_pid))
-    print("Number of distinct other einsums", len(other_einsum_pid))
+    print("Number of distinct streaming subkernels", len(streaming_pid), "flops", streaming_flops)
+    print("Number of distinct 3 to 2 einsums", len(einsum_3_to_2_pid), "flops", einsum_3_to_2_flops)
+    print("Number of distinct 4 to 2 einsums", len(einsum_4_to_2_pid), "flops", einsum_4_to_2_flops)
+    print("Number of distinct 5 to 2 einsums", len(einsum_5_to_2_pid), "flops", einsum_5_to_2_flops)
+    print("Number of distinct 5 to 3 einsums", len(einsum_5_to_3_pid), "flops", einsum_5_to_3_flops)
+    print("Number of distinct other einsums", len(other_einsum_pid), "flops", other_einsum_flops)
 
 
 def get_device_roofline_data(queue):
@@ -979,7 +995,7 @@ def test_default_transforms(sk_list, save_path=None):
             total_axes = non_red_axes + red_axes
             out_axes = total_axes - red_axes
 
-            if not indirection and red_axes > 0:
+            if not indirection and red_axes == 0:#red_axes > 0:
 
                 transformed_sk = actx.transform_loopy_program(sk)
                 ret_dict = run_single_param_set_v2(queue, transformed_sk, [], generic_test,
@@ -1101,8 +1117,9 @@ def main(arg):
 
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directories = [ #"./pickled_programs_y3_prediction_order_1",
-                    "./pickled_programs_y3_prediction_order_3",
+    directories = [ #"./pickled_programs_grudge_wave",
+                    "./pickled_programs_y3_prediction_order_1",
+                    #"./pickled_programs_y3_prediction_order_3",
                     #"./pickled_programs_prediction_order_2",
                     #"./pickled_programs_prediction_order_3",
                     #"./pickled_programs_prediction_order_4"
@@ -1123,11 +1140,11 @@ def main(arg):
         sk_list, pid_dict = collect_subkernels(tunit_dicts)
         print("Done collecting subkernels")
 
-        #get_lazy_einsum_info(tunit_dicts, hjson_dir=save_path)
+        get_lazy_einsum_info(tunit_dicts, hjson_dir=save_path)
 
         #test_default_transforms(sk_list, save_path=directory + "/default_transforms_hjson")
 
-        autotune_standalone_subkernels(sk_list, save_path=save_path)
+        #autotune_standalone_subkernels(sk_list, save_path=save_path)
 
         #compare_weighted_avg_frac_rooflines(directory, pid_dict)
 
