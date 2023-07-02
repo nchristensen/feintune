@@ -167,10 +167,10 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
 
     print(input_space)
     output_space = Space([Real(0.0, inf, name="avg_time")])
-    eval_str = "mpi_comm_executor"
+    #eval_str = "mpi_comm_executor"
     #eval_str = "mpi_pool_executor"
     #eval_str = "charm4py_pool_executor"
-    #eval_str = "threadpool"
+    eval_str = "threadpool"
     #eval_str = "processpool"
     #eval_str = "ray"
 
