@@ -1,12 +1,12 @@
 import pickle
 import loopy as lp
 from pytools.tag import Tag
-from meshmode.array_context import FEMEinsumTag, EinsumTag
+from meshmode.array_context import EinsumTag
 einsum_classes = tuple([EinsumTag])
 import pyopencl as cl
 import os
 from os.path import exists
-from utils import unique_program_id, convert, load_hjson, dump_hjson
+from utils import unique_program_id, convert, load_hjson, dump_hjson, get_domain_list
 import hjson
 from generators import createConfigSpace
 from ytopt_autotuning import ytopt_tuning
@@ -31,36 +31,11 @@ from run_tests import generic_test
 class IsDOFArray(Tag):
     pass
 
-# Map a domain to a tuple of its inames
-def get_domain_list(tunit):
-    domains = tunit.default_entrypoint.domains
-    import islpy
-    domain_list = []
-    for domain in domains:
-        #print(domain.get_var_names(islpy.dim_type.all))
-        domain_names = frozenset([key.name for key in domain.get_id_dict().keys()])
-        domain_list.append((domain_names, domain,))
-
-    #import islpy
-    #for domain_names, domain in domain_list:
-    #    print(domain_names, domain)
-    #    id_dict = domain.get_id_dict()
-    #    print(id_dict)
-    #    exit()
-    #    for dim in range(domain.n_dim()):
-    #        print(domain.dim_max(dim))
-            
-    #    #print(domain.drop_constraints_involving_dims(islpy.dim_type.all, 0, 1))
-    #    exit()
-    return domain_list
 
 # Get the barriers to divide computation into phases
 def get_barriers(tunit):
     barriers = [None]
     for instr in tunit.default_entrypoint.instructions:
-
-        #if any([isinstance(tag, EinsumTag) for tag in instr.tags]):
-        #    print(str(instr))
         if isinstance(instr, lp.BarrierInstruction) and instr.synchronization_kind == "global":
             barriers.append(instr.id)
     #print("Number of global barriers", len(barriers))
@@ -68,17 +43,12 @@ def get_barriers(tunit):
 
 
 # Get the barriers to divide computation into phases
-def get_phases(tunit, barriers, domain_list):
+def get_phases(tunit, barriers):
 
     # Should a phase be an object?
     phase_lists = [{"domains": frozenset(), "within_inames": frozenset(), "instructions": [], "args": frozenset()} for i in range(len(barriers) + 1)]
     phases = dict(zip(barriers, phase_lists))
-    #print(phases)
     for instr in tunit.default_entrypoint.instructions:
-
-        #print(instr.within_inames)
-        #print(domain_dict[instr.within_inames])
-        #if not (isinstance(instr, lp.BarrierInstruction) and instr.synchronization_kind == "global"):
         dbarrier = None
         for entry in instr.depends_on:
             if entry in barriers:
@@ -88,6 +58,8 @@ def get_phases(tunit, barriers, domain_list):
         phases[dbarrier]["instructions"].append(instr)
         phases[dbarrier]["within_inames"] = instr.within_inames | phases[dbarrier]["within_inames"]
 
+    # Replace the text domain names with the actual domain objects
+    domain_list = get_domain_list(tunit)
     # Determine the domain objects from the inames
     for dbarrier in barriers:
         
@@ -366,52 +338,33 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
     einsum_types = list(get_einsum_types(sk))    
     if len(einsum_types) > 1:
         raise(ValueError("Cannot currently handle multiple einsum types in same subkernel"))
+    est = einsum_types[0]
 
     use_ytopt = False
 
-    if use_ytopt:
-        input_space = createConfigSpace(queue, sk)
-        ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
-                     device_latency=device_latency, timeout=30, save_path=save_path)
-        # For some reason it freezes sometimes before it starts the next one
-        #return True
-    else:
-        est = einsum_types[0]
-
-        if len(est[0]) == 2 and len(est[1]) == 1:
-            trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
-        elif len(est[0]) == 3 and len(est[1]) == 2:
-            # Modified to handle the 5to3 reduction, but it might not be the fastest
-            trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
-        elif len(est[0]) == 2 and len(est[1]) == 2:
-            # Modified to handle the 5to3 reduction, but it might not be the fastest
-            trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
+    handled_pairs = set([(2,1,),(3,2,),(2,2,)])
+    if (len(est[0]), len(est[1]),) in handled_pairs:
+        #if len(est[0]) == 2 and len(est[1]) == 1:
+        #    trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
+        #elif len(est[0]) == 3 and len(est[1]) == 2:
+        #    # Modified to handle the 5to3 reduction, but it might not be the fastest
+        #    trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
+        #elif len(est[0]) == 2 and len(est[1]) == 2:
+        #    # Modified to handle the 5to3 reduction, but it might not be the fastest
+        #    trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
+        if use_ytopt:
+            input_space = createConfigSpace(queue, sk)
+            ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate,
+                             device_memory_bandwidth=device_memory_bandwidth,
+                             device_latency=device_latency, timeout=30, save_path=save_path)
         else:
-            print(est)
-            raise(ValueError("Unhandled einsum type"))
-
-        #print(save_path)
-        #from time import sleep
-        #sleep(5)
-
-        #print(len(trans_list_list))
-        #exit()
-
-        print(sk)
-
-        # 0 length array dimensions are still problematic. Maybe those just shouldn't be autotuned.
-
-        print("Artificially limiting kernel tuning")
-        if len(trans_list_list) > 600:
-
-            ts = time()
-            tdict = parallel_autotune(sk, 0, trans_list_list, program_id=program_id, max_flop_rate=max_flop_rate, device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
-            te = time()
-            print("Autotuning time", te - ts)
-            exit()
-
-        #transformations = tdict["transformations"]
-        #return transformations
+            trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
+            tdict = parallel_autotune(sk, 0, trans_list_list, program_id=program_id,
+                        max_flop_rate=max_flop_rate, device_latency=device_latency,
+                        device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
+    else:
+        print(est)
+        raise(ValueError("Unhandled einsum type"))
 
     #return list(trans_list_list[0])
 
@@ -539,10 +492,9 @@ def get_subkernels(tunit, args):
 
     ### End tag application
 
-    domain_list = get_domain_list(tunit)
     barriers = get_barriers(tunit)
     if len(barriers) > 1:
-        phases = get_phases(tunit, barriers, domain_list)
+        phases = get_phases(tunit, barriers)
         cum_subkernels = generate_cumulative_subkernels(tunit, barriers, phases)
         subkernels = generate_subkernels(tunit, barriers, phases)
     else:
@@ -760,6 +712,9 @@ def get_pickled_tunits(directory):
 
 def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
 
+    # Should probably move this to utilities or something
+    from run_tests import get_knl_flops 
+
     for filename, tunit_dict in tunit_dicts:
         tunit = tunit_dict["tunit"]
         print(tunit)
@@ -782,11 +737,17 @@ def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
     print("\nSubkernel information")
     pid_set = set()
     streaming_pid = set()
+    streaming_flops = 0
     einsum_3_to_2_pid = set()
+    einsum_3_to_2_flops = 0
     einsum_4_to_2_pid = set()
+    einsum_4_to_2_flops = 0
     einsum_5_to_3_pid = set()
+    einsum_5_to_3_flops = 0
     einsum_5_to_2_pid = set()
+    einsum_5_to_2_flops = 0
     other_einsum_pid = set()
+    other_einsum_flops = 0
 
     for filename, tunit_dict in tunit_dicts:
 
@@ -823,18 +784,25 @@ def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
                     #if total_axes == 5 and non_red_axes == 2:
                     #    print(sk)
                     #    exit()
+                    flops = get_knl_flops(sk)
                     if red_axes == 0:
                         streaming_pid |= {pid}
+                        streaming_flops += flops 
                     elif total_axes == 3 and non_red_axes == 2:
                         einsum_3_to_2_pid |= {pid}
+                        einsum_3_to_2_flops += flops
                     elif total_axes == 4 and non_red_axes == 2:
                         einsum_4_to_2_pid |= {pid}
+                        einsum_4_to_2_flops += flops
                     elif total_axes == 5 and non_red_axes == 2:
                         einsum_5_to_2_pid |= {pid}
+                        einsum_5_to_2_flops += flops
                     elif total_axes == 5 and non_red_axes == 3:
                         einsum_5_to_3_pid |= {pid}
+                        einsum_5_to_3_flops += flops
                     else:
                         other_einsum_pid |= {pid}
+                        other_einsum_flops += flops
 
                     data = None
                     if hjson_dir is not None:
@@ -858,12 +826,12 @@ def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
         print(key, val)
 
     print("Number of distinct subkernels", len(pid_set))
-    print("Number of distinct streaming subkernels", len(streaming_pid))
-    print("Number of distinct 3 to 2 einsums", len(einsum_3_to_2_pid))
-    print("Number of distinct 4 to 2 einsums", len(einsum_4_to_2_pid))
-    print("Number of distinct 5 to 2 einsums", len(einsum_5_to_2_pid))
-    print("Number of distinct 5 to 3 einsums", len(einsum_5_to_3_pid))
-    print("Number of distinct other einsums", len(other_einsum_pid))
+    print("Number of distinct streaming subkernels", len(streaming_pid), "flops", streaming_flops)
+    print("Number of distinct 3 to 2 einsums", len(einsum_3_to_2_pid), "flops", einsum_3_to_2_flops)
+    print("Number of distinct 4 to 2 einsums", len(einsum_4_to_2_pid), "flops", einsum_4_to_2_flops)
+    print("Number of distinct 5 to 2 einsums", len(einsum_5_to_2_pid), "flops", einsum_5_to_2_flops)
+    print("Number of distinct 5 to 3 einsums", len(einsum_5_to_3_pid), "flops", einsum_5_to_3_flops)
+    print("Number of distinct other einsums", len(other_einsum_pid), "flops", other_einsum_flops)
 
 
 def get_device_roofline_data(queue):
@@ -939,7 +907,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                     
                     print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
 
-                    if not indirection and red_axes == 1 and total_axes >= 3 and einsum_count <= 1:
+                    if not indirection and red_axes > 0 and total_axes >= 3 and einsum_count >= 9:
                         autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
@@ -1116,8 +1084,12 @@ def main(arg):
 
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directories = [ #"./pickled_programs_y3_prediction_order_1",
-                    "./pickled_programs_y3_prediction_order_3",
+    directories = [ #"./pickled_programs_grudge_wave",
+                    "./pickled_programs_y3_prediction_order_1",
+                    #"./pickled_programs_wave",
+                    #"./pickled_programs_prediction_order_1",
+                    #"./pickled_programs_y3_prediction_order_1",
+                    #"./pickled_programs_y3_prediction_order_3",
                     #"./pickled_programs_prediction_order_2",
                     #"./pickled_programs_prediction_order_3",
                     #"./pickled_programs_prediction_order_4"
@@ -1138,11 +1110,11 @@ def main(arg):
         sk_list, pid_dict = collect_subkernels(tunit_dicts)
         print("Done collecting subkernels")
 
-        #get_lazy_einsum_info(tunit_dicts, hjson_dir=save_path)
+        get_lazy_einsum_info(tunit_dicts, hjson_dir=save_path)
 
         #test_default_transforms(sk_list, save_path=directory + "/default_transforms_hjson")
 
-        autotune_standalone_subkernels(sk_list, save_path=save_path)
+        #autotune_standalone_subkernels(sk_list, save_path=save_path)
 
         #compare_weighted_avg_frac_rooflines(directory, pid_dict)
 

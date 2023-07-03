@@ -54,3 +54,28 @@ def unique_program_id(tunit, attempt_normalization=True):
     key = kb(tunit.default_entrypoint.copy(name="loopy_kernel"))
 
     return key
+
+
+# Map a domain to a tuple of its inames
+def get_domain_list(tunit):
+    domains = tunit.default_entrypoint.domains
+    domain_list = []
+    for domain in domains:
+        #print(domain.get_var_names(islpy.dim_type.all))
+        domain_names = {key.name for key in domain.get_id_dict().keys()}
+        domain_list.append((domain_names, domain,))
+
+    #import islpy
+    #for domain_names, domain in domain_list:
+    #    print(domain_names, domain)
+    #    id_dict = domain.get_id_dict()
+    #    print(id_dict)
+    #    exit()
+    #    for dim in range(domain.n_dim()):
+    #        print(domain.dim_max(dim))
+            
+    #    #print(domain.drop_constraints_involving_dims(islpy.dim_type.all, 0, 1))
+    #    exit()
+    return domain_list
+
+

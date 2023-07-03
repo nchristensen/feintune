@@ -200,6 +200,8 @@ def test_face_mass_merged(kern, backend="OPENCL", nruns=10, warmup=True):
 
 def measure_execution_time(queue, tunit, arg_dict, nruns, warmup_runs):
     print("Warming up")
+    #print(tunit)
+    #exit()
     for i in range(warmup_runs):
         tunit(queue, **arg_dict)
     #queue.finish()
@@ -231,7 +233,10 @@ def measure_execution_latency(queue, tunit, arg_dict, nruns, warmup_runs):
 
     otunit = lp.set_argument_order(tunit, arg_names)
     code = lp.generate_code_v2(otunit).device_code()
-    
+   
+    #print(code)
+    #exit()
+    # This isn't generally true actually. Some kernels define helper functions within them.
     null_kernel_code = code.split("{")[0] + "{}"
     search_str = "reqd_work_group_size("
     start_ind = null_kernel_code.index(search_str) + len(search_str)
@@ -412,7 +417,7 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup_runs=2):
         print("STARTING EXECUTION")
         start = time.time()
 
-        print("Returning 0 for execution latency")
+        print("Setting execution latency to zero")
         measured_latency = 0#measure_execution_latency(queue, kern, arg_dict, nruns, warmup_runs)
         avg_time = measure_execution_time(queue, kern, arg_dict, nruns, warmup_runs) 
 
@@ -906,23 +911,35 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=None, method="
 
     return avg_time, measured_latency, wall_clock_time
 
-def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, method="thread"):
+def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, method=None):#, method="thread"):
     # Timeout won't prevent applying transformations from hanging
+
+    print("PRINTING 1")
+    print(knl_base)
 
     print("BEGINNING KERNEL TRANSFORMATION")
     transformed = True
-    try:
-        start = time.time()
-        #import pdb; pdb.set_trace()
-        knl = func_timeout(timeout, apply_transformation_list, args=(knl_base, trans_list,))
-        #knl = apply_transformation_list(knl_base, trans_list)
-        end = time.time()
-        print("Transformation required", end - start, "seconds")
-        #exit()
-    except FunctionTimedOut as e:
-        print("Transformation timed out")
-        transformed = False
-        knl = knl_base
+
+    if True:
+        knl = apply_transformation_list(knl_base, trans_list)
+    else:
+        try:
+            start = time.time()
+            #import pdb; pdb.set_trace()
+            knl = func_timeout(timeout, apply_transformation_list, args=(knl_base, trans_list,))
+            #knl = apply_transformation_list(knl_base, trans_list)
+            end = time.time()
+            print("Transformation required", end - start, "seconds")
+            #exit()
+        except FunctionTimedOut as e:
+            print("Transformation timed out")
+            transformed = False
+            knl = knl_base
+
+    print("PRINTING 2")
+    print(knl)
+    exit()
+
 
     local_sizes = set()
     for trans in trans_list:
