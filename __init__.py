@@ -1360,7 +1360,7 @@ def decompose_batched_einsum_kernel(tunit):
 def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
     import islpy as isl    
 
-    batch_size = 2
+    #batch_size = 2
 
     #assert len(orig_tunit.default_entrypoint.domains) == 1
     #orig_domains = orig_tunit.default_entrypoint.domains[0]
@@ -1565,7 +1565,7 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
             
    
 
-    if True:
+    if False:
         knl = lp.add_inames_for_unused_hw_axes(knl)
         #print(knl)
         #print("After add inames")
@@ -1660,7 +1660,10 @@ def apply_transformation_list(tunit, transformations):
 
     print(transformations)
     add_prefetches = [t for t in transformations if t[0] == "add_prefetch"]
-    #exit()
+    batch_size = 0
+    for t in transformations:
+        if t[0] == "batch_einsums":
+            batch_size = t[1][0]
     # Breaks prefetching
     #for entry in knl.default_entrypoint.inames:
     #    knl = knl.with_kernel(decouple_domain(knl.default_entrypoint, [entry], frozenset()))
@@ -1683,15 +1686,17 @@ def apply_transformation_list(tunit, transformations):
             args = args + list(t[1])
         kwargs = dict(t[2]) if len(t) > 2 else {}
         if t[0] == "batch_einsums":
-            kwargs["profile"] = False
-            tunit = func(*args, **kwargs)
+            # Now handled by add_prefetch
+            pass
+            #kwargs["profile"] = False
+            #tunit = func(*args, **kwargs)
             #exit()
         # Assumes all prefetches are together in the list of transformations
         elif t[0] == "add_prefetch":
             if prefetched == False:
                 prefetched=True
-                tunit = func(tunit, add_prefetches, profile=True)
-                exit()
+                tunit = func(tunit, add_prefetches, batch_size=batch_size, profile=False)
+                #exit()
                 """
                 if index == 0 or transformations[index-1][0] != "add_prefetch":
                     # Apply all of the prefetches at once
@@ -1711,13 +1716,15 @@ def apply_transformation_list(tunit, transformations):
 
     print("ENDING TRANSFORMATION:", end - start, "seconds")
 
-    print(tunit.default_entrypoint)
-    kern = tunit.default_entrypoint.copy(target=lp.OpenCLTarget())
-    start = time.time()
-    code = lp.generate_code_v2(kern).device_code()
-    end = time.time()
-    print(code)
+    if False:
+        print(tunit.default_entrypoint)
+        kern = tunit.default_entrypoint.copy(target=lp.OpenCLTarget())
+        start = time.time()
+        code = lp.generate_code_v2(kern).device_code()
+        end = time.time()
+        print(code)
 
-    print("Codegen time:", end-start)
-    exit()
-    return knl
+        print("Codegen time:", end-start)
+        #exit()
+
+    return tunit

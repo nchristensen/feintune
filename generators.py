@@ -93,9 +93,9 @@ def batch_size_options(knl):
     #batch_size_list = list(range(1,neinsums + 1))
 
     #return list(reversed(batch_size_list))
-    #return list(batch_size_list)
-    print("Forcing batch size to be one")
-    return [1]#[117]
+    return list(batch_size_list)
+    #print("Forcing batch size to be one")
+    #return [1]#[117]
 
 
 # Creates a list containing tuples of search space parameters.
@@ -706,8 +706,8 @@ def get_trans_list(knl, params):
 
         # Should the i loop have (0,1) slabs for both?
 
-        print("Splitting reduction iname disabled. Re-enable when finished debugging")
-        #trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag",unr,),),))
+        #print("Splitting reduction iname disabled. Re-enable when finished debugging")
+        trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag",unr,),),))
 
         if r is not None:
             trans_list.append(("tag_inames", (((f"{r}", unr,),),),))
@@ -784,12 +784,12 @@ def get_trans_list(knl, params):
                 strides = [dim_tag.stride for dim_tag in arg_dict[arg].dim_tags if isinstance(dim_tag, lp.kernel.array.FixedStrideArrayDimTag)]
                 order_str = "f,f" if strides[0] < strides[1] else "c,c"
                 if kio != kii:
-                    prefetch_str = f"{j},{e}_inner_outer,{e}_inner_inner"
-                    #prefetch_str = f"{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
+                    #prefetch_str = f"{j},{e}_inner_outer,{e}_inner_inner"
+                    prefetch_str = f"{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
                 else:        
-                    prefetch_str = f"{j},{e}_inner"    
+                    #prefetch_str = f"{j},{e}_inner"    
                     #prefetch_str = f"{j},{e}_inner_outer"    
-                    #prefetch_str = f"{j}_outer,{j}_inner,{e}_inner"    
+                    prefetch_str = f"{j}_outer,{j}_inner,{e}_inner"    
 
                 trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
                     (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
@@ -801,13 +801,13 @@ def get_trans_list(knl, params):
                 # Stick with the default ordering for now. For fortran ordering
                 # slap an order tag on it.
                 if kio != kii:
-                    prefetch_str = f"{f},{j},{e}_inner_outer,{e}_inner_inner"
-                    #prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
+                    #prefetch_str = f"{f},{j},{e}_inner_outer,{e}_inner_inner"
+                    prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
                 else:
-                    prefetch_str = f"{f},{j},{e}_inner"
+                    #prefetch_str = f"{f},{j},{e}_inner"
 
                     #prefetch_str = f"{f},{j},{e}_inner_outer"
-                    #prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner"
+                    prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner"
 
                 trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
                     (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))

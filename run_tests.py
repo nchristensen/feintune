@@ -927,11 +927,6 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             transformed = False
             knl = knl_base
 
-    print("PRINTING 2")
-    print(knl)
-    exit()
-
-
     local_sizes = set()
     for trans in trans_list:
         if trans[0] == "split_iname" and "inner" in trans[1][0]:
