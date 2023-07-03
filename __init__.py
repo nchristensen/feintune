@@ -1525,7 +1525,7 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
             j = i - 1
             knl = lp.add_dependency(knl, f"id:batch_{i}_*", f"id:batch_{j}_*")
 
-        if False:
+        if True:
             pp_tunit = lp.preprocess_program(knl) # Realizes the reductions so we can access the accumulators and fill in lp.auto memory spaces
             # realize_reduction doesn't fill in lp.auto memory spaces
             #pp_tunit = realize_reduction(tunit.with_kernel(knl), unknown_types_ok=True)
@@ -1546,6 +1546,23 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
             for s in alias_sets:
                 knl = lp.alias_temporaries(knl, list(s), synchronize_for_exclusive_use=False)
 
+        if False:
+
+            # Using global barriers helps, but not by much. It still takes minutes
+            # to generate the code.
+
+            # Seems to conflict with add_inames_for_unused_hw_axes.
+
+            store_insns = ["id:"+instr.id for instr in knl.default_entrypoint.instructions if "_store" in instr.id]
+            fetch_insns = ["id:"+instr.id for instr in knl.default_entrypoint.instructions if "_fetch" in instr.id]
+            print("STORE INSTRUCTIONS")
+            print(store_insns)
+            print("FETCH INSTRUCTIONS")
+            print(fetch_insns)
+            #exit()
+            for i in range(1,nbatches,1):
+                knl = lp.add_barrier(knl, insn_before=store_insns[i-1], insn_after=fetch_insns[i])
+            
    
 
     if True:
