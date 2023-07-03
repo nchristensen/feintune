@@ -1,6 +1,7 @@
 import numpy as np
 from pytools import memoize_in
-from meshmode.array_context import EinsumTag
+from meshmode.array_context import EinsumTag, FEMEinsumTag
+einsum_classes = tuple([EinsumTag])
 
 #import pyopencl as cl
 #import pyopencl.array
@@ -409,8 +410,7 @@ def get_einsums(knl):
                         einsums.append((instr.within_inames, instr.expression.inames,))
                     else:
                         einsums.append((instr.within_inames, (),))
-                    
-    #print(knl.default_entrypoint.name, einsums)
+        #print(knl.default_entrypoint.name, einsums)
     return einsums
 
 def get_einsum_counts(knl):

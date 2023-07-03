@@ -741,7 +741,7 @@ def get_pickled_tunits(directory):
         #print(num, filename)
         f = os.path.join(directory, filename)
         # Skip the massive kernel for now
-        if os.path.isfile(f) and filename.startswith("prefeinsum") and (filename.endswith(".pickle") or filename.endswith(".pkl")):
+        if os.path.isfile(f) and filename.startswith("prefeinsum") and (filename.endswith("_0.pickle") or filename.endswith("_0.pkl")):
             f = open(f, "rb")
             fdict = pickle.load(f)
             #pid = filename.split("_")[1]
@@ -962,7 +962,12 @@ def test_default_transforms(sk_list, save_path=None):
     actx = FusionContractorArrayContext(queue)
 
 
-    device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
+    #device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
+    device_latency = None
+    device_memory_bandwidth = None
+    clpeak_flop_rate = None
+
+    total_time = 0
 
     for pid, sk, csk in sk_list:
         print(f"Testing subkernel: {pid}")
@@ -979,19 +984,29 @@ def test_default_transforms(sk_list, save_path=None):
             total_axes = non_red_axes + red_axes
             out_axes = total_axes - red_axes
 
-            if not indirection and red_axes > 0:
+            if not indirection and red_axes == 0:#not indirection and red_axes > 0:
 
-                transformed_sk = actx.transform_loopy_program(sk)
-                ret_dict = run_single_param_set_v2(queue, transformed_sk, [], generic_test,
-                            max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
-                            device_latency=device_latency)
-                   
-                print(ret_dict["data"])
-                # Should this functionality be a utility function
-                hjson_file_str = save_path + f"/{pid}.hjson"
-                out_file = open(hjson_file_str, "wt")
-                hjson.dump(ret_dict, out_file, default=convert)
-                out_file.close()
+                try:
+                    transformed_sk = actx.transform_loopy_program(sk)
+                    ret_dict = run_single_param_set_v2(queue, transformed_sk, [], generic_test,
+                                max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
+                                device_latency=device_latency)
+                      
+                    total_time += ret_dict["data"]["avg_time"]
+
+                    print(ret_dict["data"])
+                    # Should this functionality be a utility function
+                    hjson_file_str = save_path + f"/{pid}.hjson"
+                    dump_hjson(hjson_file_str, ret_dict)
+                    #out_file = open(hjson_file_str, "wt")
+                    #hjson.dump(ret_dict, out_file, default=convert)
+                    #out_file.close()
+                except IndexError:
+                    print("Unable to execute default transformation on subkernel")
+
+
+    print("TOTAL TIME", total_time)
+
 
 def test_feinsum_transforms(tunits):
 

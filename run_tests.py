@@ -389,7 +389,10 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup_runs=2):
 
                 if not arg.is_output:
                     if isinstance(array, cl.array.Array):
-                        cl.clrandom.fill_rand(array, queue=queue)
+                        try:
+                            cl.clrandom.fill_rand(array, queue=queue)
+                        except TypeError:
+                            print("clrandom cannot fill array of this dtype")
                     elif isinstance(array[0], cl.array.Array):
                         for entry in array:
                             cl.clrandom.fill_rand(entry, queue=queue)
@@ -409,7 +412,8 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup_runs=2):
         print("STARTING EXECUTION")
         start = time.time()
 
-        measured_latency = measure_execution_latency(queue, kern, arg_dict, nruns, warmup_runs)
+        print("Returning 0 for execution latency")
+        measured_latency = 0#measure_execution_latency(queue, kern, arg_dict, nruns, warmup_runs)
         avg_time = measure_execution_time(queue, kern, arg_dict, nruns, warmup_runs) 
 
         end = time.time()
