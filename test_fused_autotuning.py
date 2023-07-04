@@ -363,8 +363,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
                         max_flop_rate=max_flop_rate, device_latency=device_latency,
                         device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
     else:
-        print(est)
-        raise(ValueError("Unhandled einsum type"))
+        raise(ValueError(f"Unhandled einsum type: {est}"))
 
     #return list(trans_list_list[0])
 
@@ -788,6 +787,7 @@ def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
                     else:
                         other_einsum_pid |= {pid}
 
+                    """
                     data = None
                     if hjson_dir is not None:
                         fn = hjson_dir + f"/{pid}.hjson"
@@ -796,6 +796,7 @@ def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
                             od = load_hjson(fn)
                             data = od["data"]["frac_roofline_flop_rate"]
                     print(pid, key, data)
+                    """
 
                     if key in subkernel_counts:
                         subkernel_counts[key][0] += 1
@@ -891,7 +892,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                     
                     print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
 
-                    if not indirection and red_axes > 0 and total_axes >= 3 and einsum_count == 9:
+                    if not indirection and red_axes == 1 and non_red_axes == 2 and einsum_count == 1:
                         autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
@@ -1053,7 +1054,9 @@ def main(arg):
 
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directories = [ "./pickled_programs_wave",
+    directories = ["./pickled_programs_y3_prediction_order_1_eager",
+                    #"./pickled_programs_y3_prediction_order_1_lazy",
+                    #"./pickled_programs_wave",
                     #"./pickled_programs_prediction_order_1",
                     #"./pickled_programs_y3_prediction_order_1",
                     #"./pickled_programs_y3_prediction_order_3",
@@ -1070,7 +1073,7 @@ def main(arg):
     # figure out the element iname
 
     for directory in directories:
-        save_path = directory + "/hjson_gbrt"
+        save_path = directory + "/hjson"
         tunit_dicts = get_pickled_tunits(directory)
         print("Done collecting tunits")
         # ID changes based on whether python was run with -O

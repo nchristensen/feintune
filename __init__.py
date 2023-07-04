@@ -404,26 +404,35 @@ def get_einsums(knl):
     einsums = []
     for instr in knl.default_entrypoint.instructions:
         if isinstance(instr, lp.Assignment):
+            #print(instr.tags)
+            """
             for tag in instr.tags:
                 if isinstance(tag, EinsumTag):
                     if isinstance(instr.expression, lp.symbolic.Reduction):
                         einsums.append((instr.within_inames, instr.expression.inames,))
                     else:
                         einsums.append((instr.within_inames, (),))
-                    
+            """
+            #"""
+            # Is the above necessary? Can we just look for reductions directly?
+            if isinstance(instr.expression, lp.symbolic.Reduction):
+                einsums.append((instr.within_inames, instr.expression.inames,))
+            else:
+                einsums.append((instr.within_inames, (),))
+            #"""
     #print(knl.default_entrypoint.name, einsums)
+    #exit()
     return einsums
 
 def get_einsum_counts(knl):
     from collections import Counter
     counter = Counter(get_einsums(knl))
-    #print(counter)
     return counter
+
 
 # Obtain non-reduction and reduction inames 
 def get_einsum_types(knl):
     return frozenset(get_einsums(knl))
-
 
 
 def add_batch_ids(tunit, batch_size):
@@ -444,6 +453,8 @@ def add_batch_ids(tunit, batch_size):
         # If collect the einsums in a list then the batch number should be index // batch_size?
         # The below seems unneccessarily complicated.
 
+        # Should probably instead check if this is a reduction rather than check for einsum tags
+        # see get_einsums
         if isinstance(instr, lp.Assignment) and any([isinstance(tag, EinsumTag) for tag in instr.tags]):
             insn_mappings[instr.id] = [f"batch_{batch_number}_" + instr.id]
 
@@ -1312,8 +1323,8 @@ def decompose_batched_einsum_kernel(tunit):
 
     subkernels = []
     for i, insn in enumerate(tunit.default_entrypoint.instructions):
-        print(insn)
-        assert len(insn.tags_of_type(EinsumTag)) > 0
+        #print(insn)
+        #assert len(insn.tags_of_type(EinsumTag)) > 0
 
         # Get domain(s)
         within_inames = insn.within_inames
@@ -1603,9 +1614,11 @@ def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
     """
     subkernels = decompose_batched_einsum_kernel(tunit)
     output_subkernels = []
-    # O(n^2) complexity. Could probably be improved.
+  
     for subkernel in subkernels:
+        print(subkernel)
         for prefetch in prefetches:
+            print(prefetch)
             arg = prefetch[1][0]
             # Should this be restricted to read args only?
             kernel_args = [kernel_arg.name for kernel_arg in subkernel.default_entrypoint.args]

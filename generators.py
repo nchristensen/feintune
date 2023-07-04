@@ -497,6 +497,14 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
     nx = nr = nf = None
     sizes = frozenset()
     n_dof_arrays = 0
+
+    # This won't work for eager unless the parameter values are fixed.
+    # and the dtypes are known
+    # Either these can be supplied with tags, or the actual transformation
+    # needs to wait until that information is available.
+    # Is there a way to wrap the kernel object? 
+    # Maybe a tunit subclass?
+    print(arg_dict)
     for arg in list(arg_dict.values()):
         if arg.name in write_deps and len(arg.shape) == 2:
             n_elem, n_out = arg.shape
@@ -519,7 +527,6 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
             face_dof_arrays.append(arg.name)
             
     read_dof_arrays = read_deps & frozenset(dof_arrays)
-
 
     #config_space = createConfigSpace(queue, knl)
 
@@ -627,27 +634,47 @@ def get_trans_list(knl, params):
                 face_dof_arrays.append(arg.name)
                 
         read_dof_arrays = read_deps & frozenset(dof_arrays)
-        return arg_dict, read_dof_arrays, face_dof_arrays
-    
-    arg_dict, read_dof_arrays, face_dof_arrays = get_args_and_arrays(knl)
+        return arg_dict, read_dof_arrays, face_dof_arrays, n_in
+        
+    arg_dict, read_dof_arrays, face_dof_arrays, n_in = get_args_and_arrays(knl)
 
     # Hacky, is there a better way to get this?
     within_inames, r_inames = list(get_einsum_types(knl))[0]
     j = r = f = e = i = x = None
-    for iname in r_inames:
-        if "idof" in iname:
-            j = iname
-        elif "idim" in iname:
-            r = iname
-        elif "iface" in iname:
-            f = iname
-    for iname in within_inames:
-        if "iel" in iname:
-            e = iname
-        elif "idof" in iname:
-            i = iname
-        elif "idim" in iname:
-            x = iname
+    
+    from meshmode.transform_metadata import ConcurrentElementInameTag, ConcurrentDOFInameTag
+    if len(within_inames) == 2 and len(r_inames) == 1:
+        j = list(r_inames)[0]
+        for iname, iname_obj in knl.default_entrypoint.inames.items():
+            if ConcurrentElementInameTag() in iname_obj.tags:
+                e = iname
+            elif ConcurrentDOFInameTag() in iname_obj.tags:
+                i = iname
+        # If it is untagged, then look at the sizes of the dimensions
+        if e is None or i is None:
+            mappings = [(Id.name, int(str(knl.default_entrypoint.domains[0].dim_max_val(index)))) for Id, (dim_type, index) in knl.default_entrypoint.domains[0].get_id_dict().items() if Id.name != j]
+            mappings = sorted(mappings, key=lambda tup: tup[1])
+            assert mappings[0][1] != mappings[1][1]
+            i = mappings[0][0]
+            e = mappings[1][0]
+        if e is None or i is None:
+            raise ValueError("Invalid iname strings")
+
+    else:
+        for iname in r_inames:
+            if "idof" in iname:
+                j = iname
+            elif "idim" in iname:
+                r = iname
+            elif "iface" in iname:
+                f = iname
+        for iname in within_inames:
+            if "iel" in iname:
+                e = iname
+            elif "idof" in iname:
+                i = iname
+            elif "idim" in iname:
+                x = iname
 
     trans_list = []
     batch_size, kio, kii, iio, iii, ji = params
@@ -707,7 +734,7 @@ def get_trans_list(knl, params):
         # Should the i loop have (0,1) slabs for both?
 
         #print("Splitting reduction iname disabled. Re-enable when finished debugging")
-        trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag",unr,),),))
+        #trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag",unr,),),))
 
         if r is not None:
             trans_list.append(("tag_inames", (((f"{r}", unr,),),),))
@@ -777,19 +804,24 @@ def get_trans_list(knl, params):
         '''
         #else:
         # The more einsums the slower the prefetching becomes
-        # This will need to occur after batching
         if True: # Turn off prefetching until can assign a batch number
+            if n_in == 1:
+                j_prefetch_str = ""
+            else:
+                j_prefetch_str = f"{j},"
+                #j_prefetch_str = f"{j}_outer,{j}_inner,"
+
             for arg in read_dof_arrays:
                 # Should only prefetch if there are no indirection arrays
                 strides = [dim_tag.stride for dim_tag in arg_dict[arg].dim_tags if isinstance(dim_tag, lp.kernel.array.FixedStrideArrayDimTag)]
                 order_str = "f,f" if strides[0] < strides[1] else "c,c"
                 if kio != kii:
-                    #prefetch_str = f"{j},{e}_inner_outer,{e}_inner_inner"
-                    prefetch_str = f"{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
+                    prefetch_str = f"{j_prefetch_str}{e}_inner_outer,{e}_inner_inner"
+                    #prefetch_str = f"{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
                 else:        
-                    #prefetch_str = f"{j},{e}_inner"    
+                    prefetch_str = f"{j_prefetch_str}{e}_inner"    
                     #prefetch_str = f"{j},{e}_inner_outer"    
-                    prefetch_str = f"{j}_outer,{j}_inner,{e}_inner"    
+                    #prefetch_str = f"{j}_outer,{j}_inner,{e}_inner"    
 
                 trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
                     (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
@@ -801,13 +833,13 @@ def get_trans_list(knl, params):
                 # Stick with the default ordering for now. For fortran ordering
                 # slap an order tag on it.
                 if kio != kii:
-                    #prefetch_str = f"{f},{j},{e}_inner_outer,{e}_inner_inner"
-                    prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
+                    prefetch_str = f"{f},{j_prefetch_str}{e}_inner_outer,{e}_inner_inner"
+                    #prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
                 else:
-                    #prefetch_str = f"{f},{j},{e}_inner"
+                    prefetch_str = f"{f},{j_prefetch-str}{e}_inner"
 
                     #prefetch_str = f"{f},{j},{e}_inner_outer"
-                    prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner"
+                    #prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner"
 
                 trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
                     (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))

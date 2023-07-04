@@ -409,7 +409,8 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup_runs=2):
         print("STARTING EXECUTION")
         start = time.time()
 
-        measured_latency = measure_execution_latency(queue, kern, arg_dict, nruns, warmup_runs)
+        print("Setting measured execution latency to zero")
+        measured_latency = 0#measure_execution_latency(queue, kern, arg_dict, nruns, warmup_runs)
         avg_time = measure_execution_time(queue, kern, arg_dict, nruns, warmup_runs) 
 
         end = time.time()
