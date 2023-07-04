@@ -641,9 +641,24 @@ def get_trans_list(knl, params):
     # Hacky, is there a better way to get this?
     within_inames, r_inames = list(get_einsum_types(knl))[0]
     j = r = f = e = i = x = None
-    
-    from meshmode.transform_metadata import ConcurrentElementInameTag, ConcurrentDOFInameTag
-    if len(within_inames) == 2 and len(r_inames) == 1:
+
+    for iname in r_inames:
+        if "idof" in iname:
+            j = iname
+        elif "idim" in iname:
+            r = iname
+        elif "iface" in iname:
+            f = iname
+    for iname in within_inames:
+        if "iel" in iname:
+            e = iname
+        elif "idof" in iname:
+            i = iname
+        elif "idim" in iname:
+            x = iname
+
+    if (e is None or i is None or j is None) and len(within_inames) == 2 and len(r_inames) == 1:
+        from meshmode.transform_metadata import ConcurrentElementInameTag, ConcurrentDOFInameTag
         j = list(r_inames)[0]
         for iname, iname_obj in knl.default_entrypoint.inames.items():
             if ConcurrentElementInameTag() in iname_obj.tags:
@@ -657,24 +672,8 @@ def get_trans_list(knl, params):
             assert mappings[0][1] != mappings[1][1]
             i = mappings[0][0]
             e = mappings[1][0]
-        if e is None or i is None:
+        if e is None or i is None or j is None:
             raise ValueError("Invalid iname strings")
-
-    else:
-        for iname in r_inames:
-            if "idof" in iname:
-                j = iname
-            elif "idim" in iname:
-                r = iname
-            elif "iface" in iname:
-                f = iname
-        for iname in within_inames:
-            if "iel" in iname:
-                e = iname
-            elif "idof" in iname:
-                i = iname
-            elif "idim" in iname:
-                x = iname
 
     trans_list = []
     batch_size, kio, kii, iio, iii, ji = params
@@ -805,46 +804,48 @@ def get_trans_list(knl, params):
         #else:
         # The more einsums the slower the prefetching becomes
         if True: # Turn off prefetching until can assign a batch number
-            if n_in == 1:
-                j_prefetch_str = ""
-            else:
-                j_prefetch_str = f"{j},"
-                #j_prefetch_str = f"{j}_outer,{j}_inner,"
-
-            for arg in read_dof_arrays:
-                # Should only prefetch if there are no indirection arrays
-                strides = [dim_tag.stride for dim_tag in arg_dict[arg].dim_tags if isinstance(dim_tag, lp.kernel.array.FixedStrideArrayDimTag)]
-                order_str = "f,f" if strides[0] < strides[1] else "c,c"
-                if kio != kii:
-                    prefetch_str = f"{j_prefetch_str}{e}_inner_outer,{e}_inner_inner"
-                    #prefetch_str = f"{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
-                else:        
-                    prefetch_str = f"{j_prefetch_str}{e}_inner"    
-                    #prefetch_str = f"{j},{e}_inner_outer"    
-                    #prefetch_str = f"{j}_outer,{j}_inner,{e}_inner"    
-
-                trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
-                    (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
-                # Should be c,c by default. Maybe try to re-add this capability later
-                #trans_list.append(("tag_array_axes", (f"{arg}_f", order_str,),))
-                print(prefetch_str)
-
-            for arg in face_dof_arrays:
-                # Stick with the default ordering for now. For fortran ordering
-                # slap an order tag on it.
-                if kio != kii:
-                    prefetch_str = f"{f},{j_prefetch_str}{e}_inner_outer,{e}_inner_inner"
-                    #prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
+            # No point in prefetching if there is a single array. There is no data re-use.
+            if len(read_dof_arrays) > 1:
+                if n_in == 1:
+                    j_prefetch_str = ""
                 else:
-                    prefetch_str = f"{f},{j_prefetch-str}{e}_inner"
+                    j_prefetch_str = f"{j},"
+                    #j_prefetch_str = f"{j}_outer,{j}_inner,"
 
-                    #prefetch_str = f"{f},{j},{e}_inner_outer"
-                    #prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner"
+                for arg in read_dof_arrays:
+                    # Should only prefetch if there are no indirection arrays
+                    strides = [dim_tag.stride for dim_tag in arg_dict[arg].dim_tags if isinstance(dim_tag, lp.kernel.array.FixedStrideArrayDimTag)]
+                    order_str = "f,f" if strides[0] < strides[1] else "c,c"
+                    if kio != kii:
+                        prefetch_str = f"{j_prefetch_str}{e}_inner_outer,{e}_inner_inner"
+                        #prefetch_str = f"{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
+                    else:        
+                        prefetch_str = f"{j_prefetch_str}{e}_inner"    
+                        #prefetch_str = f"{j},{e}_inner_outer"    
+                        #prefetch_str = f"{j}_outer,{j}_inner,{e}_inner"    
 
-                trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
-                    (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
-                print(prefetch_str)
-            #exit()
+                    trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
+                        (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
+                    # Should be c,c by default. Maybe try to re-add this capability later
+                    #trans_list.append(("tag_array_axes", (f"{arg}_f", order_str,),))
+                    print(prefetch_str)
+
+                for arg in face_dof_arrays:
+                    # Stick with the default ordering for now. For fortran ordering
+                    # slap an order tag on it.
+                    if kio != kii:
+                        prefetch_str = f"{f},{j_prefetch_str}{e}_inner_outer,{e}_inner_inner"
+                        #prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
+                    else:
+                        prefetch_str = f"{f},{j_prefetch-str}{e}_inner"
+
+                        #prefetch_str = f"{f},{j},{e}_inner_outer"
+                        #prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner"
+
+                    trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
+                        (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
+                    print(prefetch_str)
+                #exit()
 
         trans_list.append(("add_inames_for_unused_hw_axes",))
 

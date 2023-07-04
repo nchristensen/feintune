@@ -400,6 +400,7 @@ def generate_transformation_list(k_inner_outer, k_inner_inner, i_inner_outer,
     transformations.append(["add_inames_for_unused_hw_axes"])
     return tuple(transformations)
 
+# Should probably rename this to "get_reductions"
 def get_einsums(knl):
     einsums = []
     for instr in knl.default_entrypoint.instructions:
@@ -1329,6 +1330,18 @@ def decompose_batched_einsum_kernel(tunit):
         # Get domain(s)
         within_inames = insn.within_inames
         domains = [domain for inames_set, domain in domain_list if within_inames <= inames_set]
+        if False:#len(tunit.default_entrypoint.domains) > 1:
+            from islpy import align_two
+            domains = tunit.default_entrypoint.domains
+            new_domains = domains[0]
+            for i in range(1,len(domains)):
+                b1, b2 = align_two(new_domains, domains[i])
+                new_domains = b1 | b2
+            #print(domains)
+            #print(new_domains)
+            #exit()
+            domains = [new_domains]
+
         active_vars = insn.dependency_names()
         new_args = [entry for entry in tunit.default_entrypoint.args if entry.name in active_vars]
         temp_args = [entry for entry in tunit.default_entrypoint.temporary_variables.keys() if entry.name in active_vars]
@@ -1350,6 +1363,7 @@ def decompose_batched_einsum_kernel(tunit):
 
         name = tunit.default_entrypoint.name + f"_{i}"
 
+        
         knl = lp.make_kernel(domains, [insn], kernel_data=new_args, name=name)
         #knl = tunit.with_kernel(tunit.default_entrypoint.copy(domains=domains, instructions=[insn], args=new_args, name=name))
         knl = lp.tag_inames(knl, iname_to_tag, ignore_nonexistent=True)
@@ -1612,7 +1626,26 @@ def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
     
     print("=================DECOMPOSED TUNITS=====================")
     """
-    subkernels = decompose_batched_einsum_kernel(tunit)
+      
+    if False:#len(get_einsums(tunit)) == 1:
+        # Kernel only has one einsum. No need to decompose it.
+        # Merge the domains if there is more than one. Inhibits prefetching
+        if len(tunit.default_entrypoint.domains) > 1:
+            from islpy import align_two
+            domains = tunit.default_entrypoint.domains
+            new_domains = domains[0]
+            for i in range(1,len(domains)):
+                b1, b2 = align_two(new_domains, domains[i])
+                new_domains = b1 | b2
+            #print(domains)
+            #print(new_domains)
+            #exit()
+            domains = [new_domains]
+            tunit = tunit.with_kernel(tunit.default_entrypoint.copy(domains=domains))
+
+        subkernels = [tunit]
+    else:
+        subkernels = decompose_batched_einsum_kernel(tunit)
     output_subkernels = []
   
     for subkernel in subkernels:
