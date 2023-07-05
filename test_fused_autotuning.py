@@ -344,22 +344,18 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
 
     handled_pairs = set([(2,1,),(3,2,),(2,2,)])
     if (len(est[0]), len(est[1]),) in handled_pairs:
-        #if len(est[0]) == 2 and len(est[1]) == 1:
-        #    trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
-        #elif len(est[0]) == 3 and len(est[1]) == 2:
-        #    # Modified to handle the 5to3 reduction, but it might not be the fastest
-        #    trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
-        #elif len(est[0]) == 2 and len(est[1]) == 2:
-        #    # Modified to handle the 5to3 reduction, but it might not be the fastest
-        #    trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
         if use_ytopt:
             input_space = createConfigSpace(queue, sk)
             ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate,
                              device_memory_bandwidth=device_memory_bandwidth,
                              device_latency=device_latency, timeout=30, save_path=save_path)
         else:
+            print("ONLY TESTING THE FIRST 20 transformations")
+            from random import shuffle
             trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
-            tdict = parallel_autotune(sk, 0, trans_list_list, program_id=program_id,
+            shuffle(trans_list_list)
+
+            tdict = parallel_autotune(sk, 0, trans_list_list[:10], program_id=program_id,
                         max_flop_rate=max_flop_rate, device_latency=device_latency,
                         device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
     else:
@@ -892,7 +888,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                     
                     print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
 
-                    if not indirection and red_axes == 1 and non_red_axes == 2 and einsum_count == 1:
+                    if not indirection and red_axes == 1 and non_red_axes == 2 and einsum_count == 43:
                         autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 
@@ -1054,8 +1050,8 @@ def main(arg):
 
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directories = ["./pickled_programs_y3_prediction_order_1_eager",
-                    #"./pickled_programs_y3_prediction_order_1_lazy",
+    directories = [#"./pickled_programs_y3_prediction_order_1_eager",
+                    "./pickled_programs_y3_prediction_order_1_lazy",
                     #"./pickled_programs_wave",
                     #"./pickled_programs_prediction_order_1",
                     #"./pickled_programs_y3_prediction_order_1",

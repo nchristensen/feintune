@@ -523,7 +523,7 @@ def analyze_flop_rate(knl, avg_time, max_flop_rate=None, latency=None):
     #print("Percent peak: " + str(100*(frac_peak_GBps)))
     #print()
 
-    return frozendict({"observed_flop_rate": flop_rate, "flops": map_flops})#gflop_rate, frac_peak_gflops
+    return frozendict({"observed_flop_rate": flop_rate, "flops": map_flops, "observed_seconds_per_flop": 1/flop_rate})#gflop_rate, frac_peak_gflops
 
 
 def get_knl_device_memory_roofline(knl, max_flop_rate, device_latency, device_memory_bandwidth):
@@ -903,7 +903,7 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=None, method="
 
     return avg_time, measured_latency, wall_clock_time
 
-def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, method=None):#, method="thread"):
+def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, method=None, run_single_batch=True):#, method="thread"):
     # Timeout won't prevent applying transformations from hanging
 
     print("PRINTING 1")
@@ -913,12 +913,12 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     transformed = True
 
     if True:
-        knl = apply_transformation_list(knl_base, trans_list)
+        knl, sb_knl = apply_transformation_list(knl_base, trans_list)
     else:
         try:
             start = time.time()
             #import pdb; pdb.set_trace()
-            knl = func_timeout(timeout, apply_transformation_list, args=(knl_base, trans_list,))
+            knl, sb_knl = func_timeout(timeout, apply_transformation_list, args=(knl_base, trans_list,))
             #knl = apply_transformation_list(knl_base, trans_list)
             end = time.time()
             print("Transformation required", end - start, "seconds")
@@ -927,6 +927,9 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             print("Transformation timed out")
             transformed = False
             knl = knl_base
+
+    if run_single_batch:
+        knl = sb_knl
 
     local_sizes = set()
     for trans in trans_list:
@@ -1001,7 +1004,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     bw = bw_dict["observed_bandwidth"]
     flop_rate = flop_rate_dict["observed_flop_rate"]
 
-    data = {"avg_time": avg_time, "wall_clock_time": wall_clock_time}
+    data = {"avg_time": avg_time, "wall_clock_time": wall_clock_time, "single_batch": run_single_batch}
     data.update(bw_dict.items())
     data.update(flop_rate_dict.items())
 

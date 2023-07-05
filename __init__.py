@@ -1385,32 +1385,19 @@ def decompose_batched_einsum_kernel(tunit):
 def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
     import islpy as isl    
 
-    #batch_size = 2
-
-    #assert len(orig_tunit.default_entrypoint.domains) == 1
-    #orig_domains = orig_tunit.default_entrypoint.domains[0]
-    #print(orig_domains)
-    #exit()
-    #domains = set()
-    #domains = orig_domains
-    #print(orig_domains.space)
-    #domains = subkernels[0].default_entrypoint.domains[0]
-    #domains = list(subkernels[0].default_entrypoint.domains)
-    #print(domains.space)
-    #print(domains.space)
-
     if batch_size == 0:
         batch_size = len(subkernels)
     batch_size = min(batch_size, len(subkernels))
     nbatches = np.int32(np.ceil(len(subkernels) / batch_size))
-    
+
     insns = []
     args = set()
     temp_args = {}
     iname_to_tag = set()
     domains = []
+    single_batch_kernel = None
 
-    # Can we just assemble the batches here?
+    # Assemble the sub-batches
     for batch in range(nbatches):
         var_names = set()
         constraints = []
@@ -1420,149 +1407,76 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
             sk = subkernel.default_entrypoint
             sk = lp.add_inames_for_unused_hw_axes(sk)
 
-            #sk = lp.duplicate_inames(sk, sk.inames.keys(),"id:*", suffix=f"_b{i}")
-            #sk = lp.remove_unused_inames(sk)
             for old_iname in sk.inames.keys():
                 sk = lp.rename_iname(sk, old_iname, old_iname + f"_b{batch}", existing_ok=False, preserve_tags=True)
-
 
             insn_mappings = {instr.id: [f"batch_{batch}_" + instr.id] for instr in sk.instructions}
             sk = lp.replace_instruction_ids(sk, insn_mappings)
             insns = insns + sk.instructions
 
-            #domains |= set([domain for inames_set, domain in get_domain_list(subkernel)])
             assert len(sk.domains) == 1
             sk_domains = sk.domains[0]
-            print("Kernel domains", sk.inames)
             var_names |= set(sk_domains.get_var_dict().keys())
-            #var_names = set(sk_domains.get_var_dict().keys())
             args |= set(sk.args)
             temp_args |= sk.temporary_variables
-            #print("Constraints")
-            #print(sk_domains.get_constraints())
             constraints += sk_domains.get_constraints()
-            #constraints = sk_domains.get_constraints()
 
-            #print(sk)
             for iname, iname_obj in sk.inames.items():
                 for tag in iname_obj.tags:
                     iname_to_tag |= set([(iname, tag,)])
 
-            #print(iname_to_tag)
-            #exit()
-
-            #print(sk_domains)
-
-            #print("Strides")
-            #print(
-            #print(subkernel.default_entrypoint.domains[0].project_out_all_params())
-            #diff = subkernel.default_entrypoint.domains[0].subtract(orig_domains)
-            #print(diff)
-            #print(subkernel.default_entrypoint.domains[0].to_list())
-            #domains = subkernel.default_entrypoint.domains[0].intersect(domains)
-            #for entry in s:
-            #print(entry)
-            #print(subkernel.default_entrypoint.domains[0].space)
-            #domains = domains.union(subkernel.default_entrypoint.domains[0])
-            #print(domains.space)
-            #domains = domains + list(subkernel.default_entrypoint.domains)
-
-            #### Create new domain #############
-
-            #print(domains) 
-            #print(var_names)
-            #print(constraints)
-            #print()
-            #for constraint in constraints:
-            #    print(constraint)
-            #    print()
-            #exit()
-
-            #print(orig_tunit.default_entrypoint.domains)
-            #print(domains)
-            #exit()
-            #print(domains)
-            #print(domains.space)
-            #exit()
-            
         space = isl.Space.create_from_names(isl.DEFAULT_CONTEXT, set=var_names)
         domain = isl.BasicSet.universe(space)
         new_constraints = set()
         for constraint in constraints:
-            #print()
-            #print(constraint)
             coefficients = constraint.get_coefficients_by_name()
-            #print(coefficients)
-            #print(coefficients)
             if constraint.is_equality():
                 new_constraint = isl.Constraint.eq_from_names(space, coefficients=coefficients)
             else:
                 new_constraint = isl.Constraint.ineq_from_names(space, coefficients=coefficients)
             new_constraints |= set([new_constraint])
-            #print("HERE")
-            #print(constraint)
-            #print(constraint.get_aff())
-            #domain = domain.add_constraint(constraint)
-            #print(domain)
-        #exit()
+
         domain = domain.add_constraints(new_constraints)
         domains.append(domain)
-        #print(domain)
-        #exit()
-        #print(new_constraints)
-        #exit()
 
-    print(len(domains))  
-    #exit() 
-    # Probably want to turn this off
-    #domain = merged_domain
+        if batch == 0:
+            # Create a single batch knl, which may be faster to tune with
+            single_batch_knl = orig_tunit.with_kernel(orig_tunit.default_entrypoint.copy(domains=domains, 
+                                    instructions=insns, args=list(args), temporary_variables=temp_args))
+            single_batch_knl = lp.tag_inames(single_batch_knl, list(iname_to_tag), ignore_nonexistent=False)
+            single_batch_knl = lp.set_options(single_batch_knl, lp.Options(no_numpy=True, return_dict=True))
+
     #knl = lp.make_kernel(domains, insns, 
     #        kernel_data=list(args) + list(temp_args.values()), 
     #        name=orig_tunit.default_entrypoint.name)
-    #knl = orig_tunit.with_kernel(orig_tunit.default_entrypoint.copy(domains=[domain], instructions=insns, args=list(args), temporary_variables=temp_args))
 
     # Avoids some weird errors with make_kernel
-    knl = orig_tunit.with_kernel(orig_tunit.default_entrypoint.copy(domains=domains, instructions=insns, args=list(args), temporary_variables=temp_args))
+    knl = orig_tunit.with_kernel(orig_tunit.default_entrypoint.copy(domains=domains, 
+                                    instructions=insns, args=list(args), temporary_variables=temp_args))
 
-    print(len(knl.default_entrypoint.domains))
 
-    """
-    # Actually, they are separate. This isn't needed
-    for batch in range(nbatches):
-        start = time.time()
-        inames_to_decouple = [iname for iname in knl.default_entrypoint.inames.keys() if f"_b{batch}" in iname]
-        knl = decouple_domain(knl, inames_to_decouple, frozenset())
-        end = time.time()
-        print(end-start)
-
-    print(len(knl.default_entrypoint.domains))
-    """
-    #exit()
-
-    print(iname_to_tag)
     knl = lp.tag_inames(knl, list(iname_to_tag), ignore_nonexistent=False)
     knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
 
     if True:
-        #from loopy.transform.realize_reduction import realize_reduction
 
         for i in range(1, nbatches):
             j = i - 1
             knl = lp.add_dependency(knl, f"id:batch_{i}_*", f"id:batch_{j}_*")
 
         if True:
+
+            #from loopy.transform.realize_reduction import realize_reduction
             pp_tunit = lp.preprocess_program(knl) # Realizes the reductions so we can access the accumulators and fill in lp.auto memory spaces
             # realize_reduction doesn't fill in lp.auto memory spaces
             #pp_tunit = realize_reduction(tunit.with_kernel(knl), unknown_types_ok=True)
             #knl = b_tunit.default_entrypoint
 
-            # This needs to be fixed. It prevents finding a successful schedule
-            # Need to separate by address space. Or maybe just call twice?
-
             batch_temps_by_size = get_batch_temporaries_by_size(pp_tunit, nbatches, lp.AddressSpace.LOCAL) 
             alias_sets = get_alias_sets(batch_temps_by_size)
             for s in alias_sets:
                 # Synchronizing for exclusive use make loopy fall back to the slow scheduler
+                # ILP also causes use of the slow scheduler, but oh well.
                 knl = lp.alias_temporaries(knl, list(s), synchronize_for_exclusive_use=False)
 
             # Doesn't seem to do anything for OpenCL but for other targets it might do something
@@ -1592,13 +1506,8 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
 
     if False:
         knl = lp.add_inames_for_unused_hw_axes(knl)
-        #print(knl)
-        #print("After add inames")
-
         #kern = knl.default_entrypoint.copy(target=lp.CTarget())
         kern = knl.default_entrypoint.copy(target=lp.OpenCLTarget())
-        #print(knl)
-        #print("After add target")
 
         print("PRINTING GENERATED CODE")
         print(kern)
@@ -1608,10 +1517,7 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
         end=time.time()
         print(end-start)
 
-
-        #exit()
-
-    return knl
+    return knl, single_batch_knl
 
 @qprofile
 def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
@@ -1670,7 +1576,7 @@ def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
 
     # Then recompose the tunit
     #print("====================RECOMPOSED TUNIT========================")
-    recomposed = recompose_batched_einsum_kernel(tunit, output_subkernels, batch_size=batch_size)
+    recomposed, single_batch_knl = recompose_batched_einsum_kernel(tunit, output_subkernels, batch_size=batch_size)
 
     """
     kern = recomposed.default_entrypoint.copy(target=lp.CTarget())
@@ -1681,7 +1587,7 @@ def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
     exit()
     """
 
-    return recomposed
+    return recomposed, single_batch_knl
 
 def apply_transformation_list(tunit, transformations):
     # Could just construct a string for the function handle and retrieve the function from that
@@ -1710,13 +1616,10 @@ def apply_transformation_list(tunit, transformations):
     for t in transformations:
         if t[0] == "batch_einsums":
             batch_size = t[1][0]
-    # Breaks prefetching
-    #for entry in knl.default_entrypoint.inames:
-    #    knl = knl.with_kernel(decouple_domain(knl.default_entrypoint, [entry], frozenset()))
-    #knl = knl.with_kernel(decouple_domain(knl.default_entrypoint, knl.default_entrypoint.inames, frozenset()))
-    
+
     transformations = list(transformations)
     prefetched=False
+    sb_tunit = None
     for index, t in enumerate(transformations):
 
         #print("PRE-TRANSFORMATION CODE")
@@ -1736,31 +1639,35 @@ def apply_transformation_list(tunit, transformations):
             pass
             #kwargs["profile"] = False
             #tunit = func(*args, **kwargs)
-            #exit()
         # Assumes all prefetches are together in the list of transformations
         elif t[0] == "add_prefetch":
             if prefetched == False:
                 prefetched=True
-                tunit = func(tunit, add_prefetches, batch_size=batch_size, profile=False)
-                #exit()
-                """
-                if index == 0 or transformations[index-1][0] != "add_prefetch":
-                    # Apply all of the prefetches at once
-                    end = index+1
-                    while transformations[end][0] == "add_prefetch":
-                        end += 1
-                    prefetches = transformations[index:end]
-                    func(tunit, prefetches, profile=True)
-
-                    #tunit = func(*args, **kwargs)
-                    #exit()
-                """
+                tunit, sb_tunit = func(tunit, add_prefetches, batch_size=batch_size, profile=False)
+                # Assumes add_prefetch happens last
+                tunit = lp.add_inames_for_unused_hw_axes(tunit)
+                sb_tunit = lp.add_inames_for_unused_hw_axes(sb_tunit)
         else:
             tunit = func(*args, **kwargs)
 
     end = time.time()
 
     print("ENDING TRANSFORMATION:", end - start, "seconds")
+
+
+    print("SINGLE BATCH TUNIT", batch_size)
+    print(sb_tunit)
+
+    if False:
+        print(sb_tunit.default_entrypoint)
+        kern = sb_tunit.default_entrypoint.copy(target=lp.OpenCLTarget())
+        start = time.time()
+        code = lp.generate_code_v2(kern).device_code()
+        end = time.time()
+        print(code)
+
+        print("Codegen time:", end-start)
+        exit()
 
     if False:
         print(tunit.default_entrypoint)
@@ -1773,4 +1680,4 @@ def apply_transformation_list(tunit, transformations):
         print("Codegen time:", end-start)
         #exit()
 
-    return tunit
+    return tunit, sb_tunit

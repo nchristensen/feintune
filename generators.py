@@ -590,53 +590,7 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
 def get_trans_list(knl, params):
     from __init__ import get_einsum_types
 
-    #print(knl)
-    #exit()
-
-    @memoize
-    def get_args_and_arrays(knl):
-        # Find read dof arrays. These are the ones that will be prefetched
-        read_deps = frozenset()
-        write_deps = frozenset()
-        for instr in knl.default_entrypoint.instructions:
-            if isinstance(instr, lp.Assignment):
-                read_deps |= instr.read_dependency_names()
-                write_deps |= instr.write_dependency_names()
-
-        dof_arrays = []
-        face_dof_arrays = []
-        arg_dict = dict([(arg.name, arg) for arg in knl.default_entrypoint.args])
-        arg_dict.update(knl.default_entrypoint.temporary_variables)
-
-        n_elem = None
-        nx = nr = nf = None
-        sizes = frozenset()
-        n_dof_arrays = 0
-        for arg in list(arg_dict.values()):
-            if arg.name in write_deps and len(arg.shape) == 2:
-                n_elem, n_out = arg.shape
-                fp_bytes = arg.dtype.dtype.itemsize
-                break
-            elif arg.name in write_deps and len(arg.shape) == 3:
-                nx, n_elem, n_out = arg.shape
-                fp_bytes = arg.dtype.dtype.itemsize
-                break
-        for arg in list(arg_dict.values()):
-            if len(arg.shape) == 2 and arg.name in read_deps and arg.shape[0] == n_elem:
-                n_in = arg.shape[1]
-                dof_arrays.append(arg.name)
-                n_dof_arrays += 1
-            elif len(arg.shape) == 3 and arg.name in read_deps and arg.shape[-1] == n_elem:
-                _, nr, _ = arg.shape
-            elif len(arg.shape) == 3 and arg.name in read_deps and arg.shape[1] == n_elem:
-                nf, _, n_in = arg.shape
-                n_dof_arrays += nf
-                face_dof_arrays.append(arg.name)
-                
-        read_dof_arrays = read_deps & frozenset(dof_arrays)
-        return arg_dict, read_dof_arrays, face_dof_arrays, n_in
-        
-    arg_dict, read_dof_arrays, face_dof_arrays, n_in = get_args_and_arrays(knl)
+    ## Figure out what the inames are called
 
     # Hacky, is there a better way to get this?
     within_inames, r_inames = list(get_einsum_types(knl))[0]
@@ -674,6 +628,97 @@ def get_trans_list(knl, params):
             e = mappings[1][0]
         if e is None or i is None or j is None:
             raise ValueError("Invalid iname strings")
+
+    ## Figure out the dimensions and categorize the args
+
+    @memoize
+    def get_args_and_arrays(knl):
+        # Find read dof arrays. These are the ones that will be prefetched
+        read_deps = frozenset()
+        write_deps = frozenset()
+        for instr in knl.default_entrypoint.instructions:
+            if isinstance(instr, lp.Assignment):
+                read_deps |= instr.read_dependency_names()
+                write_deps |= instr.write_dependency_names()
+
+        idof_arrays = []
+        jdof_arrays = []
+        op_arrays = []
+        face_dof_arrays = []
+        arg_dict = dict([(arg.name, arg) for arg in knl.default_entrypoint.args])
+        arg_dict.update(knl.default_entrypoint.temporary_variables)
+
+        n_elem = None
+        nx = nr = nf = None
+        sizes = frozenset()
+        #n_dof_arrays = 0
+        for arg in list(arg_dict.values()):
+            if arg.name in write_deps and len(arg.shape) == 2:
+                n_elem, n_out = arg.shape
+                fp_bytes = arg.dtype.dtype.itemsize
+                break
+            elif arg.name in write_deps and len(arg.shape) == 3:
+                nx, n_elem, n_out = arg.shape
+                fp_bytes = arg.dtype.dtype.itemsize
+                break
+
+        """
+        from matching_brackets import matching_brackets
+        import re
+        for instr in knl.default_entrypoint.instructions:
+            for arg in arg_dict.values()
+                name = arg.name
+                if name in read_deps:
+                    instr_str = str(instr)
+                    to_match = f"{name}["
+                    index = instr_str.find(to_match) #Assume arg only shows up once in an instruction
+                    if index > = 0:
+                        ob = index + len(to_match) - 1
+                        cb = match_brackets(instr_str, ob)
+
+                        if len(arg.shape) == 2:
+                            if re.search(f"*{e}*,*{i}*", instr_str[ob:cb]) is not None:
+                                idof_arrays.append(name)
+                                n_elem, n_in = arg.shape
+                                #n_dof_arrays += 1
+                            elif re.search(f"*{e}*,*{i}*", instr_str[ob:cb]) is not None:
+                                jdof_arrays.append(name)
+                                n_elem, n_out = arg.shape
+                            elif re.search(f"*{i}*,*{j}*", instr_str[ob:cb]) is not None:
+                                op_arrays.append(name)
+                                n_out, n_in = arg.shape
+                        elif len(arg.shape) == 3:
+                            if re.search(f"*,*{r}*,*{e}*", instr_str[ob:cb]) is not None:
+                                _, nr, n_elem = arg.shape
+                            elif re.search(f"*{f}*,*{e}*,*{i}*", instr_str[ob:cb]) is not None:
+                                face_dof_arrays.append(name)
+                                nf, n_elem, n_in = args.shape
+                                #n_dof_arrays += nf
+
+        """
+        for arg in list(arg_dict.values()):
+            if arg.name in read_deps:
+                #if len(arg.shape) == 2 and arg arg.shape[0] == n_out and arg.shape[1] == n_in:
+                    
+                if len(arg.shape) == 2 and arg.shape[0] == n_elem:
+                    # Not robust to reduce(sum, [j], arg0[e, i]*arg1[i, j]*arg2[e, j])
+                    n_in = arg.shape[1]
+                    idof_arrays.append(arg.name)
+                    #n_dof_arrays += 1
+                elif len(arg.shape) == 3 and arg.shape[-1] == n_elem:
+                    _, nr, n_elem = arg.shape
+                elif len(arg.shape) == 3 and arg.shape[1] == n_elem:
+                    nf, n_elem, n_in = arg.shape
+                    #n_dof_arrays += nf
+                    face_dof_arrays.append(arg.name)
+        
+        # Rather pointless to intersect. We already check if they are in read_deps
+        read_idof_arrays = read_deps & frozenset(idof_arrays)
+        return arg_dict, read_idof_arrays, face_dof_arrays, n_in
+        
+    arg_dict, read_idof_arrays, face_dof_arrays, n_in = get_args_and_arrays(knl)
+
+    ## Figure out the number of batches
 
     trans_list = []
     batch_size, kio, kii, iio, iii, ji = params
@@ -763,7 +808,7 @@ def get_trans_list(knl, params):
         # the prefetching and tagging commands after they are assigned.
         '''
         for b in range(nbatches):
-            for arg in read_dof_arrays:
+            for arg in read_idof_arrays:
                 # Should only prefetch if there are no indirection arrays
                 strides = [dim_tag.stride for dim_tag in arg_dict[arg].dim_tags if isinstance(dim_tag, lp.kernel.array.FixedStrideArrayDimTag)]
                 order_str = "f,f" if strides[0] < strides[1] else "c,c"
@@ -805,51 +850,52 @@ def get_trans_list(knl, params):
         # The more einsums the slower the prefetching becomes
         if True: # Turn off prefetching until can assign a batch number
             # No point in prefetching if there is a single array. There is no data re-use.
-            if len(read_dof_arrays) > 1:
-                if n_in == 1:
-                    j_prefetch_str = ""
+            # Prefetching breaks in this case
+
+            if n_in == 1:
+                j_prefetch_str = ""
+            else:
+                j_prefetch_str = f"{j},"
+                #j_prefetch_str = f"{j}_outer,{j}_inner,"
+
+            for arg in read_idof_arrays:
+                # Should only prefetch if there are no indirection arrays
+                strides = [dim_tag.stride for dim_tag in arg_dict[arg].dim_tags if isinstance(dim_tag, lp.kernel.array.FixedStrideArrayDimTag)]
+                order_str = "f,f" if strides[0] < strides[1] else "c,c"
+                if kio != kii:
+                    prefetch_str = f"{j_prefetch_str}{e}_inner_outer,{e}_inner_inner"
+                    #prefetch_str = f"{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
+                else:        
+                    prefetch_str = f"{j_prefetch_str}{e}_inner"    
+                    #prefetch_str = f"{j},{e}_inner_outer"    
+                    #prefetch_str = f"{j}_outer,{j}_inner,{e}_inner"    
+
+                trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
+                    (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
+                # Should be c,c by default. Maybe try to re-add this capability later
+                #trans_list.append(("tag_array_axes", (f"{arg}_f", order_str,),))
+                print(prefetch_str)
+
+            for arg in face_dof_arrays:
+                # Stick with the default ordering for now. For fortran ordering
+                # slap an order tag on it.
+                if kio != kii:
+                    prefetch_str = f"{f},{j_prefetch_str}{e}_inner_outer,{e}_inner_inner"
+                    #prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
                 else:
-                    j_prefetch_str = f"{j},"
-                    #j_prefetch_str = f"{j}_outer,{j}_inner,"
+                    prefetch_str = f"{f},{j_prefetch-str}{e}_inner"
 
-                for arg in read_dof_arrays:
-                    # Should only prefetch if there are no indirection arrays
-                    strides = [dim_tag.stride for dim_tag in arg_dict[arg].dim_tags if isinstance(dim_tag, lp.kernel.array.FixedStrideArrayDimTag)]
-                    order_str = "f,f" if strides[0] < strides[1] else "c,c"
-                    if kio != kii:
-                        prefetch_str = f"{j_prefetch_str}{e}_inner_outer,{e}_inner_inner"
-                        #prefetch_str = f"{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
-                    else:        
-                        prefetch_str = f"{j_prefetch_str}{e}_inner"    
-                        #prefetch_str = f"{j},{e}_inner_outer"    
-                        #prefetch_str = f"{j}_outer,{j}_inner,{e}_inner"    
+                    #prefetch_str = f"{f},{j},{e}_inner_outer"
+                    #prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner"
 
-                    trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
-                        (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
-                    # Should be c,c by default. Maybe try to re-add this capability later
-                    #trans_list.append(("tag_array_axes", (f"{arg}_f", order_str,),))
-                    print(prefetch_str)
+                trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
+                    (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
+                print(prefetch_str)
+            #exit()
 
-                for arg in face_dof_arrays:
-                    # Stick with the default ordering for now. For fortran ordering
-                    # slap an order tag on it.
-                    if kio != kii:
-                        prefetch_str = f"{f},{j_prefetch_str}{e}_inner_outer,{e}_inner_inner"
-                        #prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
-                    else:
-                        prefetch_str = f"{f},{j_prefetch-str}{e}_inner"
+        #trans_list.append(("add_inames_for_unused_hw_axes",))
 
-                        #prefetch_str = f"{f},{j},{e}_inner_outer"
-                        #prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner"
-
-                    trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
-                        (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
-                    print(prefetch_str)
-                #exit()
-
-        trans_list.append(("add_inames_for_unused_hw_axes",))
-
-        trans_list.append(("batch_einsums", (batch_size,),))
+        #trans_list.append(("batch_einsums", (batch_size,),))
         
 
 
