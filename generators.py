@@ -542,10 +542,6 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
     batch_sizes = batch_size_options(knl)
     #batch_size_list = [sorted(nbatches_dict.values())[0]]
 
-    # Very small batch sizes tend to not run because duplicate_inames increases in cost quadratically with the
-    # number of inames
-
-    #neinsums = len(get_einsums(knl))
     for batch_size in batch_sizes:#range(3,4):#range(1, neinsums + 1):
         #if batch_size >= neinsums:
         #    batch_size = 0
@@ -596,20 +592,38 @@ def get_trans_list(knl, params):
     within_inames, r_inames = list(get_einsum_types(knl))[0]
     j = r = f = e = i = x = None
 
-    for iname in r_inames:
-        if "idof" in iname:
-            j = iname
-        elif "idim" in iname:
-            r = iname
-        elif "iface" in iname:
-            f = iname
-    for iname in within_inames:
-        if "iel" in iname:
-            e = iname
-        elif "idof" in iname:
-            i = iname
-        elif "idim" in iname:
-            x = iname
+    # Fused 5 to 2 kernel. It is basically a bunch
+    # of 3,2 kernels with more array sums.
+    if len(within_inames) == 2 and len(r_inames) == 3:
+        for iname in r_inames:
+            if "idof" in iname:
+                j = iname
+            #elif "idim" in iname:
+            #    r = iname
+            #elif "iface" in iname:
+            #    f = iname
+        for iname in within_inames:
+            if "iel" in iname:
+                e = iname
+            elif "idof" in iname:
+                i = iname
+            #elif "idim" in iname:
+            #    x = iname
+    else:
+        for iname in r_inames:
+            if "idof" in iname:
+                j = iname
+            elif "idim" in iname:
+                r = iname
+            elif "iface" in iname:
+                f = iname
+        for iname in within_inames:
+            if "iel" in iname:
+                e = iname
+            elif "idof" in iname:
+                i = iname
+            elif "idim" in iname:
+                x = iname
 
     if (e is None or i is None or j is None) and len(within_inames) == 2 and len(r_inames) == 1:
         from meshmode.transform_metadata import ConcurrentElementInameTag, ConcurrentDOFInameTag
@@ -780,74 +794,22 @@ def get_trans_list(knl, params):
         #print("Splitting reduction iname disabled. Re-enable when finished debugging")
         #trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag",unr,),),))
 
+        ## Reduction inames. Not a lot to do
         if r is not None:
             trans_list.append(("tag_inames", (((f"{r}", unr,),),),))
+        if f is not None:
+            trans_list.append(("tag_inames", (((f"{f}", unr,),),),))
+        ## Non reduction iname. Could potentially split into inner and outer and
+        ## or use ilp or unr. Should see how much of the execution time this takes.
         if x is not None:
             if batch_size == 0:
-                # Breaks with einsum batching
+                # Breaks with einsum batching (should probably check this again)
                 trans_list.append(("tag_inames", (((f"{x}", ilp,),),),))
             else:
                 trans_list.append(("tag_inames", (((f"{x}", unr,),),),))
-        if f is not None:
-            trans_list.append(("tag_inames", (((f"{f}", unr,),),),))
-
-        #trans_list.append(("add_inames_for_unused_hw_axes",))
-        #trans_list.append(("batch_einsums", (batch_size,),))
-        #trans_list.append(("add_inames_for_unused_hw_axes",))
-        # Should only prefetch inside the batches it appears in
 
         #"""
-        #if batch_size > 0: # Need to rename the axes to account for the batching
-        # The more einsums the slower the prefetching becomes
-        # This will need to occur after batching
-        # For some reason this is failing when more than one einsum is placed in a batch.
 
-        # Problem: Not every variable is needed in every batch. Need to identify if the variable is used
-        # in batch i and, if so, add the prefetch command and tag_array_axes command. The issue is that
-        # the batch_ids haven't been added to the instructions at this point, so we'll have to re-write
-        # the prefetching and tagging commands after they are assigned.
-        '''
-        for b in range(nbatches):
-            for arg in read_idof_arrays:
-                # Should only prefetch if there are no indirection arrays
-                strides = [dim_tag.stride for dim_tag in arg_dict[arg].dim_tags if isinstance(dim_tag, lp.kernel.array.FixedStrideArrayDimTag)]
-                order_str = "f,f" if strides[0] < strides[1] else "c,c"
-                if kio != kii:
-                    prefetch_str = f"{j}_b{b},{e}_inner_outer_b{b},{e}_inner_inner_b{b}"
-                    #prefetch_str = f"{j}_outer_b{b},{j}_inner_b{b},{e}_inner_outer_b{b},{e}_inner_inner_b{b}"
-                else:
-                    prefetch_str = f"{j}_b{b},{e}_inner_b{b}"    
-        
-                    #prefetch_str = f"{j}_b{b},{e}_inner_outer_b{b},{e}_inner_inner_b{b}"
-                    #prefetch_str = f"{j}_outer_b{b},{j}_inner_b{b},{e}_inner_b{b}"    
-
-                trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
-                    (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
-                trans_list.append(("tag_array_axes", (f"{arg}_f", order_str,),))
-
-                trans_list.append(("add_inames_for_unused_hw_axes",))
-
-                print(prefetch_str)
-            for arg in face_dof_arrays:
-                # Stick with the default ordering for now. For fortran ordering
-                # slap an order tag on it.
-                if kio != kii:
-                    prefetch_str = f"{f},{j}_b{b},{e}_inner_outer_b{b},{e}_inner_inner_b{b}"
-                    #prefetch_str = f"{f},{j}_outer_b{b},{j}_inner_b{b},{e}_inner_outer_b{b},{e}_inner_inner_b{b}"
-                else:
-                    prefetch_str = f"{f},{j}_b{b},{e}_inner_b{b}"
-                    #prefetch_str = f"{f},{j}_outer_b{b},{j}_inner_b{b},{e}_inner_b{b}"
-
-                trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
-                    (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
-
-                print(prefetch_str)
-
-                trans_list.append(("add_inames_for_unused_hw_axes",))
-        #exit()
-        '''
-        #else:
-        # The more einsums the slower the prefetching becomes
         if True: # Turn off prefetching until can assign a batch number
             # No point in prefetching if there is a single array. There is no data re-use.
             # Prefetching breaks in this case
@@ -883,19 +845,17 @@ def get_trans_list(knl, params):
                     prefetch_str = f"{f},{j_prefetch_str}{e}_inner_outer,{e}_inner_inner"
                     #prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
                 else:
-                    prefetch_str = f"{f},{j_prefetch-str}{e}_inner"
-
+                    prefetch_str = f"{f},{j_prefetch_str}{e}_inner"
                     #prefetch_str = f"{f},{j},{e}_inner_outer"
                     #prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner"
 
                 trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
                     (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
                 print(prefetch_str)
-            #exit()
 
         #trans_list.append(("add_inames_for_unused_hw_axes",))
 
-        #trans_list.append(("batch_einsums", (batch_size,),))
+        trans_list.append(("batch_einsums", (batch_size,),))
         
 
 

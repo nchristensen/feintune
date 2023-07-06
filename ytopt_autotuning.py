@@ -147,7 +147,7 @@ class ObjectiveFunction(object):
         #            device_memory_bandwidth=device_memory_bandwidth, device_latency=device_latency, timeout=timeout)
         
         # Would be helpful if could return all of the data instead of only avg_time 
-        return result["data"]["avg_time"]
+        return result["data"]["avg_time_predicted"]
 
 
 
@@ -166,7 +166,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
         save_path = "./"
 
     print(input_space)
-    output_space = Space([Real(0.0, inf, name="avg_time")])
+    output_space = Space([Real(0.0, inf, name="avg_time_predicted")])
     #eval_str = "mpi_comm_executor"
     #eval_str = "mpi_pool_executor"
     #eval_str = "charm4py_pool_executor"

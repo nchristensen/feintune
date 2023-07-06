@@ -204,6 +204,9 @@ def generate_subkernels(tunit, barriers, phases):
         #    print(instruction)
         knl = lp.make_kernel(domains, instructions, kernel_data=new_args, name=name)
         knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
+        #if knl.default_entrypoint.name == "unfiltered_rhs_5" and ("pt_temp_119" in knl.default_entrypoint.args or "pt_temp_119" in knl.default_entrypoint.temporary_variables.values()):
+        #    print(knl)
+        #    exit()
         subkernels.append(knl)
     return subkernels
 
@@ -342,7 +345,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
 
     use_ytopt = False
 
-    handled_pairs = set([(2,1,),(3,2,),(2,2,)])
+    handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
     if (len(est[0]), len(est[1]),) in handled_pairs:
         if use_ytopt:
             input_space = createConfigSpace(queue, sk)
@@ -359,6 +362,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
                         max_flop_rate=max_flop_rate, device_latency=device_latency,
                         device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
     else:
+        print(sk)
         raise(ValueError(f"Unhandled einsum type: {est}"))
 
     #return list(trans_list_list[0])
@@ -888,7 +892,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                     
                     print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
 
-                    if not indirection and red_axes == 1 and non_red_axes == 2 and einsum_count == 43:
+                    if not indirection and red_axes == 3 and non_red_axes == 2 and einsum_count <= np.inf:
                         autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
 

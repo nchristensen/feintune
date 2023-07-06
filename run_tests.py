@@ -906,6 +906,14 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=None, method="
 def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, method=None, run_single_batch=True):#, method="thread"):
     # Timeout won't prevent applying transformations from hanging
 
+    # Should check how well single batch predicted times correllate with actual times
+    
+    print(trans_list)
+
+    from __init__ import get_einsums
+    neinsums = len(get_einsums(knl_base))
+    batch_size = neinsums # No batching is equivalent to one batch
+
     print("PRINTING 1")
     print(knl_base)
 
@@ -935,6 +943,8 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     for trans in trans_list:
         if trans[0] == "split_iname" and "inner" in trans[1][0]:
             local_sizes |= {trans[1][1]}
+        elif trans[0] == "batch_einsums":
+            batch_size = trans[1][0]
     print(local_sizes)
     assert len(local_sizes) <= 2
 
@@ -943,15 +953,23 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     # AMD does something weird with max_work_group_size so using
     # max_work_item_sizes[0] here instead
     max_work_group_size = queue.device.max_work_item_sizes[0] 
-
+    
+    knl = lp.preprocess_kernel(knl)
     temp_dict = {key: val for key, val in knl.default_entrypoint.temporary_variables.items() if val.address_space == lp.AddressSpace.LOCAL or val.address_space == lp.auto}
     base_storage_dict = {}
 
     for temp, tarray in temp_dict.items():
         if tarray.base_storage not in base_storage_dict:
-            base_storage_dict[tarray.base_storage] = np.product(tarray.shape)*tarray.dtype.dtype.itemsize
-        elif np.product(tarray.shape) > base_storage_dict[tarray.base_storage]:
-            base_storage_dict[tarray.base_storage] = np.product(tarray.shape)*tarray.dtype.dtype.itemsize
+            if tarray.base_storage is not None:
+                if tarray.base_storage not in base_storage_dict:
+                    base_storage_dict[tarray.base_storage] = np.product(tarray.shape)*tarray.dtype.dtype.itemsize
+                elif np.product(tarray.shape) > base_storage_dict[tarray.base_storage]:
+                    base_storage_dict[tarray.base_storage] = np.product(tarray.shape)*tarray.dtype.dtype.itemsize
+            else:
+                base_storage_dict[tarray.name] = np.product(tarray.shape)*tarray.dtype.dtype.itemsize
+
+    #print("BASE STORAGE DICT")
+    #print(base_storage_dict)
     local_memory_used = np.sum(list(base_storage_dict.values()))
     local_memory_avail = queue.device.local_mem_size
     print(f"KERNEL USING {local_memory_used} out of {local_memory_avail} bytes of local memory") 
@@ -1004,7 +1022,13 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     bw = bw_dict["observed_bandwidth"]
     flop_rate = flop_rate_dict["observed_flop_rate"]
 
-    data = {"avg_time": avg_time, "wall_clock_time": wall_clock_time, "single_batch": run_single_batch}
+
+    data = {"avg_time": avg_time,
+            "avg_time_predicted": avg_time*(neinsums/batch_size) if run_single_batch else avg_time,
+            "wall_clock_time": wall_clock_time, 
+            "single_batch": run_single_batch, 
+            "neinsums": neinsums}
+
     data.update(bw_dict.items())
     data.update(flop_rate_dict.items())
 

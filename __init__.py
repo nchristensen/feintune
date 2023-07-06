@@ -580,7 +580,6 @@ def get_batch_temporaries_by_size(tunit, nbatches, address_space):
 
 def get_alias_sets(batch_dict_list):
     from itertools import combinations
-    import copy
 
     sizes = set()
     for batch_dict in batch_dict_list:
@@ -615,7 +614,7 @@ def get_alias_sets(batch_dict_list):
         # For now just assert to verify this is not the case, don't attempt to fix
 
         arg_array = np.array(arg_lists)
-        #print(arg_array)
+        print(arg_array)
 
         moved = []
 
@@ -623,13 +622,14 @@ def get_alias_sets(batch_dict_list):
         set_combo_iterator = combinations(arg_sets,2)
         for (row1, set1), (row2, set2) in set_combo_iterator:
             intersection = set1 & set2
+            #print(intersection)
             for temporary in intersection:
                 # Find the column indices of the shared temporaries
                 col1 = list(arg_array[row1,:]).index(temporary)
                 col2 = list(arg_array[row2,:]).index(temporary)
                 moved.append(temporary)
 
-                if col1 != col2:
+                if col1 != col2: # Already in the same column
                     #print((row1,col1), (row2,col2))
 
                     # Use row1 as the pivot row and swap the col1 and col2 in
@@ -645,9 +645,13 @@ def get_alias_sets(batch_dict_list):
                     #print(arg_array[:,[col1,col2]])
 
                     for row in np.arange(0, arg_array.shape[0]):
+                        # Any value in col1 not equal to temporary
+                        # Needs to be swapped with col2. This 
+                        # (hopefully) ensures any previously
+                        # aligned temporaries stay together.
 
-                        # Only exchange column values when necessary.
-                        if row != row1 and arg_array[row1,col1] == arg_array[row,col2]:
+                        #if row != row1 and arg_array[row1,col1] == arg_array[row,col2]:
+                        if arg_array[row, col1] != temporary:
                             holder = arg_array[row, col1]
                             arg_array[row,col1] = arg_array[row,col2]              
                             arg_array[row,col2] = holder
@@ -688,15 +692,13 @@ def get_alias_sets(batch_dict_list):
                     #assert arg_array[row1, col1] != arg_array[row2, col2]
                     
                     #exit()
-        """
+        #"""
         # Check that everything is properly aligned.
         for entry in arg_array.flatten():
             if entry is not None:
-                print(entry)
                 indices = np.argwhere(arg_array == entry)
-                print(indices)
                 assert np.all(indices[:,1] == indices[0,1])
-        """
+        #"""
  
 
         #flat_arg_array = arg_array.flatten()
@@ -1397,11 +1399,40 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
     domains = []
     single_batch_kernel = None
 
+    # Assuming there are no internal dependencies, then we can reduce the number of prefetching
+    # operations by putting instructions that do the same prefetches in the same batches
+    """ 
+    sk_fetch_rules = []
+    for subkernel in subkernels:
+        fetch_rules = {instr.id for instr in subkernel.instructions if "_fetch" in instr.id}
+        sk_fetch_rules.append(fetch_rules)
+    from itertools import combinations
+    nintersections = 0
+    for (sk_id_1, set1), (sk_id_2, set2) in combinations(sk_fetch_rules, 2):
+        intersection = set1 & set2
+        nintersections += len(intersection)
+
+    ## Better idea, find the two sets the intersect the most, put the corresponding instructions in a batch.
+    ## Then recompute the intersections with the remaining instructions and put the sets that intersect the
+    ## most in a different batch if possible, otherwise in the set with the least intersections.
+    ## Then fill out the sets with the sets with the intersectionless einsums. Or do it in reverse
+    ## and fill out the sets with intersectionless einsums, leaving space for pairs of intersecting einsums.
+    ## This isn't quite right though. What if an einsum shares 4 single prefetches with other einsums but.
+    ## 3 prefetches with one single einsum.
+    ## There also may be a trade off between reducing the number of prefetches vs. reducing the amount of local
+    ## memory used (although this is unlikely).
+    ## Probably should prioritize reducing the local memory used if possible, then attempt to reduce
+    ## the number of prefetches.
+    """
+
+    #print(f"ELIMINATABLE PREFETCHES: {nintersections}")
+
     # Assemble the sub-batches
+    print("ASSEMBLING SUB-BATCHES")
     for batch in range(nbatches):
+        print(batch)
         var_names = set()
         constraints = []
-
         for subkernel in subkernels[batch*batch_size:(batch+1)*batch_size]:
 
             sk = subkernel.default_entrypoint
@@ -1424,6 +1455,9 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
             for iname, iname_obj in sk.inames.items():
                 for tag in iname_obj.tags:
                     iname_to_tag |= set([(iname, tag,)])
+
+        # Eliminate redundant instructions:
+        insns = list(set(insns))
 
         space = isl.Space.create_from_names(isl.DEFAULT_CONTEXT, set=var_names)
         domain = isl.BasicSet.universe(space)
@@ -1452,38 +1486,44 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
 
     # Avoids some weird errors with make_kernel
     knl = orig_tunit.with_kernel(orig_tunit.default_entrypoint.copy(domains=domains, 
-                                    instructions=insns, args=list(args), temporary_variables=temp_args))
-
-
+            instructions=insns, args=list(args), temporary_variables=temp_args))
     knl = lp.tag_inames(knl, list(iname_to_tag), ignore_nonexistent=False)
     knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
 
     if True:
+        if nbatches > 1: #Pointless of alias temporaries if there is a single batch
+            print("ALIASING TEMPORARIES")
+            for i in range(1, nbatches):
+                j = i - 1
+                knl = lp.add_dependency(knl, f"id:batch_{i}_*", f"id:batch_{j}_*")
 
-        for i in range(1, nbatches):
-            j = i - 1
-            knl = lp.add_dependency(knl, f"id:batch_{i}_*", f"id:batch_{j}_*")
+            if True:
 
-        if True:
+                #from loopy.transform.realize_reduction import realize_reduction
+                print("PREPROCESSING PROGRAM")
+                pp_tunit = lp.preprocess_program(knl) # Realizes the reductions so we can access the accumulators and fill in lp.auto memory spaces
+                # realize_reduction doesn't fill in lp.auto memory spaces
+                #pp_tunit = realize_reduction(tunit.with_kernel(knl), unknown_types_ok=True)
+                #knl = b_tunit.default_entrypoint
+                print("LOCAL: GETTING BATCH TEMPORARIES BY SIZE")
+                batch_temps_by_size = get_batch_temporaries_by_size(pp_tunit, nbatches, lp.AddressSpace.LOCAL) 
+                print("LOCAL: GETTING ALIAS SETS")
+                alias_sets = get_alias_sets(batch_temps_by_size)
+                print("LOCAL: CALLING ALIAS TEMPORARIES")
+                for s in alias_sets:
+                    print(sorted(s))
+                    # Synchronizing for exclusive use make loopy fall back to the slow scheduler
+                    # ILP also causes use of the slow scheduler, but oh well.
+                    knl = lp.alias_temporaries(knl, list(s), synchronize_for_exclusive_use=False)
 
-            #from loopy.transform.realize_reduction import realize_reduction
-            pp_tunit = lp.preprocess_program(knl) # Realizes the reductions so we can access the accumulators and fill in lp.auto memory spaces
-            # realize_reduction doesn't fill in lp.auto memory spaces
-            #pp_tunit = realize_reduction(tunit.with_kernel(knl), unknown_types_ok=True)
-            #knl = b_tunit.default_entrypoint
-
-            batch_temps_by_size = get_batch_temporaries_by_size(pp_tunit, nbatches, lp.AddressSpace.LOCAL) 
-            alias_sets = get_alias_sets(batch_temps_by_size)
-            for s in alias_sets:
-                # Synchronizing for exclusive use make loopy fall back to the slow scheduler
-                # ILP also causes use of the slow scheduler, but oh well.
-                knl = lp.alias_temporaries(knl, list(s), synchronize_for_exclusive_use=False)
-
-            # Doesn't seem to do anything for OpenCL but for other targets it might do something
-            batch_temps_by_size = get_batch_temporaries_by_size(pp_tunit, nbatches, lp.AddressSpace.PRIVATE) 
-            alias_sets = get_alias_sets(batch_temps_by_size)
-            for s in alias_sets:
-                knl = lp.alias_temporaries(knl, list(s), synchronize_for_exclusive_use=False)
+                # Doesn't seem to do anything for OpenCL but for other targets it might do something
+                print("PRIVATE: GETTING BATCH TEMPORARIES BY SIZE")
+                batch_temps_by_size = get_batch_temporaries_by_size(pp_tunit, nbatches, lp.AddressSpace.PRIVATE) 
+                print("PRIVATE: GETTING ALIAS SETS")
+                alias_sets = get_alias_sets(batch_temps_by_size)
+                print("PRIVATE: CALLING ALIAS SETS")
+                for s in alias_sets:
+                    knl = lp.alias_temporaries(knl, list(s), synchronize_for_exclusive_use=False)
 
         if False:
 
@@ -1551,7 +1591,10 @@ def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
 
         subkernels = [tunit]
     else:
+
+        print("BEGINNING DECOMPOSION")
         subkernels = decompose_batched_einsum_kernel(tunit)
+        print("ENDING DECOMPOSITION")
     output_subkernels = []
   
     for subkernel in subkernels:
@@ -1576,7 +1619,9 @@ def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
 
     # Then recompose the tunit
     #print("====================RECOMPOSED TUNIT========================")
+    print("BEGINNING RECOMPOSITION")
     recomposed, single_batch_knl = recompose_batched_einsum_kernel(tunit, output_subkernels, batch_size=batch_size)
+    print("ENDING RECOMPOSITION")
 
     """
     kern = recomposed.default_entrypoint.copy(target=lp.CTarget())
@@ -1612,10 +1657,12 @@ def apply_transformation_list(tunit, transformations):
 
     print(transformations)
     add_prefetches = [t for t in transformations if t[0] == "add_prefetch"]
+
     batch_size = 0
     for t in transformations:
         if t[0] == "batch_einsums":
             batch_size = t[1][0]
+    batch_size = 1
 
     transformations = list(transformations)
     prefetched=False
