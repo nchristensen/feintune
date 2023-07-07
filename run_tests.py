@@ -910,6 +910,11 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     
     print(trans_list)
 
+
+    if knl_base.default_entrypoint.name == "unfiltered_rhs_5_26":
+        print(knl_base)
+        exit()
+
     from __init__ import get_einsums
     neinsums = len(get_einsums(knl_base))
     batch_size = neinsums # No batching is equivalent to one batch

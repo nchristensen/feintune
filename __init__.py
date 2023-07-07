@@ -581,6 +581,8 @@ def get_batch_temporaries_by_size(tunit, nbatches, address_space):
 def get_alias_sets(batch_dict_list):
     from itertools import combinations
 
+    print(batch_dic
+
     sizes = set()
     for batch_dict in batch_dict_list:
         sizes |= set(batch_dict.keys())
@@ -590,8 +592,13 @@ def get_alias_sets(batch_dict_list):
         arg_lists = []
         arg_sets = []
         for i, batch_dict in enumerate(batch_dict_list):
-            arg_lists.append(sorted(batch_dict[size]))
-            arg_sets.append((i,set(batch_dict[size],)))
+            if size in batch_dict:
+                arg_lists.append(sorted(batch_dict[size]))
+                arg_sets.append((i,set(batch_dict[size]),))
+            else:
+                arg_lists.append([])
+                arg_sets.append((i,set(),))
+
 
         #max_len = 0
         #for l in arg_lists:
@@ -602,6 +609,8 @@ def get_alias_sets(batch_dict_list):
         max_len = np.max([len(l) for l in arg_lists])
         for l in arg_lists:
             l += [None]*(max_len - len(l)) # Pad with None so can slice columns
+
+
             #while len(l) < max_len:
             #    l.append(None) # Pad with None so can slice columns
 
@@ -650,6 +659,10 @@ def get_alias_sets(batch_dict_list):
                         # (hopefully) ensures any previously
                         # aligned temporaries stay together.
 
+                        # Something is still broken with this formulation. They still
+                        # Fall out of alignment. Maybe some kind of bin-filling algorithm
+                        # would work.
+
                         #if row != row1 and arg_array[row1,col1] == arg_array[row,col2]:
                         if arg_array[row, col1] != temporary:
                             holder = arg_array[row, col1]
@@ -657,49 +670,51 @@ def get_alias_sets(batch_dict_list):
                             arg_array[row,col2] = holder
 
 
-                    #print("AFTER")
-                    """
-                    # Check that nothing already aligned came out of alignment
-                    subarray = arg_array[:,[col1,col2]]
-                    for entry in subarray.flatten():
-                        if entry is not None:
-                            print(entry)
-                            indices = np.argwhere(subarray == entry)
-                            if entry in moved:
-                                assert indices.shape[0] > 1
-                                print(indices)
-                                print(subarray)
-                                assert np.all(indices[:,1] == indices[0,1])
-                    """
+                #print("AFTER")
+                """
+                # Check that nothing already aligned came out of alignment
+                subarray = arg_array[:,[col1,col2]]
+                for entry in subarray.flatten():
+                    if entry is not None:
+                        print(entry)
+                        indices = np.argwhere(subarray == entry)
+                        if entry in moved:
+                            assert indices.shape[0] > 1
+                            print(indices)
+                            print(subarray)
+                            assert np.all(indices[:,1] == indices[0,1])
+                """
+    
         
-            
 
-                    #arg_array[selected_rows,col1][:] = arg_array[selected_rows,col2][:]
-                    #arg_array[selected_rows,col2][:] = holder[:]
+                #arg_array[selected_rows,col1][:] = arg_array[selected_rows,col2][:]
+                #arg_array[selected_rows,col2][:] = holder[:]
 
-                    #print("AFTER")
-                    #print(arg_array[selected_rows,col1][:])
-                    #print(arg_array[selected_rows,col2][:])
+                #print("AFTER")
+                #print(arg_array[selected_rows,col1][:])
+                #print(arg_array[selected_rows,col2][:])
 
-                    #print(arg_array[row1,:])
-                    #print(arg_array[row2,:])
+                #print(arg_array[row1,:])
+                #print(arg_array[row2,:])
 
-        
-                    #arg_array[selected_rows,col1], arg_array[selected_rows,col2] = copy.deepcopy(arg_array[selected_rows, col2]), copy.deepcopy(arg_array[selected_rows,col1])
+    
+                #arg_array[selected_rows,col1], arg_array[selected_rows,col2] = copy.deepcopy(arg_array[selected_rows, col2]), copy.deepcopy(arg_array[selected_rows,col1])
 
-                    # Check that the re-arrangement was done properly
-                    #assert arg_array[row1, col1] == arg_array[row2, col1]
-                    #assert arg_array[row1, col1] != arg_array[row2, col2]
-                    
-                    #exit()
-        #"""
-        # Check that everything is properly aligned.
-        for entry in arg_array.flatten():
-            if entry is not None:
-                indices = np.argwhere(arg_array == entry)
-                assert np.all(indices[:,1] == indices[0,1])
-        #"""
- 
+                # Check that the re-arrangement was done properly
+                #assert arg_array[row1, col1] == arg_array[row2, col1]
+                #assert arg_array[row1, col1] != arg_array[row2, col2]
+                
+                #exit()
+    #"""
+    # Check that everything is properly aligned.
+    for entry in arg_array.flatten():
+        if entry is not None:
+            indices = np.argwhere(arg_array == entry)
+            if not np.all(indices[:,1] == indices[0,1]):
+                print(entry, indices)
+            assert np.all(indices[:,1] == indices[0,1])
+    #"""
+
 
         #flat_arg_array = arg_array.flatten()
         #nonzero_entries = flat_arg_array[np.flatnonzero(flat_arg_array)]
@@ -1364,7 +1379,6 @@ def decompose_batched_einsum_kernel(tunit):
         new_args += new_temp_args
 
         name = tunit.default_entrypoint.name + f"_{i}"
-
         
         knl = lp.make_kernel(domains, [insn], kernel_data=new_args, name=name)
         #knl = tunit.with_kernel(tunit.default_entrypoint.copy(domains=domains, instructions=[insn], args=new_args, name=name))
@@ -1456,7 +1470,7 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
                 for tag in iname_obj.tags:
                     iname_to_tag |= set([(iname, tag,)])
 
-        # Eliminate redundant instructions:
+        # Eliminate redundant (prefetch) instructions:
         insns = list(set(insns))
 
         space = isl.Space.create_from_names(isl.DEFAULT_CONTEXT, set=var_names)
@@ -1559,6 +1573,46 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
 
     return knl, single_batch_knl
 
+# Test code. This should be handled in loopy most likely. Or maybe in pytato
+def prune_conditionals(instr):
+
+    class MyPrunerMapper(lp.symbolic.UncachedIdentityMapper):
+
+        def map_if(self, expr, *args, seen_conditions=frozenset()):
+            print("SEEN CONDITIONS")
+            print(str(expr.condition), seen_conditions, str(expr.condition) in seen_conditions)
+            print("CONDITIONAL")
+            print("CONDITION", expr.condition) 
+            print("THEN", expr.then)
+            print("ELSE", expr.else_)
+            
+            if str(expr.condition) in seen_conditions:
+                result = self.rec(expr.else_, *args, seen_conditions=seen_conditions)
+                print(result)
+                exit()
+                return result
+            else:
+                seen_conditions |= frozenset([str(expr.condition)])
+                then = self.rec(expr.then, *args, seen_conditions=seen_conditions)
+                else_ = self.rec(expr.else_, *args, seen_conditions=seen_conditions)
+                from pymbolic.primitives import If
+                ans = If(expr.condition, then, else_)
+                return ans
+
+    if isinstance(instr, lp.Assignment):
+        prune = MyPrunerMapper()
+        expr_pruned = prune.rec(instr.expression)
+        print("DONE PRUNING")
+
+        if expr_pruned != instr.expression:
+            print("PRUNED INSTRUCTION")
+            print(instr_pruned)
+            print("NONPRUNED INSTRUCTION")
+            print(instr)
+            exit()
+        # Re-write instruction with new expression.
+    return instr
+
 @qprofile
 def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
 
@@ -1596,16 +1650,31 @@ def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
         subkernels = decompose_batched_einsum_kernel(tunit)
         print("ENDING DECOMPOSITION")
     output_subkernels = []
-  
+
     for subkernel in subkernels:
         print(subkernel)
-        for prefetch in prefetches:
-            print(prefetch)
-            arg = prefetch[1][0]
-            # Should this be restricted to read args only?
-            kernel_args = [kernel_arg.name for kernel_arg in subkernel.default_entrypoint.args]
-            if arg in kernel_args:
-                subkernel = lp.add_prefetch(subkernel, *prefetch[1], **dict(prefetch[2]))
+        kernel_args = {kernel_arg.name for kernel_arg in subkernel.default_entrypoint.args}
+        prefetch_names = {prefetch[1][0] for prefetch in prefetches}
+        
+        # Pointless to prefetch if a single einsum use a huge number of DOF arrays. Very little
+        # data would be in local memroy and it takes forever to generate the kernel because the loop domains
+        # become so large. Arbitrarily setting the cutoff to 10. Unfortunately, when this happens
+        # this makes the batches
+        # inhomogeneous and so performance can't be predicted from individual batches in this case.
+        cutoff = 10
+        prefetch_set = kernel_args & prefetch_names
+        if len(prefetch_set) <= cutoff:
+            for prefetch in prefetches:
+                print(prefetch)
+                arg = prefetch[1][0]
+                # Should this be restricted to read args only? How should deeply nested if-statements be handled?
+                #kernel_args = [kernel_arg.name for kernel_arg in subkernel.default_entrypoint.args]
+                if arg in kernel_args:
+                    subkernel = lp.add_prefetch(subkernel, *prefetch[1], **dict(prefetch[2]))
+        else:
+            print(f"Prefetching on einsum disabled. Einsum uses more than {cutoff} prefetchable arguments.")
+            #exit()
+
         output_subkernels.append(subkernel)
         """
         kern = subkernel.default_entrypoint.copy(target=lp.CTarget())

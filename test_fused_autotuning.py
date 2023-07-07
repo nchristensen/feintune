@@ -1018,20 +1018,18 @@ def collect_subkernels(tunit_dicts):
         print(f"OBTAINING SUBKERNELS FROM: {filename}")
         sks = get_subkernels(tunit, args)
 
-        #print(tunit)
-
         for sk, csk in sks:
             # This may change the identifier so needs to be set beforehand
             assert sk.default_entrypoint.options.no_numpy
             assert sk.default_entrypoint.options.return_dict
             pid = unique_program_id(sk)
-            #print(sk)
             out_list.append((pid, sk, csk,))
+
+            # Could also do this with Collections.Counter
             if pid in pid_counts:
                 pid_counts[pid] += 1
             else:
                 pid_counts[pid] = 1
-            #exit()
 
     return out_list, pid_counts
 
@@ -1072,12 +1070,31 @@ def main(arg):
     # key). Need to count that the number of inames is the same though. And need to
     # figure out the element iname
 
+    # Or just have the size be a parameter in the Bayesian optimization space.
+
     for directory in directories:
         save_path = directory + "/hjson"
         tunit_dicts = get_pickled_tunits(directory)
         print("Done collecting tunits")
         # ID changes based on whether python was run with -O
         sk_list, pid_dict = collect_subkernels(tunit_dicts)
+        """
+        for item in sk_list:
+            sk = item[1].default_entrypoint
+            a_exprs = [insn.expression for insn in sk.instructions if isinstance(insn, lp.Assignment)]# and isinstance(insn.expression, lp.symbolic.Reduction)]
+            if len(a_exprs) != len(set(a_exprs)):
+
+                print(sk.name, len(a_exprs), len(set(a_exprs)))
+                if False:#sk.name == "unfiltered_rhs_15":
+                    for entry in a_exprs:
+                        print(entry)
+                    #print(sk)
+
+            #if item[1].default_entrypoint.name == "unfiltered_rhs_5":
+            #    print(item[1].default_entrypoint)
+            #    exit()
+        exit()
+        """
         print("Done collecting subkernels")
         get_lazy_einsum_info(tunit_dicts, hjson_dir=save_path)
         #exit()
