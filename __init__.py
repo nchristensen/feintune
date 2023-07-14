@@ -581,7 +581,7 @@ def get_batch_temporaries_by_size(tunit, nbatches, address_space):
 def get_alias_sets(batch_dict_list):
     from itertools import combinations
 
-    print(batch_dic
+    #print(batch_dic
 
     sizes = set()
     for batch_dict in batch_dict_list:
@@ -604,8 +604,52 @@ def get_alias_sets(batch_dict_list):
         #for l in arg_lists:
         #    max_len = max(len(l), max_len)
 
-        
+        all_arg_list = set()
+        arg_count = 0
+        for arg_list in arg_lists:
+            arg_count += len(set(arg_list))
+            all_arg_list |= set(arg_list)
+        all_arg_list = sorted(all_arg_list)
 
+        aligned_args = np.empty((len(arg_lists), len(all_arg_list)), dtype=object)
+        aligned_args[:,:] = None
+
+        for row, arg_list in enumerate(arg_lists):
+            for arg in arg_list:
+                col = all_arg_list.index(arg)
+                aligned_args[row][col] = arg
+
+        # Condense the arguments into fewer columns.
+        # This is a fairly greedy approach. There are
+        # Likely more optimal approaches.
+        col_ind_array = np.arange(0, aligned_args.shape[0])
+        for col1 in range(0, len(all_arg_list)):
+            for col2 in range(len(all_arg_list)-1, col1, -1):
+                ind1 = col_ind_array[aligned_args[:,col1].flatten() != None]
+                ind2 = col_ind_array[aligned_args[:,col2].flatten() != None]
+                #print(set(ind1) & set(ind2))
+                if len(set(ind1) & set(ind2)) == 0:
+                    aligned_args[ind2, col1] = aligned_args[ind2, col2]
+                    aligned_args[ind2, col2] = None
+                    #for index in ind2:
+                    #    aligned_args[index,col1] = aligned_args[index,col2]
+                    #    aligned_args[index,col2] = None
+
+        #print(aligned_args.shape)
+        for col in range(0, len(all_arg_list)):
+            if np.all(aligned_args[:,col] == None):
+                aligned_args = aligned_args[:,:col+1]
+                break
+        #print(aligned_args.shape)
+
+        #print(len(aligned_args[aligned_args != None].flatten()), arg_count)
+        assert len(aligned_args[aligned_args != None].flatten()) == arg_count
+        #print(aligned_args)
+        #for entry in aligned_args:
+        #    print(aligned_args)
+        #exit()
+    
+        """
         max_len = np.max([len(l) for l in arg_lists])
         for l in arg_lists:
             l += [None]*(max_len - len(l)) # Pad with None so can slice columns
@@ -622,6 +666,11 @@ def get_alias_sets(batch_dict_list):
         # Permute so self is in current column as much as possible
         # For now just assert to verify this is not the case, don't attempt to fix
 
+        # We aren't assured swapping entries will suffice to arrange the tuples.
+        # Consider (a,b),(b,c),(c,a).
+
+        
+
         arg_array = np.array(arg_lists)
         print(arg_array)
 
@@ -630,15 +679,54 @@ def get_alias_sets(batch_dict_list):
         # See if any two batches share any temporaries
         set_combo_iterator = combinations(arg_sets,2)
         for (row1, set1), (row2, set2) in set_combo_iterator:
+            assert row1 < row2
             intersection = set1 & set2
             #print(intersection)
             for temporary in intersection:
                 # Find the column indices of the shared temporaries
                 col1 = list(arg_array[row1,:]).index(temporary)
                 col2 = list(arg_array[row2,:]).index(temporary)
+
                 moved.append(temporary)
 
                 if col1 != col2: # Already in the same column
+
+                    a_dict = {}
+                    def align(d, tup):
+                        if tup[0] is None and tup[1] is None:
+                            pass
+                        elif tup[0] is None and tup[1] is not None:
+                            if tup[1] not in d:
+                                d[tup[1]] = [True, set()]
+                        elif tup[1] is None and tup[0] is not None:
+                            if tup[0] not in d:
+                                d[tup[0]] = [True, set()]
+                        elif tup[0] in d and tup[1] in d:
+                            d[tup[0]][1] |= set([tup[1]])
+                            d[tup[1]][1] |= set([tup[0]])
+
+                            if d[tup[0]][0] == d[tup[1]][0]:
+                                visited = set([tup[0]])
+                                to_visit = set([tup[1]])
+                                while len(to_visit) > 0:
+                                    entry = to_visit.pop()
+                                    visited |= set([entry])
+                                    d[entry][0] = not d[entry][0]
+                                    for item in d[entry][1]:
+                                        if item not in visited:
+                                            to_visit.append(item)
+
+                        elif tup[0] in d:
+                            d[tup[0]][1] |= set([tup[1]])
+                            d[tup[1]] = [not d[tup[0]][0], set([tup[0]])]
+                        elif tup[1] in d:
+                            d[tup[1]][1] |= set([tup[0]])
+                            d[tup[0]] = [not d[tup[1]][0], set([tup[1]])]
+                        else:
+                            d[tup][0] = [True, set([tup[1]])]
+                            d[tup][1] = [False, set([tup[0]])]
+                     
+
                     #print((row1,col1), (row2,col2))
 
                     # Use row1 as the pivot row and swap the col1 and col2 in
@@ -653,38 +741,31 @@ def get_alias_sets(batch_dict_list):
                     #print("BEFORE")
                     #print(arg_array[:,[col1,col2]])
 
-                    for row in np.arange(0, arg_array.shape[0]):
-                        # Any value in col1 not equal to temporary
-                        # Needs to be swapped with col2. This 
-                        # (hopefully) ensures any previously
-                        # aligned temporaries stay together.
+                    for row in np.arange(1, arg_array.shape[0]):
+                        
+                        if arg_array[row, col2] in arg_array[:row,col1] and arg_array[row,col1] in arg_array[:row,col2]:
+                            
 
-                        # Something is still broken with this formulation. They still
-                        # Fall out of alignment. Maybe some kind of bin-filling algorithm
-                        # would work.
+                        elif arg_array[row, col2] in arg_array[:row,col1] or arg_array[row,col1] in arg_array[:row,col2]:
 
-                        #if row != row1 and arg_array[row1,col1] == arg_array[row,col2]:
-                        if arg_array[row, col1] != temporary:
                             holder = arg_array[row, col1]
                             arg_array[row,col1] = arg_array[row,col2]              
                             arg_array[row,col2] = holder
+                            #if arg_array[row,col1] is not None:
+                            #    assert arg_array[row,col1] != arg_array[row,col2]
 
-
-                #print("AFTER")
-                """
-                # Check that nothing already aligned came out of alignment
-                subarray = arg_array[:,[col1,col2]]
-                for entry in subarray.flatten():
-                    if entry is not None:
-                        print(entry)
-                        indices = np.argwhere(subarray == entry)
-                        if entry in moved:
-                            assert indices.shape[0] > 1
-                            print(indices)
-                            print(subarray)
-                            assert np.all(indices[:,1] == indices[0,1])
-                """
-    
+                    #print("AFTER")
+                    # Check that nothing already aligned came out of alignment
+                    subarray = arg_array[:,[col1,col2]]
+                    for entry in subarray.flatten():
+                        if entry is not None:
+                            print(entry)
+                            indices = np.argwhere(subarray == entry)
+                            if entry in moved:
+                                assert indices.shape[0] > 1
+                                print(indices)
+                                print(subarray)
+                                assert np.all(indices[:,1] == indices[0,1])
         
 
                 #arg_array[selected_rows,col1][:] = arg_array[selected_rows,col2][:]
@@ -705,7 +786,6 @@ def get_alias_sets(batch_dict_list):
                 #assert arg_array[row1, col1] != arg_array[row2, col2]
                 
                 #exit()
-    #"""
     # Check that everything is properly aligned.
     for entry in arg_array.flatten():
         if entry is not None:
@@ -713,9 +793,8 @@ def get_alias_sets(batch_dict_list):
             if not np.all(indices[:,1] == indices[0,1]):
                 print(entry, indices)
             assert np.all(indices[:,1] == indices[0,1])
-    #"""
 
-
+        """
         #flat_arg_array = arg_array.flatten()
         #nonzero_entries = flat_arg_array[np.flatnonzero(flat_arg_array)]
         #unique_entries = np.unique(nonzero_entries)
@@ -730,8 +809,8 @@ def get_alias_sets(batch_dict_list):
         #        row_set = set(arg_array[row,:].flatten())
         #        assert col_set & row_set == set([arg_array[row,col]])
 
-        for col in range(arg_array.shape[1]):
-            alias_sets.append(set(arg_array[:,col]) - set([None]))
+        for col in range(aligned_args.shape[1]):
+            alias_sets.append(set(aligned_args[:,col]) - set([None]))
     
     return alias_sets
 

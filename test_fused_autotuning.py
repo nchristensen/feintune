@@ -363,7 +363,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
                         device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
     else:
         print(sk)
-        raise(ValueError(f"Unhandled einsum type: {est}"))
+        #raise(ValueError(f"Unhandled einsum type: {est}"))
 
     #return list(trans_list_list[0])
 
@@ -891,10 +891,15 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                     out_axes = total_axes - red_axes
                     
                     print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
-
-                    if not indirection and red_axes == 3 and non_red_axes == 2 and einsum_count <= np.inf:
-                        autotune_standalone_subkernel(sk, queue, program_id=pid, max_flop_rate=clpeak_flop_rate,
-                                device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
+                    
+                    handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
+                    if not indirection and (non_red_axes, red_axes,) in handled_pairs:# and red_axes == 3 and non_red_axes == 2 and einsum_count <= np.inf:
+                        # Add indirection as a parameter?
+                        autotune_standalone_subkernel(sk, queue, program_id=pid,
+                                                      max_flop_rate=clpeak_flop_rate,
+                                                      device_latency=device_latency,
+                                                      device_memory_bandwidth=device_memory_bandwidth,
+                                                      save_path=save_path)
 
 
 def test_default_transforms(sk_list, save_path=None):
