@@ -910,10 +910,9 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     
     print(trans_list)
 
-
-    if knl_base.default_entrypoint.name == "unfiltered_rhs_5_26":
-        print(knl_base)
-        exit()
+    #if knl_base.default_entrypoint.name == "unfiltered_rhs_5_26":
+    #    print(knl_base)
+    #    exit()
 
     from __init__ import get_einsums
     neinsums = len(get_einsums(knl_base))
@@ -941,10 +940,16 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             transformed = False
             knl = knl_base
 
-    if run_single_batch:
+    print("PRINTING KNL")
+    print(knl)
+    print("PRINTING SUBKNL")
+    print(sb_knl)
+
+    if run_single_batch and sb_knl is not None:
         knl = sb_knl
 
     local_sizes = set()
+    # Incorrect if the axis is split only once
     for trans in trans_list:
         if trans[0] == "split_iname" and "inner" in trans[1][0]:
             local_sizes |= {trans[1][1]}

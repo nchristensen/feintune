@@ -28,10 +28,6 @@ from run_tests import run_single_param_set_v2
 from run_tests import generic_test
 
 
-class IsDOFArray(Tag):
-    pass
-
-
 # Get the barriers to divide computation into phases
 def get_barriers(tunit):
     barriers = [None]
@@ -70,8 +66,7 @@ def get_phases(tunit, barriers):
             if within_inames <= inames_set:
                 phases[dbarrier]["domains"].append(domain)
 
-        print(len(phases[dbarrier]["domains"]))
-    #exit()
+        #print(len(phases[dbarrier]["domains"]))
 
     return phases
 
@@ -80,7 +75,6 @@ def strip_unused_dependencies(instructions):
     phase_instruction_ids = [instruction.id for instruction in instructions]
 
     new_instructions = []
-    #print(phase_instruction_ids)
     barrier_dep_count = {}
 
     # Collect the barrier instructions
@@ -96,7 +90,6 @@ def strip_unused_dependencies(instructions):
             if dependency in barrier_dep_count:
                 barrier_dep_count[dependency] += 1
 
-        #print(new_dependencies, instruction.depends_on)
         new_instruction = instruction.copy()
         new_instruction.depends_on = frozenset(new_dependencies)
         new_instructions.append(new_instruction)
@@ -108,6 +101,39 @@ def strip_unused_dependencies(instructions):
             new_new_instructions.append(instruction)
 
     return new_new_instructions
+
+def assemble_transformed_macro_kernel(macrokernel, subkernels):
+    # Get the barrier instructions
+    barriers = [instr for instr in macrokernel.default_entrypoint.instructions if isinstance(instruction, lp.BarrierInstruction)]
+
+    assert len(subkernels) - 1 == len(barriers)
+    new_instructions = subkernels[0].instructions
+    for barrier, subkernel in zip(barriers, subkernels[1:]):
+        new_instructions.append(barrier)
+        for sk_instruction in subkernel.default_entrypoint.instructions:
+            sk_instruction.depends_on |= frozenset([barrier.id])
+            new_instructions.append(barrier)
+
+    new_macrokernel = macrokernel.default_entrypoint.copy(instructions=new_instructions)
+    return macrokernel.with_kernel(new_macrokernel)
+
+# FIXME: Needs to look at the csv file instead of the hjson file
+# FIXME: Just return a list of transform dictionaries.
+def transform_macrokernel(tunit, args, save_path):
+    
+    subkernels = get_subkernels(tunit, args)
+    transform_dict = {"transformations": []}
+    for sk in subkernels:
+        indirection = len(get_indirection_arrays(sk)) > 0
+        pid = unique_program_id(sk)
+        hjson_file_str = save_path + "/" + pid + ".hjson"
+        #if exists 
+        #    hjson = load_hjson(hjson_file_str)
+        #else:
+
+        transform_dict["transformations"].extend(hjson["transformations"])
+    
+    return transform_dict
 
 
 # Create a subkernel with the domains and instructions of each cumulative phase
@@ -362,7 +388,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
                         max_flop_rate=max_flop_rate, device_latency=device_latency,
                         device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
     else:
-        print(sk)
+        print("Not tuning", sk.name)
         #raise(ValueError(f"Unhandled einsum type: {est}"))
 
     #return list(trans_list_list[0])
@@ -393,10 +419,10 @@ def autotune_parts(parts, queue):
         if len(einsum_types) > 1:
             raise(ValueError("Cannot currently handle multiple einsum types in same subkernel"))
 
-        for instr in sk.default_entrypoint.instructions:
-            if isinstance(instr, lp.Assignment):
-                print(instr.dependency_names())
-                #print(instr.assignee, type(instr.assignee))
+        #for instr in sk.default_entrypoint.instructions:
+        #    if isinstance(instr, lp.Assignment):
+        #        print(instr.dependency_names())
+        #        #print(instr.assignee, type(instr.assignee))
 
         print("Einsum types", einsum_types)
         est = einsum_types[0]
@@ -457,39 +483,6 @@ def autotune_parts(parts, queue):
     return transformations
 
 def get_subkernels(tunit, args):
-
-    #file_path = "./pickled_programs/03dccf17ebb345c3.pickle"
-    #file_path = "./pickled_programs/03dcff6d7c9ed451.pickle"
-    #f = open(file_path, "rb")
-    #tunit, args = pickle.load(f)
-    #f.close()
-
-    #print(tunit)
-    #print(args)
-
-    ### Apply tags
-
-    # Just slap the tag on the arrays for now. Will eventually need to figure out how to propagate the tags
-    """
-    new_args = []
-    for entry in tunit.default_entrypoint.args:
-        if entry.shape == (1348732, 15):
-            entry = entry.tagged(IsDOFArray())
-        new_args.append(entry)
-
-    # Cheat for now, will eventually need to figure out how to propagate this from array arguments.
-    # Maybe this can be done in the DAG before generation though
-    new_temps = {}
-    for name, val in tunit.default_entrypoint.temporary_variables.items():
-        if val.shape == (1348732, 15):
-            val = val.tagged(IsDOFArray())
-        print(val)
-        new_temps[name] = val
-
-    tunit = tunit.with_kernel(tunit.default_entrypoint.copy(args=new_args, temporary_variables=new_temps))
-    """
-
-    ### End tag application
 
     barriers = get_barriers(tunit)
     if len(barriers) > 1:
@@ -830,6 +823,7 @@ def get_device_roofline_data(queue):
 
     return device_latency, device_memory_bandwidth, clpeak_flop_rate
 
+
 def autotune_standalone_subkernels(sk_list, save_path=None):
     platforms = cl.get_platforms()
     cl_ctx = cl.Context(
@@ -876,7 +870,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
             else:
                 print(f"A TUNE PROFILE EXISTS NOT: {hjson_file}")
 
-            if True:
+            #if True:
                 einsum_counts = list(get_einsum_counts(sk).items())
                 indirection = len(get_indirection_arrays(sk)) > 0
                 if len(einsum_counts) > 0:
@@ -900,6 +894,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                                                       device_latency=device_latency,
                                                       device_memory_bandwidth=device_memory_bandwidth,
                                                       save_path=save_path)
+
 
 
 def test_default_transforms(sk_list, save_path=None):
@@ -1038,19 +1033,7 @@ def collect_subkernels(tunit_dicts):
 
     return out_list, pid_counts
 
-# FIXME: Needs to look at the csv file instead of the hjson file
-def assemble_kernel_transformations(tunit, args, save_path):
-    
-    subkernels = get_subkernels(tunit, args)
-    transform_dict = {"transformations": []}
-    for sk in subkernels:
-        indirection = len(get_indirection_arrays(sk)) > 0
-        pid = unique_program_id(sk)
-        hjson_file_str = save_path + "/" + pid + ".hjson"
-        hjson = load_hjson(hjson_file_str) 
-        transform_dict["transformations"].extend(hjson["transformations"])
-    
-    return transform_dict
+
 
 
 def main(arg):
@@ -1058,7 +1041,7 @@ def main(arg):
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
     directories = [#"./pickled_programs_y3_prediction_order_1_eager",
-                    "./pickled_programs_y3_prediction_order_1_lazy",
+                    "./pickled_programs_y3_prediction_order_2_lazy",
                     #"./pickled_programs_wave",
                     #"./pickled_programs_prediction_order_1",
                     #"./pickled_programs_y3_prediction_order_1",

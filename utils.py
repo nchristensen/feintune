@@ -43,10 +43,10 @@ def unique_program_id(tunit, attempt_normalization=True):
             # if it has a non-reduction RHS or if it has indirection
             canonical_einsum = f.normalize_einsum(f.match_einsum(tunit))
             key = kb(canonical_einsum)
-            print("Successfully normalized einsum")
-            print(canonical_einsum)
+            #print("Successfully normalized einsum")
+            #print(canonical_einsum)
         except Exception:
-            print("Failed to normalize tunit, using non-normalized program_id.")
+            #print("Failed to normalize tunit, using non-normalized program_id.")
             key = kb(tunit.default_entrypoint.copy(name="loopy_kernel"))
     else:
         key = kb(tunit.default_entrypoint.copy(name="loopy_kernel"))

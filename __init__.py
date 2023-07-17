@@ -1836,14 +1836,17 @@ def apply_transformation_list(tunit, transformations):
             #tunit = func(*args, **kwargs)
         # Assumes all prefetches are together in the list of transformations
         elif t[0] == "add_prefetch":
+            # TODO Allow batching without prefetching.
             if prefetched == False:
                 prefetched=True
                 tunit, sb_tunit = func(tunit, add_prefetches, batch_size=batch_size, profile=False)
-                # Assumes add_prefetch happens last
-                tunit = lp.add_inames_for_unused_hw_axes(tunit)
-                sb_tunit = lp.add_inames_for_unused_hw_axes(sb_tunit)
         else:
             tunit = func(*args, **kwargs)
+
+    # Assumes add_prefetch happens last
+    tunit = lp.add_inames_for_unused_hw_axes(tunit)
+    if sb_tunit is not None:
+        sb_tunit = lp.add_inames_for_unused_hw_axes(sb_tunit)
 
     end = time.time()
 
