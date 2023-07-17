@@ -940,25 +940,31 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             transformed = False
             knl = knl_base
 
-    print("PRINTING KNL")
-    print(knl)
-    print("PRINTING SUBKNL")
-    print(sb_knl)
-
     if run_single_batch and sb_knl is not None:
         knl = sb_knl
 
-    local_sizes = set()
-    # Incorrect if the axis is split only once
-    for trans in trans_list:
-        if trans[0] == "split_iname" and "inner" in trans[1][0]:
-            local_sizes |= {trans[1][1]}
-        elif trans[0] == "batch_einsums":
-            batch_size = trans[1][0]
-    print(local_sizes)
-    assert len(local_sizes) <= 2
+    #local_sizes = set()
 
-    workitems = np.product(list(local_sizes))
+    for trans in trans_list:
+        if trans[0] == "batch_einsums":
+            batch_size = trans[1][0]
+        #elif trans[0] == "split_iname" and "inner" in trans[1][0]:
+            # Incorrect if the axis is split only once
+            # Incorrect if two local axes have the same size
+            #local_sizes |= {trans[1][1]}
+
+    insn_ids = tuple([insn.id for insn in knl.default_entrypoint.instructions])
+    group_sizes, local_sizes = knl.default_entrypoint.get_grid_sizes_for_insn_ids(insn_ids, None)
+    workitems = np.product([entry.max_val() for entry in local_sizes])
+
+    #print(local_sizes)
+    #print(local_sizes2)
+    #for entry in local_sizes2:
+    #    print(str(entry.max_val()))
+    #exit()
+    #assert len(local_sizes) <= 2
+
+    #workitems = np.product(list(local_sizes))
 
     # AMD does something weird with max_work_group_size so using
     # max_work_item_sizes[0] here instead

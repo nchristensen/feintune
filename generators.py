@@ -588,6 +588,7 @@ def get_trans_list(knl, params):
     ## Figure out what the inames are called
 
     # Hacky, is there a better way to get this?
+    # Maybe use the loop tags?
     within_inames, r_inames = list(get_einsum_types(knl))[0]
     j = r = f = e = i = x = None
 
@@ -597,17 +598,17 @@ def get_trans_list(knl, params):
         for iname in r_inames:
             if "idof" in iname:
                 j = iname
-            #elif "idim" in iname:
-            #    r = iname
-            #elif "iface" in iname:
-            #    f = iname
+            elif "idim_ensm" in iname:
+                if "_0" in iname:
+                    r = iname
+                else:
+                    # x and r might be the other way around.
+                    x = iname
         for iname in within_inames:
             if "iel" in iname:
                 e = iname
             elif "idof" in iname:
                 i = iname
-            #elif "idim" in iname:
-            #    x = iname
     else:
         for iname in r_inames:
             if "idof" in iname:
@@ -625,6 +626,8 @@ def get_trans_list(knl, params):
                 x = iname
 
     # The name strings aren't standard. Try to figure them out.
+    # If this could be made more robust it could be the primary method of
+    # determining the inames
     if (e is None or i is None or j is None) and len(within_inames) == 2 and len(r_inames) == 1:
         from meshmode.transform_metadata import ConcurrentElementInameTag, ConcurrentDOFInameTag
         j = list(r_inames)[0]
@@ -704,15 +707,28 @@ def get_trans_list(knl, params):
                             elif f"{i}, {j}" in instr_substr:
                                 op_arrays.append(name)
                                 n_out, n_in = arg.shape
+                            elif f"{f}, {e}" in instr_substr:
+                                nf, n_elem = arg.shape
                             else:
+                                print(instr_str)
                                 raise RuntimeError("Could not parse array indices")
                         elif len(arg.shape) == 3:
-                            if f", {r}, {e}" in instr_substr:
-                                _, nr, n_elem = arg.shape
+                            if f"{x}, {r}, {e}" in instr_substr:
+                                # Jacobian array. Not certain if
+                                # this is worth prefetching. The cache
+                                # may be able to handle it well enough.
+                                nx, nr, n_elem = arg.shape
                             elif f"{f}, {e}, {j}" in instr_substr:
                                 face_dof_arrays.append(name)
-                                nf, n_elem, n_in = args.shape
+                                nf, n_elem, n_in = arg.shape
+                            elif f"{r}, {i}, {j}" in instr_substr:
+                                op_arrays.append(name)
+                                nr, n_out, n_in = arg.shape
+                            elif f"{i}, {f}, {j}" in instr_substr:
+                                op_arrays.append(name)
+                                n_out, nf, n_in = arg.shape
                             else:
+                                print(instr_str)
                                 raise RuntimeError("Could not parse array indices")
                         break
 

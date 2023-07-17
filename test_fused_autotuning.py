@@ -102,7 +102,7 @@ def strip_unused_dependencies(instructions):
 
     return new_new_instructions
 
-def assemble_transformed_macro_kernel(macrokernel, subkernels):
+def assemble_transformed_macrokernel(macrokernel, subkernels):
     # Get the barrier instructions
     barriers = [instr for instr in macrokernel.default_entrypoint.instructions if isinstance(instruction, lp.BarrierInstruction)]
 
@@ -123,18 +123,21 @@ def transform_macrokernel(tunit, args, save_path):
     
     subkernels = get_subkernels(tunit, args)
     transform_dict = {"transformations": []}
+    transformed_subkernels = []
     for sk in subkernels:
         indirection = len(get_indirection_arrays(sk)) > 0
         pid = unique_program_id(sk)
         hjson_file_str = save_path + "/" + pid + ".hjson"
-        #if exists 
-        #    hjson = load_hjson(hjson_file_str)
-        #else:
+        #if not exists 
+            # Tune the subkernel and then load?
 
-        transform_dict["transformations"].extend(hjson["transformations"])
-    
-    return transform_dict
+        hjson = load_hjson(hjson_file_str)
+        # Transform
+        # transformed_subkernels.append(transformed_subkernel)
 
+
+    transformed_tunit = assemble_transformed_macrokernel(tunit, transformed_subkernels)
+    return transformed_tunit
 
 # Create a subkernel with the domains and instructions of each cumulative phase
 def generate_cumulative_subkernels(tunit, barriers, phases):
