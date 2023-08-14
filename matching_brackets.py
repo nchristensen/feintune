@@ -10,3 +10,12 @@ def matching_brackets(string, idx):
             if i >= len(opening) or j < opening[i]:
                 return j + idx + 1
     return -1
+
+
+def matching_brackets_dict(string):
+    op= []
+    dc = {
+        op.pop() if op else -1:i for i,c in enumerate(string) if
+        (c=='[' and op.append(i) and False) or (c==']' and op)
+    }
+    return False if dc.get(-1) or op else dc

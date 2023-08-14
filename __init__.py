@@ -1,8 +1,9 @@
 import numpy as np
-from pytools import memoize_in
+from pytools import memoize_in, memoize
 from meshmode.array_context import EinsumTag
 from decouple_domain import decouple_domain
-from utils import get_domain_list
+from utils import get_domain_list, get_iname_limits
+from frozendict import frozendict
 #import pyopencl as cl
 #import pyopencl.array
 #import pyopencl.clrandom
@@ -425,6 +426,10 @@ def get_einsums(knl):
     #exit()
     return einsums
 
+
+### Can probably delete everything above this line ###
+
+#@memoize
 def get_einsum_counts(knl):
     from collections import Counter
     counter = Counter(get_einsums(knl))
@@ -432,6 +437,7 @@ def get_einsum_counts(knl):
 
 
 # Obtain non-reduction and reduction inames 
+#@memoize
 def get_einsum_types(knl):
     return frozenset(get_einsums(knl))
 
@@ -552,6 +558,7 @@ def get_batch_temporaries_by_size(tunit, batches):
 
 # TODO: Make data type an argument and only alias for a single data type at a time.
 # For now, assume all temporaries have the same data type.
+@memoize
 def get_batch_temporaries_by_size(tunit, nbatches, address_space):
 
     # Assumes all of the temporaries are in local or private memory
@@ -573,31 +580,40 @@ def get_batch_temporaries_by_size(tunit, nbatches, address_space):
                         else:
                             batch_dict[size] |= set([dep])
                            
-        batch_dict_list.append(batch_dict)
+        batch_dict_list.append(frozendict(batch_dict))
 
-    return batch_dict_list
+    return tuple(batch_dict_list)
 
 
+#@memoize #Something isn't hashable
 def get_alias_sets(batch_dict_list):
-    from itertools import combinations
+    #from itertools import combinations
 
-    #print(batch_dic
-
-    sizes = set()
-    for batch_dict in batch_dict_list:
-        sizes |= set(batch_dict.keys())
-    
-    alias_sets = []
-    for size in sizes:
+        arg_to_size = {}
         arg_lists = []
-        arg_sets = []
-        for i, batch_dict in enumerate(batch_dict_list):
-            if size in batch_dict:
-                arg_lists.append(sorted(batch_dict[size]))
-                arg_sets.append((i,set(batch_dict[size]),))
-            else:
-                arg_lists.append([])
-                arg_sets.append((i,set(),))
+        for batch_dict in batch_dict_list:
+            new_list = []
+            for size, arg_list in batch_dict.items():
+                new_list += arg_list
+                for entry in arg_list:
+                    arg_to_size[entry] = size
+            arg_lists.append(new_list)
+
+        alias_sets = []
+
+        #sizes = set()
+        #for batch_dict in batch_dict_list:
+        #    sizes |= set(batch_dict.keys())
+        
+
+
+    #for size in sorted(sizes, reverse=True):
+    #    arg_lists = []
+    #    for i, batch_dict in enumerate(batch_dict_list):
+    #        if size in batch_dict:
+    #            arg_lists.append(sorted(batch_dict[size]))
+    #        else:
+    #            arg_lists.append([])
 
 
         #max_len = 0
@@ -609,9 +625,10 @@ def get_alias_sets(batch_dict_list):
         for arg_list in arg_lists:
             arg_count += len(set(arg_list))
             all_arg_list |= set(arg_list)
-        all_arg_list = sorted(all_arg_list)
+        # Arange the args to they go from large to small.
+        all_arg_list = sorted(all_arg_list, reverse=True, key=lambda arg: arg_to_size[arg])
 
-        aligned_args = np.empty((len(arg_lists), len(all_arg_list)), dtype=object)
+        aligned_args = np.empty((len(batch_dict_list), len(all_arg_list)), dtype=object)
         aligned_args[:,:] = None
 
         for row, arg_list in enumerate(arg_lists):
@@ -621,7 +638,7 @@ def get_alias_sets(batch_dict_list):
 
         # Condense the arguments into fewer columns.
         # This is a fairly greedy approach. There are
-        # Likely more optimal approaches.
+        # Likely more optimal approaches. Seems to be a bin filling problem.
         col_ind_array = np.arange(0, aligned_args.shape[0])
         for col1 in range(0, len(all_arg_list)):
             for col2 in range(len(all_arg_list)-1, col1, -1):
@@ -809,10 +826,11 @@ def get_alias_sets(batch_dict_list):
         #        row_set = set(arg_array[row,:].flatten())
         #        assert col_set & row_set == set([arg_array[row,col]])
 
+        # Should start with the largest sets 
         for col in range(aligned_args.shape[1]):
-            alias_sets.append(set(aligned_args[:,col]) - set([None]))
+            alias_sets.append(frozenset(aligned_args[:,col]) - frozenset([None]))
     
-    return alias_sets
+        return tuple(alias_sets)
 
 
 from qprofile import qprofile, qinstrument
@@ -1405,6 +1423,7 @@ def prefetch_and_project(tunit, argname, prefetch_str, **kwargs):
 
 # Assumes there are no internal dependencies between einsums
 # Assumes all instructions are einsums
+@memoize
 def decompose_batched_einsum_kernel(tunit):
     domain_list = get_domain_list(tunit)
 
@@ -1414,33 +1433,28 @@ def decompose_batched_einsum_kernel(tunit):
         for tag in iname_obj.tags:
             iname_to_tag.append((iname, tag,))
 
-    print("Incoming tunit")
-    print(tunit)
+    #print("Incoming tunit")
+    #print(tunit)
     #exit()
 
     subkernels = []
     for i, insn in enumerate(tunit.default_entrypoint.instructions):
-        #print(insn)
-        #assert len(insn.tags_of_type(EinsumTag)) > 0
 
         # Get domain(s)
         within_inames = insn.within_inames
         domains = [domain for inames_set, domain in domain_list if within_inames <= inames_set]
-        if False:#len(tunit.default_entrypoint.domains) > 1:
-            from islpy import align_two
-            domains = tunit.default_entrypoint.domains
-            new_domains = domains[0]
-            for i in range(1,len(domains)):
-                b1, b2 = align_two(new_domains, domains[i])
-                new_domains = b1 | b2
-            #print(domains)
-            #print(new_domains)
-            #exit()
-            domains = [new_domains]
+        #if False:#len(tunit.default_entrypoint.domains) > 1:
+        #    from islpy import align_two
+        #    domains = tunit.default_entrypoint.domains
+        #    new_domains = domains[0]
+        #    for i in range(1,len(domains)):
+        #        b1, b2 = align_two(new_domains, domains[i])
+        #        new_domains = b1 | b2
+        #    domains = [new_domains]
 
         active_vars = insn.dependency_names()
         new_args = [entry for entry in tunit.default_entrypoint.args if entry.name in active_vars]
-        temp_args = [entry for entry in tunit.default_entrypoint.temporary_variables.keys() if entry.name in active_vars]
+        temp_args = [entry for entry in tunit.default_entrypoint.temporary_variables.values() if entry.name in active_vars]
 
         new_temp_args = []
         for temp in temp_args:
@@ -1474,7 +1488,7 @@ def decompose_batched_einsum_kernel(tunit):
         #print(code)
     #exit()
 
-    return subkernels
+    return tuple(subkernels)
         
 
 def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
@@ -1517,8 +1531,6 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
     ## Probably should prioritize reducing the local memory used if possible, then attempt to reduce
     ## the number of prefetches.
     """
-
-    #print(f"ELIMINATABLE PREFETCHES: {nintersections}")
 
     # Assemble the sub-batches
     print("ASSEMBLING SUB-BATCHES")
@@ -1731,28 +1743,73 @@ def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
     output_subkernels = []
 
     for subkernel in subkernels:
-        print(subkernel)
         kernel_args = {kernel_arg.name for kernel_arg in subkernel.default_entrypoint.args}
-        prefetch_names = {prefetch[1][0] for prefetch in prefetches}
-        
+        subknl_prefetches = [prefetch for prefetch in prefetches if prefetch[1][0] in kernel_args]
+
         # Pointless to prefetch if a single einsum use a huge number of DOF arrays. Very little
-        # data would be in local memroy and it takes forever to generate the kernel because the loop domains
-        # become so large. Arbitrarily setting the cutoff to 10. Unfortunately, when this happens
-        # this makes the batches
-        # inhomogeneous and so performance can't be predicted from individual batches in this case.
-        cutoff = 10
-        prefetch_set = kernel_args & prefetch_names
-        if len(prefetch_set) <= cutoff:
-            for prefetch in prefetches:
-                print(prefetch)
-                arg = prefetch[1][0]
-                # Should this be restricted to read args only? How should deeply nested if-statements be handled?
-                #kernel_args = [kernel_arg.name for kernel_arg in subkernel.default_entrypoint.args]
-                if arg in kernel_args:
-                    subkernel = lp.add_prefetch(subkernel, *prefetch[1], **dict(prefetch[2]))
+        # data would be in local memory and it takes forever to generate the kernel because the loop domains
+        # become so large. Arbitrarily setting the cutoff to 10.
+        cutoff = np.inf#10#np.inf
+
+        #orig_inames = set(subkernel.default_entrypoint.inames.keys())
+        prefetch_iname_dict = {}
+        
+        #if len(subknl_prefetches) > 1:
+        #    print(subknl_prefetches)
+        #    print(prefetches)
+        #    print("EINSUM has more than one prefetch")
+        #    exit()
+
+        if len(subknl_prefetches) <= cutoff:
+            # Should this be restricted to read args only? How should deeply nested if-statements be handled?
+            #kernel_args = [kernel_arg.name for kernel_arg in subkernel.default_entrypoint.args]
+            for prefetch in subknl_prefetches:
+                #print(prefetch)
+                before_inames = set(subkernel.default_entrypoint.inames.keys())
+                subkernel = lp.add_prefetch(subkernel, *prefetch[1], **dict(prefetch[2]))
+                after_inames = set(subkernel.default_entrypoint.inames.keys())
+                added_inames = sorted(after_inames - before_inames)
+
+                iname_limits = get_iname_limits(subkernel)
+                added_iname_limits = tuple([iname_limits[added_iname] for added_iname in added_inames])
+
+                #new_inames = (set( 
+                # I think I'm trying to reduce the number of loop domains here by combining prefetch loops.
+                prefetch_str = prefetch[1][1]
+                key = (prefetch_str, added_iname_limits,)
+
+                #subkernel = lp.rename_iname(subkernel, remove, keep, existing_ok=True, preserve_tags=False)
+                
+                #"""
+                # Doesn't work. Comparing by prefetch_str is not sufficient. Need to look at domain bounds as well.
+                print(key)
+                if key in prefetch_iname_dict:
+                    existing_fetch_inames = prefetch_iname_dict[key]
+                    from utils import get_domain_list
+                    dl = dict(get_domain_list(subkernel))
+                    #print("KEYS", dl.keys())
+                    for entry in dl.keys():
+                        print(entry)
+                    #print("EXISTING", frozenset(existing_fetch_inames))
+                    #print("ADDED", frozenset(added_inames))
+                    #print("DOMAINS", subkernel.default_entrypoint.domains)
+                    #assert frozenset(existing_fetch_inames) in dl
+                    #assert frozenset(added_inames) in dl
+                    #new_inames = (set(subkernel.default_entrypoint.inames.keys()) - orig_inames) - existing_fetch_inames
+                    #print(subkernel)
+                    for remove, keep in zip(sorted(added_inames,reverse=True), sorted(existing_fetch_inames,reverse=True)):
+                        print("RENAMING FETCH INAMES:", remove, "->", keep)
+                        subkernel = lp.rename_iname(subkernel, remove, keep, existing_ok=True,
+                                                    preserve_tags=False, raise_on_domain_mismatch=False)
+                    #exit()
+                else:
+                    #prefetch_inames = (set(subkernel.default_entrypoint.inames.keys()) - orig_inames) - set().union(*(prefetch_iname_dict.values()))
+                    prefetch_iname_dict[key] = added_inames
+                    print("ADDING KEY TO DICTIONARY")
+                    print(prefetch_iname_dict)
+                #"""
         else:
             print(f"Prefetching on einsum disabled. Einsum uses more than {cutoff} prefetchable arguments.")
-            #exit()
 
         output_subkernels.append(subkernel)
         """
@@ -1835,9 +1892,9 @@ def apply_transformation_list(tunit, transformations):
             #kwargs["profile"] = False
             #tunit = func(*args, **kwargs)
         # Assumes all prefetches are together in the list of transformations
-        elif t[0] == "add_prefetch":
+        elif t[0] == "add_prefetch" or t[0] == "batch_einsums":
             # TODO Allow batching without prefetching.
-            if prefetched == False:
+            if prefetched == False: # This needs to be a separate if statement to prevent falling into the final else
                 prefetched=True
                 tunit, sb_tunit = func(tunit, add_prefetches, batch_size=batch_size, profile=False)
         else:

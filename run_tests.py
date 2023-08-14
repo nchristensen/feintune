@@ -744,7 +744,7 @@ def get_bus_id_from_queue(queue):
 
 
 
-def run_subprocess_with_timeout(queue, knl, test_fn, timeout=None):
+def run_subprocess_with_timeout(queue, knl, test_fn, timeout=None, error_return_time=max_double):
     import os
     import uuid
     from pickle import dump, dumps
@@ -782,7 +782,7 @@ def run_subprocess_with_timeout(queue, knl, test_fn, timeout=None):
         proc.kill()
         #with proc:
         #    proc.kill()
-        retval = max_double, None, 0
+        retval = error_return_time, None, 0
 
     #out, err = proc.communicate()        
 
@@ -803,7 +803,7 @@ def run_subprocess_with_timeout(queue, knl, test_fn, timeout=None):
         print(e.output)
         #os.remove(filename) 
         proc.kill()
-        retval = max_double, None, 0
+        retval = error_return_time, None, 0
 
         exit()
 
@@ -903,7 +903,8 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=None, method="
 
     return avg_time, measured_latency, wall_clock_time
 
-def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, method=None, run_single_batch=True):#, method="thread"):
+def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, method=None, run_single_batch=True, error_return_time=max_double):#, method="thread"):
+
     # Timeout won't prevent applying transformations from hanging
 
     # Should check how well single batch predicted times correllate with actual times
@@ -940,23 +941,24 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             transformed = False
             knl = knl_base
 
-    if run_single_batch and sb_knl is not None:
-        knl = sb_knl
-
     #local_sizes = set()
-
     for trans in trans_list:
         if trans[0] == "batch_einsums":
             batch_size = trans[1][0]
+        #elif trans[0] = "add_prefetch":
+            
         #elif trans[0] == "split_iname" and "inner" in trans[1][0]:
             # Incorrect if the axis is split only once
             # Incorrect if two local axes have the same size
             #local_sizes |= {trans[1][1]}
 
+    #workitems = np.product(list(local_sizes))
+
     insn_ids = tuple([insn.id for insn in knl.default_entrypoint.instructions])
     group_sizes, local_sizes = knl.default_entrypoint.get_grid_sizes_for_insn_ids(insn_ids, None)
     workitems = np.product([entry.max_val() for entry in local_sizes])
 
+    print("WORKITEMS:", workitems)
     #print(local_sizes)
     #print(local_sizes2)
     #for entry in local_sizes2:
@@ -964,7 +966,6 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     #exit()
     #assert len(local_sizes) <= 2
 
-    #workitems = np.product(list(local_sizes))
 
     # AMD does something weird with max_work_group_size so using
     # max_work_item_sizes[0] here instead
@@ -972,6 +973,8 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     
     knl = lp.preprocess_kernel(knl)
     temp_dict = {key: val for key, val in knl.default_entrypoint.temporary_variables.items() if val.address_space == lp.AddressSpace.LOCAL or val.address_space == lp.auto}
+    #print(knl)
+    print(temp_dict)
     base_storage_dict = {}
 
     for temp, tarray in temp_dict.items():
@@ -984,15 +987,19 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             else:
                 base_storage_dict[tarray.name] = np.product(tarray.shape)*tarray.dtype.dtype.itemsize
 
-    #print("BASE STORAGE DICT")
-    #print(base_storage_dict)
+    print("BASE STORAGE DICT")
+    print(base_storage_dict)
     local_memory_used = np.sum(list(base_storage_dict.values()))
     local_memory_avail = queue.device.local_mem_size
     print(f"KERNEL USING {local_memory_used} out of {local_memory_avail} bytes of local memory") 
+    #exit()
 
     # Could also look at the amount of cache space used and forbid running those that spill 
 
     print("BEGINNING KERNEL EXECUTION")
+
+    if run_single_batch and sb_knl is not None:
+        knl = sb_knl
 
     measured_latency = None 
     if local_memory_used <= queue.device.local_mem_size and workitems <= max_work_group_size and transformed: # Don't allow complete filling of local memory
@@ -1005,7 +1012,8 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             wall_clock_time = end - start
         elif method == "subprocess":
             print("Executing test with timeout of", timeout, "seconds") 
-            avg_time, measured_latency, wall_clock_time = run_subprocess_with_timeout(queue, knl, test_fn, timeout=timeout)
+            avg_time, measured_latency, wall_clock_time = run_subprocess_with_timeout(queue, knl, test_fn,
+                                                            timeout=timeout, error_return_time=error_return_time)
         elif method == "thread":
             # Concurrent futures with threads should do the same thing
             try:
@@ -1015,12 +1023,12 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
                 wall_clock_time = end - start
             except FunctionTimedOut as e:
                 print("Execution timed out")
-                avg_time, wall_clock_time = max_double, max_double # Don't run and return return an infinite run time
+                avg_time, wall_clock_time = error_return_time, error_return_time # Don't run and return return an infinite run time
         else: # processpool and pebble concurrent processes will break with MPI, use subprocess instead
             avg_time, measured_latency, wall_clock_time = run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=timeout, method=method) 
     else:
         print("Invalid kernel: too much local memory used")
-        avg_time, wall_clock_time = max_double, max_double # Don't run and return return an infinite run time
+        avg_time, wall_clock_time = error_return_time, error_return_time # Don't run and return return an infinite run time
 
 
     if measured_latency is None:
@@ -1038,12 +1046,13 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     bw = bw_dict["observed_bandwidth"]
     flop_rate = flop_rate_dict["observed_flop_rate"]
 
-
     data = {"avg_time": avg_time,
             "avg_time_predicted": avg_time*(neinsums/batch_size) if run_single_batch else avg_time,
             "wall_clock_time": wall_clock_time, 
             "single_batch": run_single_batch, 
-            "neinsums": neinsums}
+            "neinsums": neinsums,
+            "error_return_time": error_return_time,
+            "timeout": timeout}
 
     data.update(bw_dict.items())
     data.update(flop_rate_dict.items())

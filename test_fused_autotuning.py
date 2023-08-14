@@ -1,12 +1,12 @@
+import numpy as np
 import pickle
 import loopy as lp
 from pytools.tag import Tag
 from meshmode.array_context import EinsumTag
-einsum_classes = tuple([EinsumTag])
 import pyopencl as cl
 import os
 from os.path import exists
-from utils import unique_program_id, convert, load_hjson, dump_hjson, get_domain_list
+from utils import unique_program_id, convert, load_hjson, dump_hjson, get_domain_list, get_indirection_arrays
 import hjson
 from generators import createConfigSpace
 from ytopt_autotuning import ytopt_tuning
@@ -104,17 +104,24 @@ def strip_unused_dependencies(instructions):
 
 def assemble_transformed_macrokernel(macrokernel, subkernels):
     # Get the barrier instructions
-    barriers = [instr for instr in macrokernel.default_entrypoint.instructions if isinstance(instruction, lp.BarrierInstruction)]
+    barriers = [instr for instr in macrokernel.default_entrypoint.instructions if isinstance(instruction, lp.BarrierInstruction) and instr.synchronization_kind == "global"]
 
     assert len(subkernels) - 1 == len(barriers)
     new_instructions = subkernels[0].instructions
+    domains = subkernels[0].domains
     for barrier, subkernel in zip(barriers, subkernels[1:]):
+        print(barrier.depends_on)
+        """
         new_instructions.append(barrier)
+        domains = domains + subkernel.domains
         for sk_instruction in subkernel.default_entrypoint.instructions:
             sk_instruction.depends_on |= frozenset([barrier.id])
-            new_instructions.append(barrier)
+            new_instructions.append(sk_instruction)
 
-    new_macrokernel = macrokernel.default_entrypoint.copy(instructions=new_instructions)
+    # Also need to copy the domains and inames
+    new_macrokernel = macrokernel.default_entrypoint.copy(instructions=new_instructions, domains=domains)
+        """
+    exit();
     return macrokernel.with_kernel(new_macrokernel)
 
 # FIXME: Needs to look at the csv file instead of the hjson file
@@ -122,18 +129,17 @@ def assemble_transformed_macrokernel(macrokernel, subkernels):
 def transform_macrokernel(tunit, args, save_path):
     
     subkernels = get_subkernels(tunit, args)
-    transform_dict = {"transformations": []}
     transformed_subkernels = []
     for sk in subkernels:
         indirection = len(get_indirection_arrays(sk)) > 0
         pid = unique_program_id(sk)
         hjson_file_str = save_path + "/" + pid + ".hjson"
         #if not exists 
-            # Tune the subkernel and then load?
-
+            # Tune the subkernel
         hjson = load_hjson(hjson_file_str)
-        # Transform
-        # transformed_subkernels.append(transformed_subkernel)
+        # Transform ...
+
+        transformed_subkernels.append(transformed_subkernel)
 
 
     transformed_tunit = assemble_transformed_macrokernel(tunit, transformed_subkernels)
@@ -539,105 +545,9 @@ def get_subkernels(tunit, args):
     # Maybe have a tag to link otherwise independent inames so autotuner does not try to test them separately
     """
 
-## Kaushik's indirection finder code
-import loopy as lp
-from loopy.symbolic import CombineMapper, DependencyMapper
-from typing import FrozenSet
-import pymbolic.primitives as prim
-import numpy as np
-
-"""
-class IndirectionFinder(CombineMapper):
-    def __init__(self, all_inames: FrozenSet[str]):
-        super().__init__()
-        self.all_inames = all_inames
-
-    def combine(self, values):
-        return any(values)
-
-    def map_subscript(self, expr):
-        return not all(((isinstance(idx, prim.Variable)
-                         and idx.name in self.all_inames)
-                        or np.isscalar(idx))
-                       for idx in expr.index_tuple)
-
-    def map_variable(self, expr):
-        return False
-"""
-
-class MyDepMapper(DependencyMapper):
-    def map_subscript(self, expr, should_record=False):
-
-        super_subscript = super().map_subscript(expr, should_record=True)
-        aggregate = self.rec(expr.aggregate, should_record=True)
-
-        #print(expr, expr.aggregate)
-        #print(super_subscript, aggregate)
-
-        #print(super_subscript, super_subscript - aggregate) #not should_record else frozenset()
-        if not should_record:
-            retval = super_subscript - aggregate #not should_record else frozenset()
-        else:
-            retval = super_subscript
-        #print(retval)
-        return retval
-
-    def map_variable(self, expr, should_record=False):
-        #print("MAP VARIABLE", should_record)
-        return super().map_variable(expr, should_record=should_record) if should_record else frozenset()
-
-    #def map_constant(self, expr, should_record=False):
-        #print("MAP CONSTANT", expr)
-        #return frozenset()
-
-tunit = lp.make_kernel(
-    "{[i, j]: 0<=i,j<10}",
-    """
-    y[map[i], j] = j*sin(x[i, map[2*i]]) {id=foo}
-    """,
-    [lp.GlobalArg("x,y", shape=None),
-     ...],
-    lang_version=(2018, 2))
-
-knl = tunit.default_entrypoint
-dep_mapper = MyDepMapper(include_subscripts=False)
-result = set()
-for insn in knl.instructions:
-    result.update(dep_mapper(insn.expression, should_record=False))
-print("RHS index deps are:", result)
-
-def get_index_deps(tunit):
-    knl = tunit.default_entrypoint
-    dep_mapper = MyDepMapper(include_subscripts=False)
-    result = set()
-    for insn in knl.instructions:
-        if not isinstance(insn, lp.BarrierInstruction):
-            result.update(dep_mapper(insn.expression, should_record=False))
-    #print("RHS index deps are:", result)
-    retval =  frozenset([var.name for var in result]) 
-    return retval
-
-def get_indirection_arrays(tunit):
-    index_deps = get_index_deps(tunit)
-    inames = frozenset(tunit.default_entrypoint.inames.keys())
-    indirection_arrays = index_deps - (index_deps & inames)
-    #print("Indirection arrays:", indirection_arrays)
-    return indirection_arrays  
-
-# Doesn't work
-"""
-def contains_indirection(tunit):
-    knl = tunit.default_entrypoint
-    indirection_finder = IndirectionFinder(knl.all_inames())
-    if any(indirection_finder(insn.expression)
-           for insn in knl.instructions):
-        print("Kernel contains indirection")
-    else:
-        print("Kernel does *NOT* contain indirection")
-"""
 
 def has_internal_einsum_dependencies(tunit):
-    einsum_dict = {instr.id: instr for instr in tunit.default_entrypoint.instructions if any([isinstance(tag, einsum_classes) for tag in instr.tags])}
+    einsum_dict = {instr.id: instr for instr in tunit.default_entrypoint.instructions if any([isinstance(tag, EinsumTag) for tag in instr.tags])}
     instr_dict = {instr.id: instr for instr in tunit.default_entrypoint.instructions}
     for esid, einsum in einsum_dict.items():
         es_deps = set(einsum.depends_on)
@@ -651,7 +561,7 @@ def has_internal_einsum_dependencies(tunit):
     return False 
 
 def print_internal_einsum_dependencies(tunit):
-    einsum_dict = {instr.id: instr for instr in tunit.default_entrypoint.instructions if any([isinstance(tag, einsum_classes) for tag in instr.tags])}
+    einsum_dict = {instr.id: instr for instr in tunit.default_entrypoint.instructions if any([isinstance(tag, EinsumTag) for tag in instr.tags])}
     instr_dict = {instr.id: instr for instr in tunit.default_entrypoint.instructions}
     for esid, einsum in einsum_dict.items():
         deps = []
@@ -828,6 +738,7 @@ def get_device_roofline_data(queue):
 
 
 def autotune_standalone_subkernels(sk_list, save_path=None):
+
     platforms = cl.get_platforms()
     cl_ctx = cl.Context(
         dev_type=cl.device_type.GPU,
@@ -890,7 +801,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                     print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
                     
                     handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
-                    if not indirection and (non_red_axes, red_axes,) in handled_pairs:# and red_axes == 3 and non_red_axes == 2 and einsum_count <= np.inf:
+                    if (non_red_axes, red_axes,) in handled_pairs and einsum_count >= 0:
                         # Add indirection as a parameter?
                         autotune_standalone_subkernel(sk, queue, program_id=pid,
                                                       max_flop_rate=clpeak_flop_rate,
@@ -1011,6 +922,7 @@ def compare_weighted_avg_frac_rooflines(directory, pid_dict):
     print(len(overlapping_files), len(untuned_files), untuned_frac_roofline, tuned_frac_roofline)
 
 
+
 def collect_subkernels(tunit_dicts):
 
     out_list = []
@@ -1035,7 +947,6 @@ def collect_subkernels(tunit_dicts):
                 pid_counts[pid] = 1
 
     return out_list, pid_counts
-
 
 
 

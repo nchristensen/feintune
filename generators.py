@@ -1,12 +1,13 @@
 import numpy as np
 import loopy as lp
-#from frozendict import frozendict
+from frozendict import frozendict
 from meshmode.transform_metadata import FirstAxisIsElementsTag
 from grudge_tags import (IsDOFArray, IsSepVecDOFArray,
     IsOpArray, IsSepVecOpArray, IsFaceDOFArray, IsFaceMassOpArray,
     IsVecDOFArray, IsVecOpArray, IsFourAxisDOFArray)
 from pytools import memoize
 from __init__ import get_einsums
+from utils import get_indirection_arrays
 
 def k_inner_inner_options(start_val=None):
     #options = [8, 16, 4, 32]
@@ -311,6 +312,9 @@ def einsum3to2_kernel_tlist_generator(params, **kwargs):
 
 def createConfigSpace(queue, knl):
     import ConfigSpace as cs
+    from utils import get_indirection_arrays
+
+    prefetch = len(get_indirection_arrays(knl)) == 0
 
     ## Gather some data from the knl and queue to bound the space 
 
@@ -376,6 +380,9 @@ def createConfigSpace(queue, knl):
 
     # Element axis
     a_s = cs.ConfigurationSpace(name="autotuning_space")
+    prefetch_hyp = cs.OrdinalHyperParameter("prefetch", [0,1] if prefetch else [0])
+    a_s.add_hyperparameter(prefetch_hyp)
+
     if True:#n_elem*n_out > 1024:
         kii = cs.OrdinalHyperparameter("kii", k_inner_inner_options())
         iii = cs.OrdinalHyperparameter("iii", i_inner_inner_options(n_out, max_work_group_size=max_work_group_size))
@@ -576,13 +583,28 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
 
 
     # Now create the list of transformations instructions with those parameters
-    trans_list_list = [tuple(get_trans_list(knl,params)) for params in parameter_list]
+
+    # Don't prefetch if there are indirection arrays.
+    # (technically, we only need to avoid to prefetching arrays that are indirectly addressed
+    # but I think there is only one that qualifies at this point.)
+    prefetch = len(get_indirection_arrays(knl)) == 0
+    trans_list_list = []
+    if prefetch == False:
+        print("KERNEL CONTAINS INDIRECTION ARRAYS. Disabling prefetching.")
+        trans_list_list = [tuple(get_trans_list(knl,params, prefetch=False)) for params in parameter_list]
+    # Try with both prefetching and not prefetching. Some of the kernels have a huge number of prefetchable arrays
+    # which is detrimental to performance.
+    else:
+        trans_list_list = [tuple(get_trans_list(knl,params, prefetch=True)) for params in parameter_list]
+        trans_list_list += [tuple(get_trans_list(knl,params, prefetch=False)) for params in parameter_list]
+    #if prefetch:
+    #    trans_list_list.append([tuple(get_trans_list(knl,params, prefetch=True)) for params in parameter_list])
 
     print("Num trans to try: ", len(trans_list_list))
 
     return trans_list_list
 
-def get_trans_list(knl, params):
+def get_trans_list(knl, params, prefetch=True):
     from __init__ import get_einsum_types
 
     ## Figure out what the inames are called
@@ -648,7 +670,7 @@ def get_trans_list(knl, params):
 
     ## Figure out the dimensions and categorize the args
 
-    #@memoize
+    @memoize
     def get_args_and_arrays(knl):
         # Find read dof arrays. These are the ones that will be prefetched
         read_deps = frozenset()
@@ -681,57 +703,82 @@ def get_trans_list(knl, params):
                 break
 
         #"""
-        from matching_brackets import matching_brackets
-        for arg in arg_dict.values():
-            name = arg.name
-            if n_in is not None:
-                break
-            if name in read_deps:
-                for instr in knl.default_entrypoint.instructions:
-                    instr_str = str(instr)
-                    to_match = f"{name}[" # Could be problematic if "f{some_prefix}{name}[" is a read_dep
-                    index = instr_str.find(to_match) #Assume arg only shows up once in an instruction
-                    if index >= 0:
-                        ob = index + len(to_match) - 1
-                        assert instr_str[ob:].find(to_match) == -1
-                        cb = matching_brackets(instr_str, ob)
-                        instr_substr = instr_str[ob+1:cb]
-                        #print("SUBSTRING:", instr_substr)
-                        if len(arg.shape) == 2:
-                            if f"{e}, {i}" in instr_substr:
-                                idof_arrays.append(name)
-                                n_elem, n_out = arg.shape
-                            elif f"{e}, {j}" in instr_substr:
-                                jdof_arrays.append(name)
-                                n_elem, n_in = arg.shape
-                            elif f"{i}, {j}" in instr_substr:
-                                op_arrays.append(name)
-                                n_out, n_in = arg.shape
-                            elif f"{f}, {e}" in instr_substr:
-                                nf, n_elem = arg.shape
-                            else:
-                                print(instr_str)
-                                raise RuntimeError("Could not parse array indices")
-                        elif len(arg.shape) == 3:
-                            if f"{x}, {r}, {e}" in instr_substr:
-                                # Jacobian array. Not certain if
-                                # this is worth prefetching. The cache
-                                # may be able to handle it well enough.
-                                nx, nr, n_elem = arg.shape
-                            elif f"{f}, {e}, {j}" in instr_substr:
-                                face_dof_arrays.append(name)
-                                nf, n_elem, n_in = arg.shape
-                            elif f"{r}, {i}, {j}" in instr_substr:
-                                op_arrays.append(name)
-                                nr, n_out, n_in = arg.shape
-                            elif f"{i}, {f}, {j}" in instr_substr:
-                                op_arrays.append(name)
-                                n_out, nf, n_in = arg.shape
-                            else:
-                                print(instr_str)
-                                raise RuntimeError("Could not parse array indices")
-                        break
+        from matching_brackets import matching_brackets_dict
+        arg_names = set(arg_dict.keys())
+        for instr in knl.default_entrypoint.instructions:
+            #print("HERE")
+            instr_str = str(instr)
+            print("CREATING BRACKET DICT")
+            bracket_dict = matching_brackets_dict(instr_str)
+            print("DONE CREATING BRACKET DICT")
+            instr_read_deps = instr.read_dependency_names()
+            #print("READ DEPS", instr_read_deps)
+            #print("ARG DICT VALUES", [entry.name for entry in arg_dict.values()])
+            arg_names_subset = instr_read_deps & arg_names
 
+            for name in arg_names_subset:
+                arg = arg_dict[name]
+                #print("HERE2")
+                #if n_in is not None:
+                #    break # We can't do this. We need the jdof arrays.
+                to_match = f"{name}[" # Could be problematic if "f{some_prefix}{name}[" is a read_dep
+                index = instr_str.find(to_match)
+                #print(to_match, index)
+                while index >= 0:
+                    ob = index + len(to_match) - 1
+                    cb = bracket_dict[ob]
+                    #cb = matching_brackets(instr_str, ob)
+                    instr_substr = instr_str[ob+1:cb]
+                    #print(instr_substr, len(arg.shape))
+                    if len(arg.shape) == 2:
+                        if f"{e}, {i}" == instr_substr:
+                            print("appending to idof arrays")
+                            idof_arrays.append(name)
+                            n_elem, n_out = arg.shape
+                        elif f"{e}, {j}" == instr_substr:
+                            print("appending to jdof_arrays")
+                            jdof_arrays.append(name)
+                            n_elem, n_in = arg.shape
+                        elif f"[{e}], {j}" in instr_substr:
+                            print("[e], j")
+                            jdof_arrays.append(name)
+                            # Might not be correct for n_elem.
+                            n_elem, n_in = arg.shape
+                        elif f"{e}, " in instr_substr:
+                            print("e,")
+                            #jdof_arrays.append(name)
+                            n_elem, _ = arg.shape
+                        elif f"{i}, {j}" == instr_substr:
+                            print("i,j")
+                            op_arrays.append(name)
+                            n_out, n_in = arg.shape
+                        elif f"{f}, {e}" == instr_substr:
+                            print("f, e,")
+                            nf, n_elem = arg.shape
+                        else:
+                            print(instr_str)
+                            raise RuntimeError("Could not parse array indices")
+                    elif len(arg.shape) == 3:
+                        if f"{x}, {r}, {e}" == instr_substr:
+                            # Jacobian array. Not certain if
+                            # this is worth prefetching. The cache
+                            # may be able to handle it well enough.
+                            nx, nr, n_elem = arg.shape
+                        elif f"{f}, {e}, {j}" == instr_substr:
+                            face_dof_arrays.append(name)
+                            nf, n_elem, n_in = arg.shape
+                        elif f"{r}, {i}, {j}" == instr_substr:
+                            op_arrays.append(name)
+                            nr, n_out, n_in = arg.shape
+                        elif f"{i}, {f}, {j}" == instr_substr:
+                            op_arrays.append(name)
+                            n_out, nf, n_in = arg.shape
+                        else:
+                            print(instr_str)
+                            raise RuntimeError("Could not parse array indices")
+
+                    index = instr_str.find(to_match, ob)
+                    #assert instr_str[ob:].find(to_match) == -1 # Check that arg only shows up once in an instruction
         #"""
         """
         for arg in arg_dict.values():
@@ -743,7 +790,7 @@ def get_trans_list(knl, params):
                     # Not robust to square arrays
                     n_in = arg.shape[1]
                     jdof_arrays.append(arg.name)
-                elif len(arg.shape) == 3 
+                elif len(arg.shape) == 3:
                     if arg.shape[-1] == n_elem:
                         _, nr, n_elem = arg.shape
                     elif arg.shape[1] == n_elem:
@@ -751,8 +798,8 @@ def get_trans_list(knl, params):
                         face_dof_arrays.append(arg.name)
         """
         # Rather pointless to intersect. We already check if they are in read_deps
-        read_jdof_arrays = read_deps & frozenset(jdof_arrays)
-        return arg_dict, read_jdof_arrays, face_dof_arrays, n_in
+        #read_jdof_arrays = read_deps & frozenset(jdof_arrays)
+        return frozendict(arg_dict), frozenset(jdof_arrays), frozenset(face_dof_arrays), n_in
         
     arg_dict, read_jdof_arrays, face_dof_arrays, n_in = get_args_and_arrays(knl)
 
@@ -833,8 +880,13 @@ def get_trans_list(knl, params):
                 trans_list.append(("tag_inames", (((f"{x}", unr,),),),))
 
         #"""
+        #if len(read_jdof_arrays) == 0 and len(face_dof_arrays) == 0:
+            #print(knl)
+            #print("NO arrays to prefetch")
+            #exit()
 
-        if True: # Turn off prefetching until can assign a batch number
+
+        if prefetch: # Turn off prefetching until can assign a batch number
             # No point in prefetching if there is a single array. There is no data re-use.
             # Prefetching breaks in this case
 
@@ -843,6 +895,13 @@ def get_trans_list(knl, params):
             else:
                 j_prefetch_str = f"{j},"
                 #j_prefetch_str = f"{j}_outer,{j}_inner,"
+
+            #print(len(read_jdof_arrays))
+            #print(len(face_dof_arrays))
+            #exit()
+            #if len(read_jdof_arrays) == 0 and len(face_dof_arrays) == 0:
+            #    print(knl)
+            #    exit()
 
             for arg in read_jdof_arrays:
                 # Should only prefetch if there are no indirection arrays
@@ -860,7 +919,7 @@ def get_trans_list(knl, params):
                     (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
                 # Should be c,c by default. Maybe try to re-add this capability later
                 #trans_list.append(("tag_array_axes", (f"{arg}_f", order_str,),))
-                print(prefetch_str)
+                #print(prefetch_str)
 
             for arg in face_dof_arrays:
                 # Stick with the default ordering for now. For fortran ordering
@@ -875,7 +934,7 @@ def get_trans_list(knl, params):
 
                 trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
                     (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
-                print(prefetch_str)
+                #print(prefetch_str)
 
         # Just doing this automatically now
         #trans_list.append(("add_inames_for_unused_hw_axes",))
