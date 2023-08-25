@@ -104,45 +104,77 @@ def strip_unused_dependencies(instructions):
 
 def assemble_transformed_macrokernel(macrokernel, subkernels):
     # Get the barrier instructions
-    barriers = [instr for instr in macrokernel.default_entrypoint.instructions if isinstance(instruction, lp.BarrierInstruction) and instr.synchronization_kind == "global"]
+    barriers = [instr for instr in macrokernel.default_entrypoint.instructions if isinstance(instr, lp.BarrierInstruction) and instr.synchronization_kind == "global"]
 
     assert len(subkernels) - 1 == len(barriers)
-    new_instructions = subkernels[0].instructions
-    domains = subkernels[0].domains
+    new_instructions_all = []
+    new_instructions = subkernels[0].default_entrypoint.instructions
+    new_instructions_all += new_instructions
+    domains = subkernels[0].default_entrypoint.domains
     for barrier, subkernel in zip(barriers, subkernels[1:]):
-        print(barrier.depends_on)
-        """
-        new_instructions.append(barrier)
-        domains = domains + subkernel.domains
+        barrier.depends_on = frozenset([instr.id for instr in new_instructions])
+        new_instructions_all.append(barrier)
+        domains = domains + subkernel.default_entrypoint.domains
+
+        new_instructions = []
         for sk_instruction in subkernel.default_entrypoint.instructions:
             sk_instruction.depends_on |= frozenset([barrier.id])
             new_instructions.append(sk_instruction)
+        new_instructions_all += new_instructions
 
     # Also need to copy the domains and inames
-    new_macrokernel = macrokernel.default_entrypoint.copy(instructions=new_instructions, domains=domains)
-        """
-    exit();
+    new_macrokernel = macrokernel.default_entrypoint.copy(instructions=new_instructions_all,
+                                                          domains=domains)
+    #print(new_macrokernel)
+    #exit()
     return macrokernel.with_kernel(new_macrokernel)
 
 # FIXME: Needs to look at the csv file instead of the hjson file
 # FIXME: Just return a list of transform dictionaries.
-def transform_macrokernel(tunit, args, save_path):
+def transform_macrokernel(tunit_dict, save_path):
     
-    subkernels = get_subkernels(tunit, args)
+    sk_list, pid_counts = collect_subkernels([tunit_dict])
+    autotune_standalone_subkernels(sk_list, save_path=save_path)
     transformed_subkernels = []
-    for sk in subkernels:
-        indirection = len(get_indirection_arrays(sk)) > 0
-        pid = unique_program_id(sk)
+
+    for pid, sk, csk in sk_list:
+        #pid = unique_program_id(sk)
+        # Tune the subkernel
         hjson_file_str = save_path + "/" + pid + ".hjson"
-        #if not exists 
-            # Tune the subkernel
-        hjson = load_hjson(hjson_file_str)
+        if exists(hjson_file_str):
+            print("Found", hjson_file_str)
+            hjson = load_hjson(hjson_file_str)
+            from __init__ import apply_transformation_list
+            transformed_subkernels.append(apply_transformation_list(sk, hjson["transformations"])[0] )
+        else:
+            print("Can't find", hjson_file_str)
+            # Should probably apply the default transformations
+            platforms = cl.get_platforms()
+            cl_ctx = cl.Context(
+                dev_type=cl.device_type.GPU,
+                properties=[(cl.context_properties.PLATFORM, platforms[0])])
+            queue = cl.CommandQueue(cl_ctx,
+                properties=cl.command_queue_properties.PROFILING_ENABLE)
+
+            from meshmode.array_context import FusionContractorArrayContext
+            actx = FusionContractorArrayContext(queue)
+            # Currently fails
+            #transformed_subkernels.append(actx.transform_loopy_program(sk))
+            transformed_subkernels.append(sk)
         # Transform ...
 
-        transformed_subkernels.append(transformed_subkernel)
+        #transformed_subkernels.append(transformed_subkernel)
 
+    #exit()
 
-    transformed_tunit = assemble_transformed_macrokernel(tunit, transformed_subkernels)
+    print("PRE-TRANSFORMATION")
+    print(tunit_dict[1]["tunit"])
+    transformed_tunit = assemble_transformed_macrokernel(tunit_dict[1]["tunit"], transformed_subkernels)
+    
+    print("POST_TRANSFORMATION")
+    print(transformed_tunit)
+    print("END OF KERNEL")
+    
     return transformed_tunit
 
 # Create a subkernel with the domains and instructions of each cumulative phase
@@ -955,7 +987,7 @@ def main(arg):
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
     directories = [#"./pickled_programs_y3_prediction_order_1_eager",
-                    "./pickled_programs_y3_prediction_order_2_lazy",
+                    "./pickled_programs_y3_prediction_order_1_lazy",
                     #"./pickled_programs_wave",
                     #"./pickled_programs_prediction_order_1",
                     #"./pickled_programs_y3_prediction_order_1",
@@ -976,36 +1008,44 @@ def main(arg):
 
     for directory in directories:
         save_path = directory + "/hjson"
+        # Really a tuple, not a dict
         tunit_dicts = get_pickled_tunits(directory)
-        print("Done collecting tunits")
-        # ID changes based on whether python was run with -O
-        sk_list, pid_dict = collect_subkernels(tunit_dicts)
-        """
-        for item in sk_list:
-            sk = item[1].default_entrypoint
-            a_exprs = [insn.expression for insn in sk.instructions if isinstance(insn, lp.Assignment)]# and isinstance(insn.expression, lp.symbolic.Reduction)]
-            if len(a_exprs) != len(set(a_exprs)):
 
-                print(sk.name, len(a_exprs), len(set(a_exprs)))
-                if False:#sk.name == "unfiltered_rhs_15":
-                    for entry in a_exprs:
-                        print(entry)
-                    #print(sk)
+        if True: # Tune a single macrokernel at a time.
+            for tunit_dict in tunit_dicts:
+                transform_macrokernel(tunit_dict, save_path)
 
-            #if item[1].default_entrypoint.name == "unfiltered_rhs_5":
-            #    print(item[1].default_entrypoint)
-            #    exit()
-        exit()
-        """
-        print("Done collecting subkernels")
-        get_lazy_einsum_info(tunit_dicts, hjson_dir=save_path)
-        #exit()
 
-        #test_default_transforms(sk_list, save_path=directory + "/default_transforms_hjson")
+        if False: # Tune all of the subkernels
+            print("Done collecting tunits")
+            # ID changes based on whether python was run with -O
+            sk_list, pid_dict = collect_subkernels(tunit_dicts)
+            """
+            for item in sk_list:
+                sk = item[1].default_entrypoint
+                a_exprs = [insn.expression for insn in sk.instructions if isinstance(insn, lp.Assignment)]# and isinstance(insn.expression, lp.symbolic.Reduction)]
+                if len(a_exprs) != len(set(a_exprs)):
 
-        autotune_standalone_subkernels(sk_list, save_path=save_path)
+                    print(sk.name, len(a_exprs), len(set(a_exprs)))
+                    if False:#sk.name == "unfiltered_rhs_15":
+                        for entry in a_exprs:
+                            print(entry)
+                        #print(sk)
 
-        #compare_weighted_avg_frac_rooflines(directory, pid_dict)
+                #if item[1].default_entrypoint.name == "unfiltered_rhs_5":
+                #    print(item[1].default_entrypoint)
+                #    exit()
+            exit()
+            """
+            print("Done collecting subkernels")
+            get_lazy_einsum_info(tunit_dicts, hjson_dir=save_path)
+            #exit()
+
+            #test_default_transforms(sk_list, save_path=directory + "/default_transforms_hjson")
+
+            autotune_standalone_subkernels(sk_list, save_path=save_path)
+
+            #compare_weighted_avg_frac_rooflines(directory, pid_dict)
 
     exit() 
 

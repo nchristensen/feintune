@@ -464,6 +464,8 @@ def createConfigSpace(queue, knl):
     # should allow the tests of kernels with different element counts to inform
     # the selection.
     # Maybe set upper based on maximum memory size?
+    # Maybe this should be a NormalFloatHyperparameter and cast to an int so it doesn't need
+    # to store 10^8 ints. Actually, doesn't it use NormalFloat Hyperparameter under the hood?
     num_elements = cs.NormalIntegerHyperparameter(name="num_elements", mu=n_elem, sigma=0, lower=0, upper=1e8, default_value=n_elem)
     a_s.add_hyperparameter(num_elements)
 
@@ -587,6 +589,7 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
     # Don't prefetch if there are indirection arrays.
     # (technically, we only need to avoid to prefetching arrays that are indirectly addressed
     # but I think there is only one that qualifies at this point.)
+    # Prefetching could be possible if we can bound the accesses.
     prefetch = len(get_indirection_arrays(knl)) == 0
     trans_list_list = []
     if prefetch == False:
@@ -649,7 +652,7 @@ def get_trans_list(knl, params, prefetch=True):
 
     # The name strings aren't standard. Try to figure them out.
     # If this could be made more robust it could be the primary method of
-    # determining the inames
+    # determining the inames. Alternatively, could transform the kernel to standardize the names
     if (e is None or i is None or j is None) and len(within_inames) == 2 and len(r_inames) == 1:
         from meshmode.transform_metadata import ConcurrentElementInameTag, ConcurrentDOFInameTag
         j = list(r_inames)[0]
@@ -708,9 +711,9 @@ def get_trans_list(knl, params, prefetch=True):
         for instr in knl.default_entrypoint.instructions:
             #print("HERE")
             instr_str = str(instr)
-            print("CREATING BRACKET DICT")
+            #print("CREATING BRACKET DICT")
             bracket_dict = matching_brackets_dict(instr_str)
-            print("DONE CREATING BRACKET DICT")
+            #print("DONE CREATING BRACKET DICT")
             instr_read_deps = instr.read_dependency_names()
             #print("READ DEPS", instr_read_deps)
             #print("ARG DICT VALUES", [entry.name for entry in arg_dict.values()])
