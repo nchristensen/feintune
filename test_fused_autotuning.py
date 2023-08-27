@@ -131,43 +131,50 @@ def assemble_transformed_macrokernel(macrokernel, subkernels):
 
 # FIXME: Needs to look at the csv file instead of the hjson file
 # FIXME: Just return a list of transform dictionaries.
-def transform_macrokernel(tunit_dict, save_path):
+def transform_macrokernel(tunit_dict, save_path, actx=None):
     
     sk_list, pid_counts = collect_subkernels([tunit_dict])
-    autotune_standalone_subkernels(sk_list, save_path=save_path)
+    if actx is None:
+        autotune_standalone_subkernels(sk_list, save_path=save_path)
     transformed_subkernels = []
 
     for pid, sk, csk in sk_list:
-        #pid = unique_program_id(sk)
-        # Tune the subkernel
-        hjson_file_str = save_path + "/" + pid + ".hjson"
-        if exists(hjson_file_str):
-            print("Found", hjson_file_str)
-            hjson = load_hjson(hjson_file_str)
-            from __init__ import apply_transformation_list
-            transformed_subkernels.append(apply_transformation_list(sk, hjson["transformations"])[0] )
+
+        if actx is not None:
+            default_transformed_sk = actx.transform_loopy_program(sk)
+            transformed_subkernels.append(default_transformed_sk)
         else:
-            print("Can't find", hjson_file_str)
-            # Should probably apply the default transformations
-            platforms = cl.get_platforms()
-            cl_ctx = cl.Context(
-                dev_type=cl.device_type.GPU,
-                properties=[(cl.context_properties.PLATFORM, platforms[0])])
-            queue = cl.CommandQueue(cl_ctx,
-                properties=cl.command_queue_properties.PROFILING_ENABLE)
 
-            from meshmode.array_context import FusionContractorArrayContext
-            actx = FusionContractorArrayContext(queue)
-            # Currently fails
-            #transformed_subkernels.append(actx.transform_loopy_program(sk))
-            transformed_subkernels.append(sk)
-        # Transform ...
+            #pid = unique_program_id(sk)
+            # Tune the subkernel
+            hjson_file_str = save_path + "/" + pid + ".hjson"
+            if exists(hjson_file_str):
+                print("Found", hjson_file_str)
+                hjson = load_hjson(hjson_file_str)
+                from __init__ import apply_transformation_list
+                transformed_subkernels.append(apply_transformation_list(sk, hjson["transformations"])[0] )
+            else:
+                print("Can't find", hjson_file_str)
+                # Should probably apply the default transformations
+                platforms = cl.get_platforms()
+                cl_ctx = cl.Context(
+                    dev_type=cl.device_type.GPU,
+                    properties=[(cl.context_properties.PLATFORM, platforms[0])])
+                queue = cl.CommandQueue(cl_ctx,
+                    properties=cl.command_queue_properties.PROFILING_ENABLE)
 
-        #transformed_subkernels.append(transformed_subkernel)
+                from meshmode.array_context import FusionContractorArrayContext
+                actx = FusionContractorArrayContext(queue)
+                # Currently fails
+                #transformed_subkernels.append(actx.transform_loopy_program(sk))
+                transformed_subkernels.append(sk)
+            # Transform ...
 
-    #exit()
+            #transformed_subkernels.append(transformed_subkernel)
 
-    print("PRE-TRANSFORMATION")
+        #exit()
+
+        print("PRE-TRANSFORMATION")
     print(tunit_dict[1]["tunit"])
     transformed_tunit = assemble_transformed_macrokernel(tunit_dict[1]["tunit"], transformed_subkernels)
     
@@ -410,15 +417,18 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
         raise(ValueError("Cannot currently handle multiple einsum types in same subkernel"))
     est = einsum_types[0]
 
-    use_ytopt = False
+    use_ytopt = True
 
     handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
     if (len(est[0]), len(est[1]),) in handled_pairs:
         if use_ytopt:
+            #print("HERE")
+            #exit()
             input_space = createConfigSpace(queue, sk)
             ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate,
                              device_memory_bandwidth=device_memory_bandwidth,
-                             device_latency=device_latency, timeout=30, save_path=save_path)
+                             device_latency=device_latency, timeout=60, save_path=save_path,
+                             max_evals=20, max_new_evals=0)
         else:
             print("ONLY TESTING THE FIRST 20 transformations")
             from random import shuffle
@@ -758,7 +768,7 @@ def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
 
 
 def get_device_roofline_data(queue):
-    import feinsum.empirical_roofline as er
+    import empirical_roofline as er
     results_list = er.loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
     device_latency = er.get_min_device_latency(results_list)
     loopy_bw = er.get_latency_adjusted_max_device_memory_bandwidth(results_list)
@@ -840,6 +850,9 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                                                       device_latency=device_latency,
                                                       device_memory_bandwidth=device_memory_bandwidth,
                                                       save_path=save_path)
+
+
+#def test_tunit_performance(kernel, queue, save_path=None, device_latency=None, device_memory_bandwidth=None, clpeak_flop_rate=None):
 
 
 
@@ -1012,8 +1025,35 @@ def main(arg):
         tunit_dicts = get_pickled_tunits(directory)
 
         if True: # Tune a single macrokernel at a time.
+
+            platforms = cl.get_platforms()
+            cl_ctx = cl.Context(
+                dev_type=cl.device_type.GPU,
+                properties=[(cl.context_properties.PLATFORM, platforms[0])])
+            queue = cl.CommandQueue(cl_ctx,
+                properties=cl.command_queue_properties.PROFILING_ENABLE)
+
+            #device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
+
+            from meshmode.array_context import PrefusedFusionContractorArrayContext
+            #actx = PrefusedFusionContractorArrayContext(queue)
+            actx = None
+
             for tunit_dict in tunit_dicts:
-                transform_macrokernel(tunit_dict, save_path)
+                #transformed_tunit = transform_macrokernel(tunit_dict, save_path)
+
+                transformed_tunit = transform_macrokernel(tunit_dict, save_path, actx=actx)
+
+                # Would need to save the indirection arrays with the kernel
+                #if not any([arg.dtype.dtype == np.int8 for arg in transformed_tunit.default_entrypoint.args]):
+                #    ret_dict = run_single_param_set_v2(queue, transformed_tunit, [], generic_test,
+                #                max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
+                #                device_latency=device_latency)
+
+                #ret_dict = run_single_param_set_v2(queue, default_transformed_tunit, [], generic_test,
+                #            max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
+                #            device_latency=device_latency)
+ 
 
 
         if False: # Tune all of the subkernels

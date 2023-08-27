@@ -87,7 +87,10 @@ def test(args):
             max_flop_rate=args["max_flop_rate"],
             device_memory_bandwidth=args["device_memory_bandwidth"],
             device_latency=args["device_latency"],
-            timeout=args["timeout"])
+            timeout=args["timeout"],
+            method="thread",#None
+            run_single_batch=True,
+            error_return_time=args["timeout"])
 
     return args["test_id"], result
 
@@ -117,7 +120,7 @@ class ObjectiveFunction(object):
                   p["iio"]*p["iii"],
                   p["iii"],
                   p["ji"],)
-        tlist = get_trans_list(self.knl, params)
+        tlist = get_trans_list(self.knl, params, prefetch=p["prefetch"])
         test_id = get_test_id(tlist)
 
         print("BEGINNING TEST")
@@ -151,8 +154,8 @@ class ObjectiveFunction(object):
 
 
 
-
-def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, save_path=None):
+# TODO: Change default max_evals
+def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, save_path=None, max_evals=10, max_new_evals=0):
 
     global exec_id
 
@@ -213,6 +216,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
 
     initial_observations = []
 
+    # Maybe use pandas instead?
     if exists(csv_file_str):
         print(f"Loading saved data from {csv_file_str}")
         with open(csv_file_str) as csvfile:
@@ -226,10 +230,13 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
         print("No saved data found.")
         num_random = 1
 
-    max_evals=len(initial_observations) + 5
+    pre_existing_evals = len(initial_observations)
+    max_evals = min(max_evals, len(initial_observations) + max_new_evals)
 
     # Note that the initial observations count toward max_evals
     searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner, set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations)
+    print("==========BEGINNING SEARCH=============")
+
     searcher.main()
 
     print("======FINISHING SEARCHING========")

@@ -380,7 +380,7 @@ def createConfigSpace(queue, knl):
 
     # Element axis
     a_s = cs.ConfigurationSpace(name="autotuning_space")
-    prefetch_hyp = cs.OrdinalHyperParameter("prefetch", [0,1] if prefetch else [0])
+    prefetch_hyp = cs.OrdinalHyperparameter("prefetch", [0,1] if prefetch else [0])
     a_s.add_hyperparameter(prefetch_hyp)
 
     if True:#n_elem*n_out > 1024:
@@ -466,8 +466,9 @@ def createConfigSpace(queue, knl):
     # Maybe set upper based on maximum memory size?
     # Maybe this should be a NormalFloatHyperparameter and cast to an int so it doesn't need
     # to store 10^8 ints. Actually, doesn't it use NormalFloat Hyperparameter under the hood?
-    num_elements = cs.NormalIntegerHyperparameter(name="num_elements", mu=n_elem, sigma=0, lower=0, upper=1e8, default_value=n_elem)
-    a_s.add_hyperparameter(num_elements)
+    # Breaks at the moment
+    #num_elements = cs.NormalIntegerHyperparameter(name="num_elements", mu=n_elem, sigma=0, lower=0, upper=1e8, default_value=n_elem)
+    #a_s.add_hyperparameter(num_elements)
 
     return a_s
 

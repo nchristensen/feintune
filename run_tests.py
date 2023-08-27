@@ -281,7 +281,7 @@ def measure_execution_latency(queue, tunit, arg_dict, nruns, warmup_runs):
 # tag basis
 
 #cache_arg_dict = {}
-def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup_runs=2):
+def generic_test(queue, kern, backend="OPENCL", nruns=1, warmup_runs=1):
 
     kern = lp.set_options(kern, "no_numpy")
     kern = lp.set_options(kern, "return_dict")
@@ -523,7 +523,7 @@ def analyze_flop_rate(knl, avg_time, max_flop_rate=None, latency=None):
     #print("Percent peak: " + str(100*(frac_peak_GBps)))
     #print()
 
-    return frozendict({"observed_flop_rate": flop_rate, "flops": map_flops, "observed_seconds_per_flop": 1/flop_rate})#gflop_rate, frac_peak_gflops
+    return frozendict({"observed_flop_rate": flop_rate, "flops": map_flops})#gflop_rate, frac_peak_gflops
 
 
 def get_knl_device_memory_roofline(knl, max_flop_rate, device_latency, device_memory_bandwidth):
@@ -925,7 +925,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     print("BEGINNING KERNEL TRANSFORMATION")
     transformed = True
 
-    if True:
+    if False:
         knl, sb_knl = apply_transformation_list(knl_base, trans_list)
     else:
         try:
@@ -1011,12 +1011,13 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             end = time.time()
             wall_clock_time = end - start
         elif method == "subprocess":
-            print("Executing test with timeout of", timeout, "seconds") 
+            print("Executing test subprocess with timeout of", timeout, "seconds") 
             avg_time, measured_latency, wall_clock_time = run_subprocess_with_timeout(queue, knl, test_fn,
                                                             timeout=timeout, error_return_time=error_return_time)
         elif method == "thread":
             # Concurrent futures with threads should do the same thing
             try:
+                print("Executing test thread with timeout of", timeout, "seconds") 
                 start = time.time()
                 _, avg_time, measured_latency = func_timeout(timeout, test_fn, args=(queue, knl,))
                 end = time.time()

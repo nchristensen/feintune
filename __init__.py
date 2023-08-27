@@ -1867,7 +1867,7 @@ def apply_transformation_list(tunit, transformations):
     for t in transformations:
         if t[0] == "batch_einsums":
             batch_size = t[1][0]
-    batch_size = 1
+    #batch_size = 1
 
     transformations = list(transformations)
     prefetched=False
