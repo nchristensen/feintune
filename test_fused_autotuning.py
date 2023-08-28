@@ -428,7 +428,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
             ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate,
                              device_memory_bandwidth=device_memory_bandwidth,
                              device_latency=device_latency, timeout=60, save_path=save_path,
-                             max_evals=20, max_new_evals=0)
+                             max_evals=20, required_new_evals=0)
         else:
             print("ONLY TESTING THE FIRST 20 transformations")
             from random import shuffle
@@ -617,8 +617,14 @@ def print_internal_einsum_dependencies(tunit):
         print(esid, "depends on the following einsums:", set(deps))
 
 
-def get_pickled_tunits(directory):
-    files = os.listdir(directory)
+def get_pickled_tunits(directory_or_files):
+
+    if isinstance(directory_or_files, str):
+        files = os.listdir(directory)
+    else:
+        # Assume it is a list of file names
+        files = directory_or_files
+
     tunit_dicts = []
 
     '''
@@ -640,7 +646,9 @@ def get_pickled_tunits(directory):
         #print(num, filename)
         f = os.path.join(directory, filename)
         # Skip the massive kernel for now
-        if os.path.isfile(f) and filename.startswith("prefeinsum") and (filename.endswith(".pickle") or filename.endswith(".pkl")):
+        #if os.path.isfile(f) and filename.startswith("prefeinsum") and (filename.endswith(".pickle") or filename.endswith(".pkl")):
+
+        if os.path.isfile(f) and (filename.endswith(".pickle") or filename.endswith(".pkl")):
             f = open(f, "rb")
             fdict = pickle.load(f)
             #pid = filename.split("_")[1]
@@ -1000,7 +1008,7 @@ def main(arg):
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
     directories = [#"./pickled_programs_y3_prediction_order_1_eager",
-                    "./pickled_programs_y3_prediction_order_1_lazy",
+                    "./pickled_programs_y3_prediction_order_2_lazy",
                     #"./pickled_programs_wave",
                     #"./pickled_programs_prediction_order_1",
                     #"./pickled_programs_y3_prediction_order_1",

@@ -423,18 +423,27 @@ def generic_test(queue, kern, backend="OPENCL", nruns=1, warmup_runs=1):
 
 
 def get_knl_device_memory_bytes(knl):
-    nbytes = 0
+
     # What if the output is not in the input arguments?
     #print(knl.default_entrypoint.args)
     # Would probably be better to use the memory footprint
     # if can get it to work.
+
     args_and_temps = knl.default_entrypoint.args + list(knl.default_entrypoint.temporary_variables.values())
+
+    read_deps = set()
+    write_deps = set()
+    for instr in knl.default_entrypoint.instructions:
+        read_deps |= instr.read_dependency_names
+        write_deps |= instr.write_dependency_names
+
+    nbytes = 0
     for arg in args_and_temps:
         if arg.address_space == lp.AddressSpace.GLOBAL:
-            #print(arg.name)
-            #print(arg.shape)
-            #print(type(arg.dtype))
-            nbytes += np.prod((arg.shape))*arg.dtype.dtype.itemsize
+            if arg.name in read_deps:
+                nbytes += np.prod((arg.shape))*arg.dtype.dtype.itemsize
+            if arg.name in write_deps:
+                nbytes += np.prod((arg.shape))*arg.dtype.dtype.itemsize
             
     return nbytes
 
@@ -465,6 +474,12 @@ def analyze_knl_bandwidth(knl, avg_time, device_latency=None):
 
 
 def get_knl_flops(knl):
+
+    knl = knl.copy(silenced_warnings=(knl.silenced_warnings
+                                        + ["insn_count_subgroups_upper_bound",
+                                            "summing_if_branches_ops"]))
+
+    # There is a more complex version of this in meshmode.arraycontext
     op_map = lp.get_op_map(knl, count_within_subscripts=False, subgroup_size=1)
     map_flops = 0
     for val in op_map.values():
@@ -909,7 +924,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
 
     # Should check how well single batch predicted times correllate with actual times
     
-    print(trans_list)
+    #print(trans_list)
 
     #if knl_base.default_entrypoint.name == "unfiltered_rhs_5_26":
     #    print(knl_base)
@@ -919,32 +934,37 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     neinsums = len(get_einsums(knl_base))
     batch_size = neinsums # No batching is equivalent to one batch
 
-    print("PRINTING 1")
-    print(knl_base)
+    #print("PRINTING 1")
+    #print(knl_base)
 
     print("BEGINNING KERNEL TRANSFORMATION")
-    transformed = True
 
-    if False:
-        knl, sb_knl = apply_transformation_list(knl_base, trans_list)
-    else:
-        try:
+    try:
+        if timeout is None:
+            knl, sb_knl = apply_transformation_list(knl_base, trans_list)
+            knl = lp.preprocess_kernel(args)
+            insn_ids = tuple([insn.id for insn in knl.default_entrypoint.instructions])
+            group_sizes, local_sizes = knl.default_entrypoint.get_grid_sizes_for_insn_ids(insn_ids, None)
+            transformed = True
+        else:
+            # For large kernels, these can be expensive operations
             start = time.time()
             #import pdb; pdb.set_trace()
             knl, sb_knl = func_timeout(timeout, apply_transformation_list, args=(knl_base, trans_list,))
-            #knl = apply_transformation_list(knl_base, trans_list)
+            knl = func_timeout(timeout, lp.preprocess_kernel, args=(knl,))
+            insn_ids = tuple([insn.id for insn in knl.default_entrypoint.instructions])
+            group_sizes, local_sizes = func_timeout(timeout, knl.default_entrypoint.get_grid_sizes_for_insn_ids, args=(insn_ids, None,))
             end = time.time()
-            print("Transformation required", end - start, "seconds")
+            transformed = True
+            print("Transformation, preprocessing, and obtaining grid sizes required", end - start, "seconds")
             #exit()
-        except FunctionTimedOut as e:
-            print("Transformation timed out")
-            transformed = False
-            knl = knl_base
+    except FunctionTimedOut as e:
+        print("Transformation, preprocessing, and obtaining grid sizes timed out")
+        transformed = False
+        knl = knl_base
+        local_sizes = []
 
     #local_sizes = set()
-    for trans in trans_list:
-        if trans[0] == "batch_einsums":
-            batch_size = trans[1][0]
         #elif trans[0] = "add_prefetch":
             
         #elif trans[0] == "split_iname" and "inner" in trans[1][0]:
@@ -954,8 +974,8 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
 
     #workitems = np.product(list(local_sizes))
 
-    insn_ids = tuple([insn.id for insn in knl.default_entrypoint.instructions])
-    group_sizes, local_sizes = knl.default_entrypoint.get_grid_sizes_for_insn_ids(insn_ids, None)
+    #insn_ids = [insn.id for insn in knl.default_entrypoint.instructions]
+    #group_sizes, local_sizes = knl.default_entrypoint.get_grid_sizes_for_insn_ids(insn_ids, None)
     workitems = np.product([entry.max_val() for entry in local_sizes])
 
     print("WORKITEMS:", workitems)
@@ -971,7 +991,6 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     # max_work_item_sizes[0] here instead
     max_work_group_size = queue.device.max_work_item_sizes[0] 
     
-    knl = lp.preprocess_kernel(knl)
     temp_dict = {key: val for key, val in knl.default_entrypoint.temporary_variables.items() if val.address_space == lp.AddressSpace.LOCAL or val.address_space == lp.auto}
     #print(knl)
     print(temp_dict)
@@ -1002,7 +1021,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
         knl = sb_knl
 
     measured_latency = None 
-    if local_memory_used <= queue.device.local_mem_size and workitems <= max_work_group_size and transformed: # Don't allow complete filling of local memory
+    if transformed and local_memory_used <= queue.device.local_mem_size and workitems <= max_work_group_size: # Don't allow complete filling of local memory
 
         # Should check what the performance difference is between None, subprocess, and thread
         if method is None:
@@ -1028,8 +1047,8 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
         else: # processpool and pebble concurrent processes will break with MPI, use subprocess instead
             avg_time, measured_latency, wall_clock_time = run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=timeout, method=method) 
     else:
-        print("Invalid kernel: too much local memory used")
-        avg_time, wall_clock_time = error_return_time, error_return_time # Don't run and return return an infinite run time
+        print("Invalid kernel: Pre-execution timed out, too much local memory was used, or the number of work items exceeded the maximum work group size.")
+        avg_time, wall_clock_time = error_return_time, error_return_time # Don't run and return return a large run time
 
 
     if measured_latency is None:
@@ -1041,11 +1060,10 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     print("NULL KERNEL LATENCY:", measured_latency)
     print("DEVICE MEMORY BANDWIDTH:", device_memory_bandwidth)
 
-    flop_rate_dict = analyze_flop_rate(knl, avg_time, max_flop_rate=max_flop_rate, latency=None)
-    bw_dict = analyze_knl_bandwidth(knl, avg_time, device_latency=measured_latency)
 
-    bw = bw_dict["observed_bandwidth"]
-    flop_rate = flop_rate_dict["observed_flop_rate"]
+    for trans in trans_list:
+        if trans[0] == "batch_einsums":
+            batch_size = trans[1][0]
 
     data = {"avg_time": avg_time,
             "avg_time_predicted": avg_time*(neinsums/batch_size) if run_single_batch else avg_time,
@@ -1055,43 +1073,62 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             "error_return_time": error_return_time,
             "timeout": timeout}
 
+
+    bw_dict = analyze_knl_bandwidth(knl, avg_time, device_latency=measured_latency)
+    print("ANALYZED BANDWIDTH")
+
+    bw = bw_dict["observed_bandwidth"]
     data.update(bw_dict.items())
-    data.update(flop_rate_dict.items())
+
 
     if device_memory_bandwidth is not None:
         frac_peak_bandwidth = bw / device_memory_bandwidth
         data.update({"frac_peak_bandwidth": frac_peak_bandwidth,
                  "device_memory_bandwidth": device_memory_bandwidth})
 
-    #if frac_peak_bandwidth  >= bandwidth_cutoff:  # noqa
-    #    # Should validate result here
-    #    print("Performance is within tolerance of peak bandwith. Terminating search")  # noqa
-    #    return choices
 
-    # This is incorrect for general einsum kernels
-    if max_flop_rate is not None:
-        frac_peak_flop_rate = flop_rate / max_flop_rate#analyze_FLOPS(knl, max_gflops, avg_time)
-        data.update({"frac_peak_flop_rate": frac_peak_flop_rate,
-            "max_flop_rate": max_flop_rate})
+    try:
+        if timeout is None:
+            flop_rate_dict = analyze_flop_rate(knl, avg_time, max_flop_rate=max_flop_rate, latency=None)
+        else:
+            flop_rate_dict = func_timeout(timeout, analyze_flop_rate, args=(knl, avg_time, max_flop_rate,))
 
-    #if frac_peak_gflops >= gflops_cutoff:
-    #    # Should validate result here
-    #    print("Performance is within tolerance of peak bandwith or flop rate. Terminating search")  # noqa
-    #    return choices
 
-    if max_flop_rate is not None and device_memory_bandwidth is not None:
-        roofline_flop_rate = get_knl_device_memory_roofline(knl, max_flop_rate,
-            measured_latency, device_memory_bandwidth)
-        frac_roofline_flop_rate = flop_rate / roofline_flop_rate
+        flop_rate = flop_rate_dict["observed_flop_rate"]
+        data.update(flop_rate_dict.items())
 
-        print("Roofline GFLOP/s:", roofline_flop_rate*1e-9)
-        print()
+        #if frac_peak_bandwidth  >= bandwidth_cutoff:  # noqa
+        #    # Should validate result here
+        #    print("Performance is within tolerance of peak bandwith. Terminating search")  # noqa
+        #    return choices
 
-        data.update({"frac_roofline_flop_rate": frac_roofline_flop_rate,
-                "roofline_flop_rate": roofline_flop_rate})
+        # This is incorrect for general einsum kernels
+        if max_flop_rate is not None:
+            frac_peak_flop_rate = flop_rate / max_flop_rate#analyze_FLOPS(knl, max_gflops, avg_time)
+            data.update({"frac_peak_flop_rate": frac_peak_flop_rate,
+                "max_flop_rate": max_flop_rate})
+
+        #if frac_peak_gflops >= gflops_cutoff:
+        #    # Should validate result here
+        #    print("Performance is within tolerance of peak bandwith or flop rate. Terminating search")  # noqa
+        #    return choices
+
+        if max_flop_rate is not None and device_memory_bandwidth is not None:
+            roofline_flop_rate = get_knl_device_memory_roofline(knl, max_flop_rate,
+                measured_latency, device_memory_bandwidth)
+            frac_roofline_flop_rate = flop_rate / roofline_flop_rate
+
+            print("Roofline GFLOP/s:", roofline_flop_rate*1e-9)
+            print()
+
+            data.update({"frac_roofline_flop_rate": frac_roofline_flop_rate,
+                    "roofline_flop_rate": roofline_flop_rate})
         
+    except FunctionTimedOut as e:
+        print("FLOP count timed out. Unable to report FLOP rate.")
 
-    from frozendict import frozendict
+    print("ANALYZED FLOP RATE")
+
     retval = frozendict({"transformations": trans_list, "data": data})
     print(retval)
     return retval

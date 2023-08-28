@@ -1233,7 +1233,6 @@ def batch_einsums(tunit, batch_size, **kwargs):
             #pp_tunit = realize_reduction(tunit.with_kernel(knl), unknown_types_ok=True)
             #knl = b_tunit.default_entrypoint
 
-            # This needs to be fixed. It prevents finding a successful schedule
             # Need to separate by address space. Or maybe just call twice?
 
             batch_temps_by_size = get_batch_temporaries_by_size(pp_tunit, nbatches, lp.AddressSpace.LOCAL) 
