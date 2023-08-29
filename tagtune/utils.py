@@ -2,7 +2,6 @@ import hjson
 import loopy as lp
 from loopy.symbolic import CombineMapper, DependencyMapper
 from typing import FrozenSet
-import pymbolic.primitives as prim
 import numpy as np
 from pytools import memoize
 from frozendict import frozendict
@@ -121,6 +120,7 @@ class IndirectionFinder(CombineMapper):
         return any(values)
 
     def map_subscript(self, expr):
+        import pymbolic.primitives as prim
         return not all(((isinstance(idx, prim.Variable)
                          and idx.name in self.all_inames)
                         or np.isscalar(idx))

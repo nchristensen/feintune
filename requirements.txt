@@ -1,0 +1,41 @@
+# Also needs clpeak from conda for roofline. May be worthwhile to install islpy barvinok
+
+# generated with pipreqs
+feinsum==2022.1
+frozendict==2.3.8
+func_timeout==4.3.5
+hjson==3.1.0
+islpy==2023.1.2
+loopy>=2023.1
+matplotlib==3.7.2
+mpi4py==3.1.4
+numpy==1.25.2
+pandas==1.5.2
+psutil==5.9.5
+pyopencl==2023.1.1
+pytools==2023.1.1
+
+# Not actually required (probably)
+#charm4py==1.0
+#beautifulsoup4==4.12.2
+#guppy==0.1.11
+#mem_top==0.2.1
+#mpipool==1.0.0
+Pebble==5.0.3
+#pyinstrument==4.5.1
+#schwimmbad==0.3.2
+
+#grudge.egg==info
+#meshmode.egg==info
+#mirgecom.egg==info
+
+# Ones not installed from pip
+
+# Profiling
+pyinstrument @ git+https://github.com/cpennington/pyinstrument@flame-chart 
+
+# ytopt repos
+dh_scikit_optimize @ git+https://github.com/ytopt-team/scikit-optimize
+autotune @ git+https://github.com/ytopt-team/autotune@version1
+ytopt.egg @ git+https://github.com/nchristensen/ytopt@executor-evaluators
+ConfigSpace @ git+https://github.com/nchristensen/ConfigSpace@ForbiddenCallableRelation

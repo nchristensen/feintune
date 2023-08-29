@@ -8,6 +8,7 @@ import loopy as lp
 from loopy.version import LOOPY_USE_LANGUAGE_VERSION_2018_2
 from pyopencl.tools import ImmediateAllocator, MemoryPool
 from frozendict import frozendict
+#TODO Remove usage of Pebble, which is broken anyway.
 from pebble import concurrent, ProcessExpired
 from pebble.concurrent.process import _process_wrapper
 from concurrent.futures import TimeoutError, BrokenExecutor
@@ -28,7 +29,7 @@ from pycuda.compiler import SourceModule
 from pycuda.curandom import rand as curand
 """
 
-from modepy import equidistant_nodes
+#from modepy import equidistant_nodes
 from pytools.obj_array import make_obj_array
 
 import hjson

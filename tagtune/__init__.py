@@ -1664,6 +1664,7 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
     return knl, single_batch_knl
 
 # Test code. This should be handled in loopy most likely. Or maybe in pytato
+"""
 def prune_conditionals(instr):
 
     class MyPrunerMapper(lp.symbolic.UncachedIdentityMapper):
@@ -1702,6 +1703,7 @@ def prune_conditionals(instr):
             exit()
         # Re-write instruction with new expression.
     return instr
+"""
 
 @qprofile
 def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
