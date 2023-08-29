@@ -282,7 +282,7 @@ def measure_execution_latency(queue, tunit, arg_dict, nruns, warmup_runs):
 # tag basis
 
 #cache_arg_dict = {}
-def generic_test(queue, kern, backend="OPENCL", nruns=1, warmup_runs=1):
+def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup_runs=2):
 
     kern = lp.set_options(kern, "no_numpy")
     kern = lp.set_options(kern, "return_dict")
@@ -435,8 +435,8 @@ def get_knl_device_memory_bytes(knl):
     read_deps = set()
     write_deps = set()
     for instr in knl.default_entrypoint.instructions:
-        read_deps |= instr.read_dependency_names
-        write_deps |= instr.write_dependency_names
+        read_deps |= instr.read_dependency_names()
+        write_deps |= instr.write_dependency_names()
 
     nbytes = 0
     for arg in args_and_temps:
@@ -476,9 +476,9 @@ def analyze_knl_bandwidth(knl, avg_time, device_latency=None):
 
 def get_knl_flops(knl):
 
-    knl = knl.copy(silenced_warnings=(knl.silenced_warnings
-                                        + ["insn_count_subgroups_upper_bound",
-                                            "summing_if_branches_ops"]))
+    #knl = knl.copy(silenced_warnings=(knl.silenced_warnings
+    #                                    + ["insn_count_subgroups_upper_bound",
+    #                                        "summing_if_branches_ops"]))
 
     # There is a more complex version of this in meshmode.arraycontext
     op_map = lp.get_op_map(knl, count_within_subscripts=False, subgroup_size=1)
@@ -943,7 +943,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     try:
         if timeout is None:
             knl, sb_knl = apply_transformation_list(knl_base, trans_list)
-            knl = lp.preprocess_kernel(args)
+            knl = lp.preprocess_kernel(knl)
             insn_ids = tuple([insn.id for insn in knl.default_entrypoint.instructions])
             group_sizes, local_sizes = knl.default_entrypoint.get_grid_sizes_for_insn_ids(insn_ids, None)
             transformed = True

@@ -619,10 +619,12 @@ def print_internal_einsum_dependencies(tunit):
 def get_pickled_tunits(directory_or_files):
 
     if isinstance(directory_or_files, str):
-        files = os.listdir(directory)
+        files = os.listdir(directory_or_files)#[directory_or_files + "/" + file for file in os.listdir(directory_or_files)]
+        directory = directory_or_files
     else:
         # Assume it is a list of file names
         files = directory_or_files
+        directory = ""
 
     tunit_dicts = []
 
@@ -642,12 +644,16 @@ def get_pickled_tunits(directory_or_files):
     '''
 
     for num, filename in list(enumerate(sorted(files))):
+        #f = filename
         #print(num, filename)
         f = os.path.join(directory, filename)
         # Skip the massive kernel for now
-        #if os.path.isfile(f) and filename.startswith("prefeinsum") and (filename.endswith(".pickle") or filename.endswith(".pkl")):
+        #print(filename)
 
-        if os.path.isfile(f) and (filename.endswith(".pickle") or filename.endswith(".pkl")):
+        # TODO: Change the pickle file prefix. Prefix is needed because other non-kernel pickle objects may be in the directory
+        if os.path.isfile(f) and filename.startswith("prefeinsum") and (filename.endswith(".pickle") or filename.endswith(".pkl")):
+            #if os.path.isfile(f) and (filename.endswith(".pickle") or filename.endswith(".pkl")):
+            #print("HERE")
             f = open(f, "rb")
             fdict = pickle.load(f)
             #pid = filename.split("_")[1]
@@ -850,7 +856,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                     print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
                     
                     handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
-                    if (non_red_axes, red_axes,) in handled_pairs and einsum_count >= 0:
+                    if (non_red_axes, red_axes,) in handled_pairs and einsum_count >= 100:
                         # Add indirection as a parameter?
                         autotune_standalone_subkernel(sk, queue, program_id=pid,
                                                       max_flop_rate=clpeak_flop_rate,
@@ -880,8 +886,10 @@ def test_default_transforms(sk_list, save_path=None):
     from meshmode.array_context import FusionContractorArrayContext
     actx = FusionContractorArrayContext(queue)
 
-
-    device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
+    device_latency=None
+    device_memory_bandwidth = None
+    clpeak_flop_rate = None
+    #device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
 
     for pid, sk, csk in sk_list:
         print(f"Testing subkernel: {pid}")
@@ -898,8 +906,11 @@ def test_default_transforms(sk_list, save_path=None):
             total_axes = non_red_axes + red_axes
             out_axes = total_axes - red_axes
 
-            if not indirection and red_axes > 0:
+            print("HERE1")
+            handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
+            if (non_red_axes, red_axes,) in handled_pairs and einsum_count >= 100:
 
+                print("HERE2")
                 transformed_sk = actx.transform_loopy_program(sk)
                 ret_dict = run_single_param_set_v2(queue, transformed_sk, [], generic_test,
                             max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
@@ -1007,7 +1018,7 @@ def main(arg):
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
     directories = [#"./pickled_programs_y3_prediction_order_1_eager",
-                    "./pickled_programs_y3_prediction_order_2_lazy",
+                    "../pickled_programs_y3_prediction_order_2_lazy",
                     #"./pickled_programs_wave",
                     #"./pickled_programs_prediction_order_1",
                     #"./pickled_programs_y3_prediction_order_1",
@@ -1031,7 +1042,7 @@ def main(arg):
         # Really a tuple, not a dict
         tunit_dicts = get_pickled_tunits(directory)
 
-        if True: # Tune a single macrokernel at a time.
+        if False: # Tune a single macrokernel at a time.
 
             platforms = cl.get_platforms()
             cl_ctx = cl.Context(
@@ -1063,7 +1074,7 @@ def main(arg):
  
 
 
-        if False: # Tune all of the subkernels
+        if True: # Tune all of the subkernels
             print("Done collecting tunits")
             # ID changes based on whether python was run with -O
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
@@ -1085,12 +1096,12 @@ def main(arg):
             exit()
             """
             print("Done collecting subkernels")
-            get_lazy_einsum_info(tunit_dicts, hjson_dir=save_path)
+            #get_lazy_einsum_info(tunit_dicts, hjson_dir=save_path)
             #exit()
 
-            #test_default_transforms(sk_list, save_path=directory + "/default_transforms_hjson")
+            test_default_transforms(sk_list, save_path=directory + "/default_transforms_hjson")
 
-            autotune_standalone_subkernels(sk_list, save_path=save_path)
+            #autotune_standalone_subkernels(sk_list, save_path=save_path)
 
             #compare_weighted_avg_frac_rooflines(directory, pid_dict)
 
