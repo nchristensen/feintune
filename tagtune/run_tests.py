@@ -43,9 +43,9 @@ lp.set_caching_enabled(False)
 import loopy.options
 loopy.options.ALLOW_TERMINAL_COLORS = False
 
-from __init__ import (gen_diff_knl, gen_diff_knl_fortran2,
+from tagtune.__init__ import (gen_diff_knl, gen_diff_knl_fortran2,
     apply_transformation_list, gen_elwise_linear_knl, gen_face_mass_knl, gen_face_mass_knl_merged)
-from grudge_tags import (IsDOFArray, IsSepVecDOFArray, IsOpArray,
+from tagtune.grudge_tags import (IsDOFArray, IsSepVecDOFArray, IsOpArray,
     IsSepVecOpArray, IsFaceDOFArray, IsFaceMassOpArray, IsVecDOFArray, IsVecOpArray, IsFourAxisDOFArray)
 #import  grudge.grudge_array_context as gac#import set_memory_layout
 
@@ -931,7 +931,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     #    print(knl_base)
     #    exit()
 
-    from __init__ import get_einsums
+    from tagtune.__init__ import get_einsums
     neinsums = len(get_einsums(knl_base))
     batch_size = neinsums # No batching is equivalent to one batch
 
@@ -1672,7 +1672,7 @@ if __name__ == "__main__":
     unpickle_and_run_test(*sys.argv[1:])
 
     """
-    from __init__ import gen_diff_knl, load_transformations_from_file, apply_transformation_list
+    from tagtune.__init__ import gen_diff_knl, load_transformations_from_file, apply_transformation_list
     from grudge.execution import diff_prg, elwise_linear_prg, face_mass_prg
 
     # Test existing optimizations

@@ -13,8 +13,8 @@ import os
 #import grudge.grudge_array_context as gac
 import loopy as lp
 from os.path import exists
-from run_tests import run_single_param_set_v2, generic_test
-from utils import convert, load_hjson, dump_hjson
+from tagtune.run_tests import run_single_param_set_v2, generic_test
+from tagtune.utils import convert, load_hjson, dump_hjson
 from hashlib import md5
 from random import shuffle
 #from grudge.execution import diff_prg, elwise_linear
@@ -161,7 +161,7 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     assert knl.default_entrypoint.options.return_dict
 
     if program_id is None:
-        from utils import unique_program_id
+        from tagtune.utils import unique_program_id
         pid = unique_program_id(knl)
     else:
         pid = program_id

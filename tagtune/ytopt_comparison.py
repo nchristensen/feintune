@@ -3,13 +3,14 @@
 import numpy as np
 from pandas import read_csv
 import matplotlib.pyplot as plt
+from tagtune.utils import load_hjson
+
 kernel_id = "7344480911b9231871c60bf856e21f6a3d3a2a30f1d106646db2dab7e5deb2ef"
 
 strategies = ["rf", "gbrt", "dummy"]#, "et", "gp"]
 
 base_directory = "./pickled_programs_prediction_order_3"
 
-from utils import load_hjson
 data = load_hjson(base_directory + "/four_axis_hjson_dummy" + "/" + kernel_id + ".hjson")["data"]
 roofline_flop_rate = data["roofline_flop_rate"]
 flops = data["flops"]

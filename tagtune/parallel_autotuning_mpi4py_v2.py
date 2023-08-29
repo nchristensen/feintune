@@ -13,7 +13,7 @@ import os
 import loopy as lp
 from os.path import exists
 from run_tests import run_single_param_set_v2, generic_test
-from utils import convert, dump_hjson, load_hjson
+from tagtune.utils import convert, dump_hjson, load_hjson
 #from grudge.execution import diff_prg, elwise_linear
 import mpi4py.MPI as MPI
 from mpi4py.futures import MPIPoolExecutor, MPICommExecutor
@@ -174,7 +174,7 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
 
     #knl = gac.set_memory_layout(knl)
     if program_id is None:
-        from utils import unique_program_id
+        from tagtune.utils import unique_program_id
         pid = unique_program_id(knl)
     else:
         pid = program_id

@@ -15,7 +15,7 @@ import numpy as np
 import os
 import loopy as lp
 from os.path import exists
-from utils import convert, load_hjson, dump_hjson
+from tagtune.utils import convert, load_hjson, dump_hjson
 from hashlib import md5
 from random import shuffle
 

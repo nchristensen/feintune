@@ -6,10 +6,10 @@ from meshmode.array_context import EinsumTag
 import pyopencl as cl
 import os
 from os.path import exists
-from utils import unique_program_id, convert, load_hjson, dump_hjson, get_domain_list, get_indirection_arrays
+from tagtune.utils import unique_program_id, convert, load_hjson, dump_hjson, get_domain_list, get_indirection_arrays
 import hjson
-from generators import createConfigSpace
-from ytopt_autotuning import ytopt_tuning
+from tagtune.generators import createConfigSpace
+from tagtune.ytopt_autotuning import ytopt_tuning
 from time import time
 
 use_charm=False
@@ -17,15 +17,14 @@ if use_charm:
     from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
     from charm4py.pool import PoolScheduler, Pool
     from charm4py.charm import Charm, CharmRemote
-    from parallel_autotuning_charm4py_v2 import parallel_autotune
+    from tagtune.parallel_autotuning_charm4py_v2 import parallel_autotune
 else:
-    from parallel_autotuning_mpi4py_v2 import parallel_autotune
+    from tagtune.parallel_autotuning_mpi4py_v2 import parallel_autotune
     import mpi4py.MPI as MPI
     comm = MPI.COMM_WORLD
 
-from generators import einsum3to2_kernel_tlist_generator_v2#, einsum4to2_kernel_tlist_generator_v2
-from run_tests import run_single_param_set_v2
-from run_tests import generic_test
+from tagtune.generators import einsum3to2_kernel_tlist_generator_v2#, einsum4to2_kernel_tlist_generator_v2
+from tagtune.run_tests import run_single_param_set_v2, generic_test
 
 
 # Get the barriers to divide computation into phases
@@ -151,7 +150,7 @@ def transform_macrokernel(tunit_dict, save_path, actx=None):
             if exists(hjson_file_str):
                 print("Found", hjson_file_str)
                 hjson = load_hjson(hjson_file_str)
-                from __init__ import apply_transformation_list
+                from tagtune.__init__ import apply_transformation_list
                 transformed_subkernels.append(apply_transformation_list(sk, hjson["transformations"])[0] )
             else:
                 print("Can't find", hjson_file_str)
@@ -285,7 +284,7 @@ def generate_subkernels(tunit, barriers, phases):
     return subkernels
 
 
-from __init__ import get_einsums, get_einsum_counts, get_einsum_types
+from tagtune.__init__ import get_einsums, get_einsum_counts, get_einsum_types
 
 def dump_subkernels_from_pickled(arg):
 

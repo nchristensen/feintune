@@ -1,15 +1,15 @@
 import numpy as np
 from pytools import memoize_in, memoize
 from meshmode.array_context import EinsumTag
-from decouple_domain import decouple_domain
-from utils import get_domain_list, get_iname_limits
+from tagtune.decouple_domain import decouple_domain # decouple_domain can likely be removed.
+from tagtune.utils import get_domain_list, get_iname_limits
 from frozendict import frozendict
 #import pyopencl as cl
 #import pyopencl.array
 #import pyopencl.clrandom
 
 import loopy as lp
-from grudge_tags import IsDOFArray, ParameterValue
+from tagtune.grudge_tags import IsDOFArray, ParameterValue
 #from loopy.version import LOOPY_USE_LANGUAGE_VERSION_2018_2
 #from loopy.kernel.data import AddressSpace
 
@@ -1786,7 +1786,7 @@ def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
                 print(key)
                 if key in prefetch_iname_dict:
                     existing_fetch_inames = prefetch_iname_dict[key]
-                    from utils import get_domain_list
+                    from tagtune.utils import get_domain_list
                     dl = dict(get_domain_list(subkernel))
                     #print("KEYS", dl.keys())
                     for entry in dl.keys():

@@ -2,12 +2,12 @@ import numpy as np
 import loopy as lp
 from frozendict import frozendict
 from meshmode.transform_metadata import FirstAxisIsElementsTag
-from grudge_tags import (IsDOFArray, IsSepVecDOFArray,
+from tagtune.grudge_tags import (IsDOFArray, IsSepVecDOFArray,
     IsOpArray, IsSepVecOpArray, IsFaceDOFArray, IsFaceMassOpArray,
     IsVecDOFArray, IsVecOpArray, IsFourAxisDOFArray)
 from pytools import memoize
-from __init__ import get_einsums
-from utils import get_indirection_arrays
+from tagtune.__init__ import get_einsums
+from tagtune.utils import get_indirection_arrays
 
 def k_inner_inner_options(start_val=None):
     #options = [8, 16, 4, 32]
@@ -312,7 +312,6 @@ def einsum3to2_kernel_tlist_generator(params, **kwargs):
 
 def createConfigSpace(queue, knl):
     import ConfigSpace as cs
-    from utils import get_indirection_arrays
 
     prefetch = len(get_indirection_arrays(knl)) == 0
 
@@ -609,7 +608,7 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
     return trans_list_list
 
 def get_trans_list(knl, params, prefetch=True):
-    from __init__ import get_einsum_types
+    from tagtune.__init__ import get_einsum_types
 
     ## Figure out what the inames are called
 
