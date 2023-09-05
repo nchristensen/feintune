@@ -301,7 +301,7 @@ def dump_subkernels_from_pickled(arg):
         print(num, filename)
         f = os.path.join(directory, filename)
         # Skip the massive kernel for now
-        if os.path.isfile(f) and filename.startswith("prefeinsum") and (filename.endswith(".pickle") or filename.endswith(".pkl")):
+        if os.path.isfile(f) and filename.startswith("prefeinsum") and (filename.endswith("_0.pickle") or filename.endswith(".pkl")):
             f = open(f, "rb")
             tunit, args = pickle.load(f)
             f.close()
@@ -427,7 +427,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
             ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate,
                              device_memory_bandwidth=device_memory_bandwidth,
                              device_latency=device_latency, timeout=60, save_path=save_path,
-                             max_evals=20, required_new_evals=0)
+                             max_evals=40, required_new_evals=0)
         else:
             print("ONLY TESTING THE FIRST 20 transformations")
             from random import shuffle
@@ -804,7 +804,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
     if save_path is None:
         save_path = "./hjson"
 
-    if False:
+    if True:
         if not use_charm:
             if comm.Get_rank() == 0:
                 # The latency is now obtained per-kernel so it probably needn't be obtained here.
@@ -883,22 +883,26 @@ def test_default_transforms(sk_list, save_path=None):
     queue = cl.CommandQueue(cl_ctx,
         properties=cl.command_queue_properties.PROFILING_ENABLE)
 
-    from meshmode.array_context import FusionContractorArrayContext
-    actx = FusionContractorArrayContext(queue)
+    from meshmode.array_context import FusionContractorArrayContext, PrefusedFusionContractorArrayContext
+    #actx = FusionContractorArrayContext(queue)
+    actx = PrefusedFusionContractorArrayContext(queue)
 
     device_latency=None
     device_memory_bandwidth = None
     clpeak_flop_rate = None
     #device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
 
-    for pid, sk, csk in sk_list:
-        print(f"Testing subkernel: {pid}")
+    gen_times = []
+
+    #for pid, sk, csk in sk_list:
+    for sk in sk_list:
+        #print(f"Testing subkernel: {pid}")
 
         einsum_counts = list(get_einsum_counts(sk).items())
         indirection = len(get_indirection_arrays(sk)) > 0
         if len(einsum_counts) > 0:
-            if len(einsum_counts) > 1:
-                raise ValueError("Subkernel has multiple einsum types")
+            #if len(einsum_counts) > 1:
+            #    raise ValueError("Subkernel has multiple einsum types")
 
             einsum_type, einsum_count = einsum_counts[0]
             non_red_axes = len(einsum_type[0])
@@ -906,22 +910,47 @@ def test_default_transforms(sk_list, save_path=None):
             total_axes = non_red_axes + red_axes
             out_axes = total_axes - red_axes
 
-            print("HERE1")
+            #print("HERE1")
             handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
-            if (non_red_axes, red_axes,) in handled_pairs and einsum_count >= 100:
+            if True:#(non_red_axes, red_axes,) in handled_pairs:# and einsum_count >= 100:
 
-                print("HERE2")
-                transformed_sk = actx.transform_loopy_program(sk)
+                #print("HERE2")
+                start = time()
+                try:
+                    transformed_sk = actx.transform_loopy_program(sk)
+                except NotImplementedError:
+                    transformed_sk = sk
+                end = time()
+                transform_time = end - start
+                start = time()
+                code = lp.generate_code_v2(transformed_sk).device_code()
+                end = time()
+                codegen_time = end - start
+
+                name = transformed_sk.default_entrypoint.name
+                print(name, transform_time, codegen_time)
+                
+                gen_times.append([name, transform_time, codegen_time])
+
+                """
                 ret_dict = run_single_param_set_v2(queue, transformed_sk, [], generic_test,
                             max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
                             device_latency=device_latency)
-                   
+                
+                ret_dict = dict(ret_dict)
+                ret_dict["data"]["transform_time"] = transform_time
+                ret_dict["data"]["codegen_time"] = codegen_time
                 print(ret_dict["data"])
                 # Should this functionality be a utility function
                 hjson_file_str = save_path + f"/{pid}.hjson"
                 out_file = open(hjson_file_str, "wt")
                 hjson.dump(ret_dict, out_file, default=convert)
                 out_file.close()
+                """
+    #print("PRINTING RESULTS")
+    #for name, transform_time, codegen_time in gen_times:
+    #    print(name, transform_time, codegen_time)
+
 
 def test_feinsum_transforms(tunits):
 
@@ -1038,7 +1067,7 @@ def main(arg):
     # Or just have the size be a parameter in the Bayesian optimization space.
 
     for directory in directories:
-        save_path = directory + "/hjson"
+        save_path = directory + "/hjson3"
         # Really a tuple, not a dict
         tunit_dicts = get_pickled_tunits(directory)
 
@@ -1058,7 +1087,6 @@ def main(arg):
             actx = None
 
             for tunit_dict in tunit_dicts:
-                #transformed_tunit = transform_macrokernel(tunit_dict, save_path)
 
                 transformed_tunit = transform_macrokernel(tunit_dict, save_path, actx=actx)
 
@@ -1077,7 +1105,8 @@ def main(arg):
         if True: # Tune all of the subkernels
             print("Done collecting tunits")
             # ID changes based on whether python was run with -O
-            sk_list, pid_dict = collect_subkernels(tunit_dicts)
+            #sk_list, pid_dict = collect_subkernels(tunit_dicts)
+            sk_list = [tunit_dict[1]["tunit"] for tunit_dict in tunit_dicts]
             """
             for item in sk_list:
                 sk = item[1].default_entrypoint

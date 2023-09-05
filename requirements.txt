@@ -14,6 +14,7 @@ pandas==1.5.2
 psutil==5.9.5
 pyopencl==2023.1.1
 pytools==2023.1.1
+meshmode
 
 # Not actually required (probably)
 #charm4py==1.0

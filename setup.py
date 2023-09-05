@@ -35,7 +35,7 @@ setup(name='Tagtune',
         'pyinstrument',
         #'schwimmbad',
         #'grudge',
-        #'meshmode',
+        'meshmode',
         #'mirgecom',
         'loopy'
       ]

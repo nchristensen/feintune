@@ -282,7 +282,7 @@ def measure_execution_latency(queue, tunit, arg_dict, nruns, warmup_runs):
 # tag basis
 
 #cache_arg_dict = {}
-def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup_runs=2):
+def generic_test(queue, kern, backend="OPENCL", nruns=5, warmup_runs=2):
 
     kern = lp.set_options(kern, "no_numpy")
     kern = lp.set_options(kern, "return_dict")
@@ -474,14 +474,14 @@ def analyze_knl_bandwidth(knl, avg_time, device_latency=None):
                         "device_latency": device_latency})
 
 
-def get_knl_flops(knl):
+def get_knl_flops(tunit):
 
-    #knl = knl.copy(silenced_warnings=(knl.silenced_warnings
-    #                                    + ["insn_count_subgroups_upper_bound",
-    #                                        "summing_if_branches_ops"]))
+    tunit = tunit.with_kernel(tunit.default_entrypoint.copy(silenced_warnings=(tunit.default_entrypoint.silenced_warnings
+                                        + ["insn_count_subgroups_upper_bound",
+                                            "summing_if_branches_ops"])))
 
     # There is a more complex version of this in meshmode.arraycontext
-    op_map = lp.get_op_map(knl, count_within_subscripts=False, subgroup_size=1)
+    op_map = lp.get_op_map(tunit, count_within_subscripts=False, subgroup_size=1)
     map_flops = 0
     for val in op_map.values():
         map_flops += val.eval_with_dict({})
@@ -919,7 +919,7 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=None, method="
 
     return avg_time, measured_latency, wall_clock_time
 
-def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, method=None, run_single_batch=True, error_return_time=max_double):#, method="thread"):
+def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, method=None, run_single_batch=False, error_return_time=max_double):#, method="thread"):
 
     # Timeout won't prevent applying transformations from hanging
 
