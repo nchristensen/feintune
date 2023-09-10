@@ -623,7 +623,7 @@ def get_pickled_tunits(directory_or_files):
         directory = directory_or_files
     else:
         # Assume it is a list of file names
-        files = directory_or_files
+        files = [os.path(file) for file in directory_or_files]
         directory = ""
 
     tunit_dicts = []
@@ -1071,6 +1071,7 @@ def main(arg):
         # Really a tuple, not a dict
         tunit_dicts = get_pickled_tunits(directory)
 
+
         if False: # Tune a single macrokernel at a time.
 
             platforms = cl.get_platforms()
@@ -1105,8 +1106,14 @@ def main(arg):
         if True: # Tune all of the subkernels
             print("Done collecting tunits")
             # ID changes based on whether python was run with -O
-            #sk_list, pid_dict = collect_subkernels(tunit_dicts)
-            sk_list = [tunit_dict[1]["tunit"] for tunit_dict in tunit_dicts]
+            sk_list, pid_dict = collect_subkernels(tunit_dicts)
+            #sk_list = [tunit_dict[1]["tunit"] for tunit_dict in tunit_dicts]
+            sk_list = [sk for _, sk, _ in sk_list]
+            for sk in sk_list:
+                sk_to_print = ["unfiltered_rhs_20"]
+                if sk.default_entrypoint.name in sk_to_print:
+                    print(sk)
+            exit()
             """
             for item in sk_list:
                 sk = item[1].default_entrypoint
