@@ -436,7 +436,8 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
 
             tdict = parallel_autotune(sk, 0, trans_list_list[:10], program_id=program_id,
                         max_flop_rate=max_flop_rate, device_latency=device_latency,
-                        device_memory_bandwidth=device_memory_bandwidth, save_path=save_path)
+                        device_memory_bandwidth=device_memory_bandwidth, save_path=save_path,
+                        timeout=60)
     else:
         print("Not tuning", sk.name)
         #raise(ValueError(f"Unhandled einsum type: {est}"))
