@@ -607,9 +607,149 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
 
     return trans_list_list
 
-def get_trans_list(knl, params, prefetch=True):
-    from tagtune.__init__ import get_einsum_types
 
+## Figure out the dimensions and categorize the args
+@memoize
+def get_args_and_arrays(knl):
+
+    e, i, j, x, f, r = get_inames(knl)       
+
+    # Find read dof arrays. These are the ones that will be prefetched
+    read_deps = frozenset()
+    write_deps = frozenset()
+    for instr in knl.default_entrypoint.instructions:
+        if isinstance(instr, lp.Assignment):
+            read_deps |= instr.read_dependency_names()
+            write_deps |= instr.write_dependency_names()
+
+    idof_arrays = []
+    jdof_arrays = []
+    op_arrays = []
+    face_dof_arrays = []
+    arg_dict = dict([(arg.name, arg) for arg in knl.default_entrypoint.args])
+    arg_dict.update(knl.default_entrypoint.temporary_variables)
+
+    n_elem = None
+    nx = nr = nf = None
+    n_in = n_out = None
+    sizes = frozenset()
+    #n_dof_arrays = 0
+    for arg in list(arg_dict.values()):
+        if arg.name in write_deps and len(arg.shape) == 2:
+            n_elem, n_out = arg.shape
+            fp_bytes = arg.dtype.dtype.itemsize
+            break
+        elif arg.name in write_deps and len(arg.shape) == 3:
+            nx, n_elem, n_out = arg.shape
+            fp_bytes = arg.dtype.dtype.itemsize
+            break
+
+    #"""
+    from tagtune.matching_brackets import matching_brackets_dict
+    arg_names = set(arg_dict.keys())
+    for i_num, instr in enumerate(knl.default_entrypoint.instructions):
+        #print("INSTRUCTION", i_num)
+        #print("HERE")
+        instr_str = str(instr)
+        #print("CREATING BRACKET DICT")
+        bracket_dict = matching_brackets_dict(instr_str)
+        #print("DONE CREATING BRACKET DICT")
+        instr_read_deps = instr.read_dependency_names()
+        #print("READ DEPS", instr_read_deps)
+        #print("ARG DICT VALUES", [entry.name for entry in arg_dict.values()])
+        arg_names_subset = instr_read_deps & arg_names
+
+        for name in arg_names_subset:
+            arg = arg_dict[name]
+            #print("HERE2")
+            #if n_in is not None:
+            #    break # We can't do this. We need the jdof arrays.
+            to_match = f"{name}[" # Could be problematic if "f{some_prefix}{name}[" is a read_dep
+            index = instr_str.find(to_match)
+            #print(to_match, index)
+            while index >= 0:
+                ob = index + len(to_match) - 1
+                cb = bracket_dict[ob]
+                #cb = matching_brackets(instr_str, ob)
+                instr_substr = instr_str[ob+1:cb]
+                #print(instr_substr, len(arg.shape))
+                if len(arg.shape) == 2:
+                    if f"{e}, {i}" == instr_substr:
+                        print("appending to idof arrays")
+                        idof_arrays.append(name)
+                        n_elem, n_out = arg.shape
+                    elif f"{e}, {j}" == instr_substr:
+                        print("appending to jdof_arrays")
+                        jdof_arrays.append(name)
+                        n_elem, n_in = arg.shape
+                    elif f"[{e}], {j}" in instr_substr:
+                        print("[e], j")
+                        jdof_arrays.append(name)
+                        # Might not be correct for n_elem.
+                        n_elem, n_in = arg.shape
+                    elif f"{e}, " in instr_substr:
+                        print("e,")
+                        #jdof_arrays.append(name)
+                        n_elem, _ = arg.shape
+                    elif f"{i}, {j}" == instr_substr:
+                        print("i,j")
+                        op_arrays.append(name)
+                        n_out, n_in = arg.shape
+                    elif f"{f}, {e}" == instr_substr:
+                        print("f, e,")
+                        nf, n_elem = arg.shape
+                    else:
+                        print(instr_str)
+                        raise RuntimeError("Could not parse array indices")
+                elif len(arg.shape) == 3:
+                    if f"{x}, {r}, {e}" == instr_substr:
+                        # Jacobian array. Not certain if
+                        # this is worth prefetching. The cache
+                        # may be able to handle it well enough.
+                        nx, nr, n_elem = arg.shape
+                    elif f"{f}, {e}, {j}" == instr_substr:
+                        face_dof_arrays.append(name)
+                        nf, n_elem, n_in = arg.shape
+                    elif f"{r}, {i}, {j}" == instr_substr:
+                        op_arrays.append(name)
+                        nr, n_out, n_in = arg.shape
+                    elif f"{i}, {f}, {j}" == instr_substr:
+                        op_arrays.append(name)
+                        n_out, nf, n_in = arg.shape
+                    else:
+                        print(instr_str)
+                        raise RuntimeError("Could not parse array indices")
+
+                index = instr_str.find(to_match, ob)
+                #print(index)
+                #assert instr_str[ob:].find(to_match) == -1 # Check that arg only shows up once in an instruction
+    #"""
+    """
+    for arg in arg_dict.values():
+        if arg.name in read_deps:
+            #if len(arg.shape) == 2 and arg arg.shape[0] == n_out and arg.shape[1] == n_in:
+                
+            if len(arg.shape) == 2 and arg.shape[0] == n_elem:
+                # Not robust to reduce(sum, [j], arg0[e, i]*arg1[i, j]*arg2[e, j])
+                # Not robust to square arrays
+                n_in = arg.shape[1]
+                jdof_arrays.append(arg.name)
+            elif len(arg.shape) == 3:
+                if arg.shape[-1] == n_elem:
+                    _, nr, n_elem = arg.shape
+                elif arg.shape[1] == n_elem:
+                    nf, n_elem, n_in = arg.shape
+                    face_dof_arrays.append(arg.name)
+    """
+
+    # Rather pointless to intersect. We already check if they are in read_deps
+    #read_jdof_arrays = read_deps & frozenset(jdof_arrays)
+    return frozendict(arg_dict), frozenset(jdof_arrays), frozenset(face_dof_arrays), n_in
+
+@memoize
+def get_inames(knl):
+
+    from tagtune.__init__ import get_einsum_types
     ## Figure out what the inames are called
 
     # Hacky, is there a better way to get this?
@@ -671,139 +811,12 @@ def get_trans_list(knl, params, prefetch=True):
         if e is None or i is None or j is None:
             raise ValueError("Invalid iname strings")
 
-    ## Figure out the dimensions and categorize the args
+    return e, i, j, x, f, r
 
-    @memoize
-    def get_args_and_arrays(knl):
-        # Find read dof arrays. These are the ones that will be prefetched
-        read_deps = frozenset()
-        write_deps = frozenset()
-        for instr in knl.default_entrypoint.instructions:
-            if isinstance(instr, lp.Assignment):
-                read_deps |= instr.read_dependency_names()
-                write_deps |= instr.write_dependency_names()
 
-        idof_arrays = []
-        jdof_arrays = []
-        op_arrays = []
-        face_dof_arrays = []
-        arg_dict = dict([(arg.name, arg) for arg in knl.default_entrypoint.args])
-        arg_dict.update(knl.default_entrypoint.temporary_variables)
+def get_trans_list(knl, params, prefetch=True):
 
-        n_elem = None
-        nx = nr = nf = None
-        n_in = n_out = None
-        sizes = frozenset()
-        #n_dof_arrays = 0
-        for arg in list(arg_dict.values()):
-            if arg.name in write_deps and len(arg.shape) == 2:
-                n_elem, n_out = arg.shape
-                fp_bytes = arg.dtype.dtype.itemsize
-                break
-            elif arg.name in write_deps and len(arg.shape) == 3:
-                nx, n_elem, n_out = arg.shape
-                fp_bytes = arg.dtype.dtype.itemsize
-                break
-
-        #"""
-        from matching_brackets import matching_brackets_dict
-        arg_names = set(arg_dict.keys())
-        for instr in knl.default_entrypoint.instructions:
-            #print("HERE")
-            instr_str = str(instr)
-            #print("CREATING BRACKET DICT")
-            bracket_dict = matching_brackets_dict(instr_str)
-            #print("DONE CREATING BRACKET DICT")
-            instr_read_deps = instr.read_dependency_names()
-            #print("READ DEPS", instr_read_deps)
-            #print("ARG DICT VALUES", [entry.name for entry in arg_dict.values()])
-            arg_names_subset = instr_read_deps & arg_names
-
-            for name in arg_names_subset:
-                arg = arg_dict[name]
-                #print("HERE2")
-                #if n_in is not None:
-                #    break # We can't do this. We need the jdof arrays.
-                to_match = f"{name}[" # Could be problematic if "f{some_prefix}{name}[" is a read_dep
-                index = instr_str.find(to_match)
-                #print(to_match, index)
-                while index >= 0:
-                    ob = index + len(to_match) - 1
-                    cb = bracket_dict[ob]
-                    #cb = matching_brackets(instr_str, ob)
-                    instr_substr = instr_str[ob+1:cb]
-                    #print(instr_substr, len(arg.shape))
-                    if len(arg.shape) == 2:
-                        if f"{e}, {i}" == instr_substr:
-                            print("appending to idof arrays")
-                            idof_arrays.append(name)
-                            n_elem, n_out = arg.shape
-                        elif f"{e}, {j}" == instr_substr:
-                            print("appending to jdof_arrays")
-                            jdof_arrays.append(name)
-                            n_elem, n_in = arg.shape
-                        elif f"[{e}], {j}" in instr_substr:
-                            print("[e], j")
-                            jdof_arrays.append(name)
-                            # Might not be correct for n_elem.
-                            n_elem, n_in = arg.shape
-                        elif f"{e}, " in instr_substr:
-                            print("e,")
-                            #jdof_arrays.append(name)
-                            n_elem, _ = arg.shape
-                        elif f"{i}, {j}" == instr_substr:
-                            print("i,j")
-                            op_arrays.append(name)
-                            n_out, n_in = arg.shape
-                        elif f"{f}, {e}" == instr_substr:
-                            print("f, e,")
-                            nf, n_elem = arg.shape
-                        else:
-                            print(instr_str)
-                            raise RuntimeError("Could not parse array indices")
-                    elif len(arg.shape) == 3:
-                        if f"{x}, {r}, {e}" == instr_substr:
-                            # Jacobian array. Not certain if
-                            # this is worth prefetching. The cache
-                            # may be able to handle it well enough.
-                            nx, nr, n_elem = arg.shape
-                        elif f"{f}, {e}, {j}" == instr_substr:
-                            face_dof_arrays.append(name)
-                            nf, n_elem, n_in = arg.shape
-                        elif f"{r}, {i}, {j}" == instr_substr:
-                            op_arrays.append(name)
-                            nr, n_out, n_in = arg.shape
-                        elif f"{i}, {f}, {j}" == instr_substr:
-                            op_arrays.append(name)
-                            n_out, nf, n_in = arg.shape
-                        else:
-                            print(instr_str)
-                            raise RuntimeError("Could not parse array indices")
-
-                    index = instr_str.find(to_match, ob)
-                    #assert instr_str[ob:].find(to_match) == -1 # Check that arg only shows up once in an instruction
-        #"""
-        """
-        for arg in arg_dict.values():
-            if arg.name in read_deps:
-                #if len(arg.shape) == 2 and arg arg.shape[0] == n_out and arg.shape[1] == n_in:
-                    
-                if len(arg.shape) == 2 and arg.shape[0] == n_elem:
-                    # Not robust to reduce(sum, [j], arg0[e, i]*arg1[i, j]*arg2[e, j])
-                    # Not robust to square arrays
-                    n_in = arg.shape[1]
-                    jdof_arrays.append(arg.name)
-                elif len(arg.shape) == 3:
-                    if arg.shape[-1] == n_elem:
-                        _, nr, n_elem = arg.shape
-                    elif arg.shape[1] == n_elem:
-                        nf, n_elem, n_in = arg.shape
-                        face_dof_arrays.append(arg.name)
-        """
-        # Rather pointless to intersect. We already check if they are in read_deps
-        #read_jdof_arrays = read_deps & frozenset(jdof_arrays)
-        return frozendict(arg_dict), frozenset(jdof_arrays), frozenset(face_dof_arrays), n_in
-        
+    e, i, j, x, f, r = get_inames(knl)       
     arg_dict, read_jdof_arrays, face_dof_arrays, n_in = get_args_and_arrays(knl)
 
     ## Figure out the number of batches
