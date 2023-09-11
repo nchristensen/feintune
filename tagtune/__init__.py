@@ -833,7 +833,7 @@ def get_alias_sets(batch_dict_list):
         return tuple(alias_sets)
 
 
-from qprofile import qprofile, qinstrument
+from tagtune.qprofile import qprofile, qinstrument
 
 # Should probably be renamed batch_einsums_and_prefetch or similar
 # these transformations seem to be linked

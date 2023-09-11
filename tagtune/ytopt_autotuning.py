@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Union, Optional
-from generators import get_trans_list
-from run_tests import generic_test, run_single_param_set_v2
+from tagtune.generators import get_trans_list
+from tagtune.run_tests import generic_test, run_single_param_set_v2
 from autotune import TuningProblem
 from autotune.space import *
 from skopt.space import Real

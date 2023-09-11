@@ -623,8 +623,8 @@ def get_pickled_tunits(directory_or_files):
         directory = directory_or_files
     else:
         # Assume it is a list of file names
-        files = [os.path(file) for file in directory_or_files]
-        directory = ""
+        files = directory_or_files#[ for file in directory_or_files]
+        directory = None
 
     tunit_dicts = []
 
@@ -644,16 +644,22 @@ def get_pickled_tunits(directory_or_files):
     '''
 
     for num, filename in list(enumerate(sorted(files))):
-        #f = filename
-        #print(num, filename)
-        f = os.path.join(directory, filename)
-        # Skip the massive kernel for now
-        #print(filename)
+        if directory is not None:
+            f = os.path.join(directory, filename)
+        else:
+            f = os.path.normpath(filename)
+
+        _, filename = os.path.split(f)
+        filename = str(filename)
+
+        print(filename)
+        print(os.path.isfile(f))
+        print(filename.startswith("prefeinsum"))
+        print(filename.endswith(".pickle"))
 
         # TODO: Change the pickle file prefix. Prefix is needed because other non-kernel pickle objects may be in the directory
         if os.path.isfile(f) and filename.startswith("prefeinsum") and (filename.endswith(".pickle") or filename.endswith(".pkl")):
             #if os.path.isfile(f) and (filename.endswith(".pickle") or filename.endswith(".pkl")):
-            #print("HERE")
             f = open(f, "rb")
             fdict = pickle.load(f)
             #pid = filename.split("_")[1]
@@ -781,7 +787,7 @@ def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
 
 
 def get_device_roofline_data(queue):
-    import empirical_roofline as er
+    import tagtune.empirical_roofline as er
     results_list = er.loopy_bandwidth_test(queue, fast=True, print_results=True, fill_on_device=True)
     device_latency = er.get_min_device_latency(results_list)
     loopy_bw = er.get_latency_adjusted_max_device_memory_bandwidth(results_list)
@@ -804,7 +810,8 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
     if save_path is None:
         save_path = "./hjson"
 
-    if True:
+    # TODO: Cache the roofline result or pass it in as an argument.
+    if False:
         if not use_charm:
             if comm.Get_rank() == 0:
                 # The latency is now obtained per-kernel so it probably needn't be obtained here.

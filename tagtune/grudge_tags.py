@@ -1,5 +1,5 @@
 from pytools.tag import Tag, UniqueTag
-from transform_metadata import IsDOFArray, IsOpArray, ParameterValue, EinsumArgsTags
+from tagtune.transform_metadata import IsDOFArray, IsOpArray, ParameterValue, EinsumArgsTags
 #from meshmode.transform_metadata import IsDOFArray, IsOpArray, ParameterValue, EinsumArgsTags
 
 class KernelDataTag(Tag): # Delete this when no longer needed

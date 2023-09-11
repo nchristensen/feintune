@@ -12,7 +12,7 @@ import os
 #import grudge.grudge_array_context as gac
 import loopy as lp
 from os.path import exists
-from run_tests import run_single_param_set_v2, generic_test
+from tagtune.run_tests import run_single_param_set_v2, generic_test
 from tagtune.utils import convert, dump_hjson, load_hjson
 #from grudge.execution import diff_prg, elwise_linear
 import mpi4py.MPI as MPI
