@@ -1,0 +1,1 @@
+Need to install old version of cython (see the ConfigSpace repo) and possibly use an old version of Python. Only 3.9 has been tested so far.
