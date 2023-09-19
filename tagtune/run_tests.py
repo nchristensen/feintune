@@ -952,9 +952,11 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             start = time.time()
             #import pdb; pdb.set_trace()
             knl, sb_knl = func_timeout(timeout, apply_transformation_list, args=(knl_base, trans_list,))
-            knl = func_timeout(timeout, lp.preprocess_kernel, args=(knl,))
+            dt = time.time() - start
+            knl = func_timeout(timeout - dt, lp.preprocess_kernel, args=(knl,))
             insn_ids = tuple([insn.id for insn in knl.default_entrypoint.instructions])
-            group_sizes, local_sizes = func_timeout(timeout, knl.default_entrypoint.get_grid_sizes_for_insn_ids, args=(insn_ids, None,))
+            dt = time.time() - start
+            group_sizes, local_sizes = func_timeout(timeout - dt, knl.default_entrypoint.get_grid_sizes_for_insn_ids, args=(insn_ids, None,))
             end = time.time()
             transformed = True
             print("Transformation, preprocessing, and obtaining grid sizes required", end - start, "seconds")
@@ -1067,7 +1069,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             batch_size = trans[1][0]
 
     data = {"avg_time": avg_time,
-            "avg_time_predicted": avg_time*(neinsums/batch_size) if run_single_batch else avg_time,
+            "avg_time_predicted": avg_time*(neinsums/batch_size) if (run_single_batch and avg_time != error_return_time) else avg_time,
             "wall_clock_time": wall_clock_time, 
             "single_batch": run_single_batch, 
             "neinsums": neinsums,
