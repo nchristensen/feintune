@@ -160,7 +160,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
     global exec_id
 
     if program_id is None:
-        from utils import unique_program_id
+        from tagtune.utils import unique_program_id
         pid = unique_program_id(knl)
     else:
         pid = program_id
