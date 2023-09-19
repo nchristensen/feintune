@@ -423,11 +423,13 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
         if use_ytopt:
             #print("HERE")
             #exit()
+            #eval_str = "mpi_comm_executor"
+            eval_str = "mpi_pool_executor"
             input_space = createConfigSpace(queue, sk)
             ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate,
                              device_memory_bandwidth=device_memory_bandwidth,
                              device_latency=device_latency, timeout=60, save_path=save_path,
-                             max_evals=40, required_new_evals=0)
+                             max_evals=40, required_new_evals=0, eval_str=eval_str)
         else:
             print("ONLY TESTING THE FIRST 20 transformations")
             from random import shuffle

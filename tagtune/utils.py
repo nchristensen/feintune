@@ -47,7 +47,7 @@ def unique_program_id(tunit, attempt_normalization=True):
         try:
             # Not every einsum can currently be normalized, for instance
             # if it has a non-reduction RHS or if it has indirection
-            canonical_einsum = f.normalize_einsum(f.match_einsum(tunit))
+            canonical_einsum = f.canonicalize_einsum(f.get_a_matched_einsum(tunit))
             key = kb(canonical_einsum)
             #print("Successfully normalized einsum")
             #print(canonical_einsum)
