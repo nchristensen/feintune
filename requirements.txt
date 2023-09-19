@@ -10,7 +10,7 @@ loopy>=2023.1
 matplotlib==3.7.2
 mpi4py==3.1.4
 numpy==1.25.2
-pandas==1.5.2
+pandas==1.5.3
 psutil==5.9.5
 pyopencl==2023.1.1
 pytools==2023.1.1
@@ -40,3 +40,5 @@ dh_scikit_optimize @ git+https://github.com/ytopt-team/scikit-optimize
 autotune @ git+https://github.com/ytopt-team/autotune@version1
 ytopt.egg @ git+https://github.com/nchristensen/ytopt@executor-evaluators
 ConfigSpace @ git+https://github.com/nchristensen/ConfigSpace@ForbiddenCallableRelation
+
+# Also needs clpeak from conda. Not sure how to add tha/t

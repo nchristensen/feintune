@@ -421,13 +421,11 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
     handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
     if (len(est[0]), len(est[1]),) in handled_pairs:
         if use_ytopt:
-            #print("HERE")
-            #exit()
             input_space = createConfigSpace(queue, sk)
             ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate,
                              device_memory_bandwidth=device_memory_bandwidth,
                              device_latency=device_latency, timeout=60, save_path=save_path,
-                             max_evals=40, required_new_evals=0)
+                             max_evals=10, required_new_evals=0)
         else:
             print("ONLY TESTING THE FIRST 20 transformations")
             from random import shuffle
@@ -898,12 +896,14 @@ def test_default_transforms(sk_list, save_path=None):
     device_latency=None
     device_memory_bandwidth = None
     clpeak_flop_rate = None
-    #device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
+
+    if False:
+        device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
 
     gen_times = []
 
-    #for pid, sk, csk in sk_list:
-    for sk in sk_list:
+    for pid, sk, csk in sk_list:
+    #for sk in sk_list:
         #print(f"Testing subkernel: {pid}")
 
         einsum_counts = list(get_einsum_counts(sk).items())
@@ -918,11 +918,10 @@ def test_default_transforms(sk_list, save_path=None):
             total_axes = non_red_axes + red_axes
             out_axes = total_axes - red_axes
 
-            #print("HERE1")
             handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
-            if True:#(non_red_axes, red_axes,) in handled_pairs:# and einsum_count >= 100:
+            #if True:
+            if (non_red_axes, red_axes,) in handled_pairs and einsum_count >= 100:
 
-                #print("HERE2")
                 start = time()
                 try:
                     transformed_sk = actx.transform_loopy_program(sk)
@@ -931,6 +930,7 @@ def test_default_transforms(sk_list, save_path=None):
                 end = time()
                 transform_time = end - start
                 start = time()
+                """
                 code = lp.generate_code_v2(transformed_sk).device_code()
                 end = time()
                 codegen_time = end - start
@@ -939,22 +939,22 @@ def test_default_transforms(sk_list, save_path=None):
                 print(name, transform_time, codegen_time)
                 
                 gen_times.append([name, transform_time, codegen_time])
-
                 """
+                #"""
                 ret_dict = run_single_param_set_v2(queue, transformed_sk, [], generic_test,
                             max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
                             device_latency=device_latency)
                 
-                ret_dict = dict(ret_dict)
-                ret_dict["data"]["transform_time"] = transform_time
-                ret_dict["data"]["codegen_time"] = codegen_time
-                print(ret_dict["data"])
+                #ret_dict = dict(ret_dict)
+                #ret_dict["data"]["transform_time"] = transform_time
+                #ret_dict["data"]["codegen_time"] = codegen_time
+                #print(ret_dict["data"])
                 # Should this functionality be a utility function
                 hjson_file_str = save_path + f"/{pid}.hjson"
                 out_file = open(hjson_file_str, "wt")
                 hjson.dump(ret_dict, out_file, default=convert)
                 out_file.close()
-                """
+                #"""
     #print("PRINTING RESULTS")
     #for name, transform_time, codegen_time in gen_times:
     #    print(name, transform_time, codegen_time)
@@ -1116,12 +1116,14 @@ def main(arg):
             # ID changes based on whether python was run with -O
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
             #sk_list = [tunit_dict[1]["tunit"] for tunit_dict in tunit_dicts]
-            sk_list = [sk for _, sk, _ in sk_list]
-            for sk in sk_list:
-                sk_to_print = ["unfiltered_rhs_20"]
-                if sk.default_entrypoint.name in sk_to_print:
-                    print(sk)
-            exit()
+            #"""
+            #sk_list = [sk for _, sk, _ in sk_list]
+            #for sk in sk_list:
+            #    sk_to_print = ["unfiltered_rhs_20"]
+            #    if sk.default_entrypoint.name in sk_to_print:
+            #        print(sk)
+            #exit()
+            #"""
             """
             for item in sk_list:
                 sk = item[1].default_entrypoint
