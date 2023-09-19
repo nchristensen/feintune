@@ -265,7 +265,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
                       p["iii"],
                       p["ji"],)
 
-            from generators import get_trans_list
+            from tagtune.generators import get_trans_list
             trans_list = get_trans_list(knl, params)
 
 
