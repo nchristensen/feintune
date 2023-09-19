@@ -295,7 +295,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
                         device_latency=device_latency,
                         timeout=timeout)
             
-            from utils import dump_hjson
+            from tagtune.utils import dump_hjson
             hjson_file_str = save_path + "/" + pid + ".hjson"
             dump_hjson(hjson_file_str, tdict)
 
