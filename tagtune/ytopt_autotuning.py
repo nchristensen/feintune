@@ -155,7 +155,7 @@ class ObjectiveFunction(object):
 
 
 # TODO: Change default max_evals
-def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, save_path=None, max_evals=10, required_new_evals=0):
+def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, save_path=None, max_evals=10, required_new_evals=0, eval_str="threadpool"):
 
     global exec_id
 
@@ -173,7 +173,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
     #eval_str = "mpi_comm_executor"
     #eval_str = "mpi_pool_executor"
     #eval_str = "charm4py_pool_executor"
-    eval_str = "threadpool"
+    #eval_str = "threadpool"
     #eval_str = "processpool"
     #eval_str = "ray"
 

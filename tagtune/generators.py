@@ -33,7 +33,7 @@ def k_inner_outer_options(n_in, k_inner_inner, sm_size,
 
     #Arbitrarily limit to at max 6 inline to limit search space
     ilp_limit = min(nelem // k_inner_inner, 6) if nelem is not None else 6
-    options = list(k_inner_inner*options[options <= ilp_limit])
+    options = (k_inner_inner*options[options <= ilp_limit]).tolist()
 
     start_ind = 0 if start_val is None else options.index(start_val)
     options = options[start_ind:]
@@ -43,7 +43,7 @@ def i_inner_inner_options(n_out, k_inner_inner=1, max_work_group_size=1024, star
     factors = np.arange(1, n_out+1)[(n_out % np.arange(1, n_out+1)) == 0]
     # Ensure total number of workitems is less than maximum
     usable_factors = factors[factors*k_inner_inner <= max_work_group_size]
-    options = sorted(usable_factors, reverse=False)
+    options = sorted(usable_factors.tolist(), reverse=False)
     start_ind = 0 if start_val is None else options.index(start_val)
     options = options[start_ind:]
     return options
@@ -57,7 +57,7 @@ def i_inner_outer_options(n_out, i_inner_inner, start_val=None):
     # i_outer, i_inner_outer, and i_inner_inner are all 1
     #inline = np.array([1]) if n_out == 1 else np.arange(1, (n_out // i_inner_inner) + 1)
     inline = np.arange(1, max(1,(n_out // i_inner_inner)) + 1)
-    options = list(i_inner_inner*inline[n_out % (inline*i_inner_inner) == 0])
+    options = (i_inner_inner*inline[n_out % (inline*i_inner_inner) == 0]).tolist()
     start_ind = 0 if start_val is None else options.index(start_val)
     options = options[start_ind:]
     return options
@@ -66,7 +66,7 @@ def i_inner_outer_options(n_out, i_inner_inner, start_val=None):
 def j_inner_options(n_in, start_val=None):
 
     start = 1
-    factors = list(np.arange(start, n_in + 1)[(n_in % np.arange(start, n_in + 1)) == 0])
+    factors = (np.arange(start, n_in + 1)[(n_in % np.arange(start, n_in + 1)) == 0]).tolist()
     #factors = list(np.arange(1, n_in + 1)[(n_in % np.arange(1, n_in + 1)) == 0])
     # Should this be limited by the number of registers
     start_ind = 0 if start_val is None else factors.index(start_val)
