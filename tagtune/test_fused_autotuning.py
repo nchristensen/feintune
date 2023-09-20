@@ -421,7 +421,11 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
     handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
     if (len(est[0]), len(est[1]),) in handled_pairs:
         if use_ytopt:
-            eval_str = "mpi_comm_executor"
+            # Won't work with charm. But the charm4py executor is broken anyway.
+            if comm.Get_size() <= 1:
+                eval_str = "threadpool"
+            else:
+                eval_str = "mpi_comm_executor"
             #eval_str = "mpi_pool_executor"
             input_space = createConfigSpace(queue, sk)
             ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate,
