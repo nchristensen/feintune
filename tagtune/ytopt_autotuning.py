@@ -88,7 +88,7 @@ def test(args):
             device_memory_bandwidth=args["device_memory_bandwidth"],
             device_latency=args["device_latency"],
             timeout=args["timeout"],
-            method="thread",#None
+            method="thread",#"subprocess",#None
             run_single_batch=True,
             error_return_time=args["timeout"])
 
@@ -232,19 +232,23 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
 
     pre_existing_evals = len(initial_observations)
 
-    max_evals = max(max_evals, len(initial_observations) + required_new_evals)
+    max_evals = 1#max(max_evals, len(initial_observations) + required_new_evals)
 
-    # Note that the initial observations count toward max_evals
+    # Note that the initial observations count toward max_evals.
+    # --Is this actually true?
     searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner, set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations)
-    print("==========BEGINNING SEARCH=============")
 
-    searcher.main()
-
-    print("======FINISHING SEARCHING========")
+    if pre_existing_evals < max_evals:
+        print("==========BEGINNING SEARCH=============")
+        searcher.main()
+        print("======FINISHING SEARCHING========")
+    else:
+        print("=======SKIPPING SEARCH: EXISTING EVALS >= MAX_EVALS")
 
     best_result = None
 
-    if exec_id == 0:
+    # Not sure if this works for ray
+    if exec_id == 0 and "mpi" in eval_str or "mpi" not in eval_str:
 
         # Write best result to hjson file
         with open(csv_file_str) as csvfile:
@@ -289,15 +293,23 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
             #test_id, tdict = test(args)
 
             # Re-run to obtain performance data and null-kernel latency
-            tdict = run_single_param_set_v2(in_queue, knl, trans_list, generic_test,
-                        max_flop_rate=max_flop_rate,
-                        device_memory_bandwidth=device_memory_bandwidth,
-                        device_latency=device_latency,
-                        timeout=timeout)
-            
-            from tagtune.utils import dump_hjson
+            # since ytopt doesn't appear to have a way to return ancillary data.
+            # Could have each rank/process/thread write to a file and then recombine the 
+            # results.
             hjson_file_str = save_path + "/" + pid + ".hjson"
-            dump_hjson(hjson_file_str, tdict)
+
+            if not exists(hjson_file_str) or pre_existing_evals < max_evals:
+                tdict = run_single_param_set_v2(in_queue, knl, trans_list, generic_test,
+                            max_flop_rate=max_flop_rate,
+                            device_memory_bandwidth=device_memory_bandwidth,
+                            device_latency=device_latency,
+                            timeout=timeout,
+                            method="thread",#"subprocess",
+                            run_single_batch="True",
+                            error_return_time=timeout)
+                
+                from tagtune.utils import dump_hjson
+                dump_hjson(hjson_file_str, tdict)
 
     print("======RETURNING FROM SEARCH========")
     #exit()

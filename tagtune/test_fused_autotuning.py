@@ -110,10 +110,14 @@ def assemble_transformed_macrokernel(macrokernel, subkernels):
     new_instructions = subkernels[0].default_entrypoint.instructions
     new_instructions_all += new_instructions
     domains = subkernels[0].default_entrypoint.domains
+    temporaries = macrokernel.default_entrypoint.temporary_variables
+    temporaries |= subkernels[0].default_entrypoint.temporary_variables
+
     for barrier, subkernel in zip(barriers, subkernels[1:]):
         barrier.depends_on = frozenset([instr.id for instr in new_instructions])
         new_instructions_all.append(barrier)
         domains = domains + subkernel.default_entrypoint.domains
+        temporaries |= subkernel.default_entrypoint.temporary_variables
 
         new_instructions = []
         for sk_instruction in subkernel.default_entrypoint.instructions:
@@ -123,35 +127,43 @@ def assemble_transformed_macrokernel(macrokernel, subkernels):
 
     # Also need to copy the domains and inames
     new_macrokernel = macrokernel.default_entrypoint.copy(instructions=new_instructions_all,
-                                                          domains=domains)
+                                                          domains=domains,
+                                                          temporary_variables=temporaries)
     #print(new_macrokernel)
     #exit()
     return macrokernel.with_kernel(new_macrokernel)
 
 # FIXME: Needs to look at the csv file instead of the hjson file
 # FIXME: Just return a list of transform dictionaries.
-def transform_macrokernel(tunit_dict, save_path, actx=None):
+def transform_macrokernel(tunit_dict, save_path, in_actx=None):
     
     sk_list, pid_counts = collect_subkernels([tunit_dict])
-    if actx is None:
+    if in_actx is None:
         autotune_standalone_subkernels(sk_list, save_path=save_path)
     transformed_subkernels = []
 
+    sk_to_avoid = []#["frozen_inv_metric_deriv_vol_0"]
+    tunit_to_avoid = ["frozen_inv_metric_deriv_vol"]
+
     for pid, sk, csk in sk_list:
 
-        if actx is not None:
-            default_transformed_sk = actx.transform_loopy_program(sk)
+        if in_actx is not None:
+            default_transformed_sk = in_actx.transform_loopy_program(sk)
             transformed_subkernels.append(default_transformed_sk)
         else:
 
             #pid = unique_program_id(sk)
             # Tune the subkernel
             hjson_file_str = save_path + "/" + pid + ".hjson"
-            if exists(hjson_file_str):
+            if exists(hjson_file_str) and  \
+               sk.default_entrypoint.name not in sk_to_avoid and \
+               tunit_dict[1]["tunit"].default_entrypoint.name not in tunit_to_avoid:
+
                 print("Found", hjson_file_str)
                 hjson = load_hjson(hjson_file_str)
                 from tagtune.__init__ import apply_transformation_list
                 transformed_subkernels.append(apply_transformation_list(sk, hjson["transformations"])[0] )
+
             else:
                 print("Can't find", hjson_file_str)
                 # Should probably apply the default transformations
@@ -162,24 +174,30 @@ def transform_macrokernel(tunit_dict, save_path, actx=None):
                 queue = cl.CommandQueue(cl_ctx,
                     properties=cl.command_queue_properties.PROFILING_ENABLE)
 
-                from meshmode.array_context import FusionContractorArrayContext
-                actx = FusionContractorArrayContext(queue)
+                from meshmode.array_context import PrefusedFusionContractorArrayContext
+                actx = PrefusedFusionContractorArrayContext(queue)
                 # Currently fails
-                #transformed_subkernels.append(actx.transform_loopy_program(sk))
-                transformed_subkernels.append(sk)
+
+                print("TRANSFORMING")
+                tsk = actx.transform_loopy_program(sk)
+                transformed_subkernels.append(tsk)
+                print("DONE TRANSFORMING")
+                #transformed_subkernels.append(sk)
             # Transform ...
 
             #transformed_subkernels.append(transformed_subkernel)
 
         #exit()
 
-        print("PRE-TRANSFORMATION")
-    print(tunit_dict[1]["tunit"])
+        #print("PRE-TRANSFORMATION")
+    #print(tunit_dict[1]["tunit"])
+    print("REASSEMBLING")
     transformed_tunit = assemble_transformed_macrokernel(tunit_dict[1]["tunit"], transformed_subkernels)
-    
-    print("POST_TRANSFORMATION")
-    print(transformed_tunit)
-    print("END OF KERNEL")
+    print("DONE REASSEMBLING")    
+
+    #print("POST_TRANSFORMATION")
+    #print(transformed_tunit)
+    #print("END OF KERNEL")
     
     return transformed_tunit
 
@@ -417,9 +435,10 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
     est = einsum_types[0]
 
     use_ytopt = True
+    indirection = len(get_indirection_arrays(sk)) > 0
 
     handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
-    if (len(est[0]), len(est[1]),) in handled_pairs:
+    if (len(est[0]), len(est[1]),) in handled_pairs and not indirection:
         if use_ytopt:
             # Won't work with charm. But the charm4py executor is broken anyway.
             if comm.Get_size() <= 1:
@@ -428,10 +447,11 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
                 eval_str = "mpi_comm_executor"
             #eval_str = "mpi_pool_executor"
             input_space = createConfigSpace(queue, sk)
+            print("TESTING YTOPT")
             ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate,
                              device_memory_bandwidth=device_memory_bandwidth,
                              device_latency=device_latency, timeout=60, save_path=save_path,
-                             max_evals=40, required_new_evals=0, eval_str=eval_str)
+                             max_evals=10, required_new_evals=0, eval_str=eval_str)
         else:
             print("ONLY TESTING THE FIRST 20 transformations")
             from random import shuffle
@@ -443,7 +463,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
                         device_memory_bandwidth=device_memory_bandwidth, save_path=save_path,
                         timeout=60)
     else:
-        print("Not tuning", sk.name)
+        print("Not tuning", sk.default_entrypoint.name)
         #raise(ValueError(f"Unhandled einsum type: {est}"))
 
     #return list(trans_list_list[0])
@@ -851,7 +871,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
             else:
                 print(f"A TUNE PROFILE EXISTS NOT: {hjson_file}")
 
-            #if True:
+            if True:
                 einsum_counts = list(get_einsum_counts(sk).items())
                 indirection = len(get_indirection_arrays(sk)) > 0
                 if len(einsum_counts) > 0:
@@ -868,16 +888,13 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                     print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
                     
                     handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
-                    if (non_red_axes, red_axes,) in handled_pairs and einsum_count >= 100:
-                        # Add indirection as a parameter?
+                    if (non_red_axes, red_axes,) in handled_pairs and not indirection and einsum_count <= 1:
+                        # Add indirection arrays as a parameter?
                         autotune_standalone_subkernel(sk, queue, program_id=pid,
                                                       max_flop_rate=clpeak_flop_rate,
                                                       device_latency=device_latency,
                                                       device_memory_bandwidth=device_memory_bandwidth,
                                                       save_path=save_path)
-
-
-#def test_tunit_performance(kernel, queue, save_path=None, device_latency=None, device_memory_bandwidth=None, clpeak_flop_rate=None):
 
 
 

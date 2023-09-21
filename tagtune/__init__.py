@@ -1761,6 +1761,8 @@ def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
         #    print("EINSUM has more than one prefetch")
         #    exit()
 
+        print(subkernel)
+
         if len(subknl_prefetches) <= cutoff:
             # Should this be restricted to read args only? How should deeply nested if-statements be handled?
             #kernel_args = [kernel_arg.name for kernel_arg in subkernel.default_entrypoint.args]
@@ -1775,7 +1777,7 @@ def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
                 added_iname_limits = tuple([iname_limits[added_iname] for added_iname in added_inames])
 
                 #new_inames = (set( 
-                # I think I'm trying to reduce the number of loop domains here by combining prefetch loops.
+                # I'm trying to reduce the number of loop domains here by combining prefetch loops.
                 prefetch_str = prefetch[1][1]
                 key = (prefetch_str, added_iname_limits,)
 

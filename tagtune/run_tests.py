@@ -782,8 +782,13 @@ def run_subprocess_with_timeout(queue, knl, test_fn, timeout=None, error_return_
 
     #unpickle_and_run_test(filename)
 
+    import tagtune
+    import os
+    dirname = os.path.dirname(tagtune.__file__)
+    f = os.path.join(dirname, "run_tests.py") 
+
     start = time.time()
-    proc = Popen(["python", "run_tests.py", shm.name], stdout=PIPE, stderr=STDOUT, text=True)
+    proc = Popen(["python", f, shm.name], stdout=PIPE, stderr=STDOUT, text=True)
     shm.close()
     #proc = Popen(["python", "run_tests.py", filename], stdout=PIPE, stderr=STDOUT, text=True)
     try:
@@ -820,11 +825,12 @@ def run_subprocess_with_timeout(queue, knl, test_fn, timeout=None, error_return_
         #os.remove(filename) 
         proc.kill()
         retval = error_return_time, None, 0
-
+        #shm.unlink()
         exit()
 
     #os.remove(filename) 
 
+    #shm.unlink()
     return retval
 
 def unpickle_and_run_test(sh_mem_name):
@@ -833,6 +839,8 @@ def unpickle_and_run_test(sh_mem_name):
     sh_mem = shared_memory.SharedMemory(sh_mem_name)
     knl, test_fn, bus_id = loads(sh_mem.buf) 
     sh_mem.close()
+
+    # Warnings related to https://github.com/python/cpython/issues/82300
     sh_mem.unlink()
     
     #in_file = open(filename, "rb")
@@ -1028,6 +1036,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
 
         # Should check what the performance difference is between None, subprocess, and thread
         if method is None:
+            print("Executing in existing process with no timeout")
             start = time.time()
             _, avg_time, measured_latency = test_fn(queue, knl)
             end = time.time()
