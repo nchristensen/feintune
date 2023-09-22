@@ -232,7 +232,8 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
 
     pre_existing_evals = len(initial_observations)
 
-    max_evals = 1#max(max_evals, len(initial_observations) + required_new_evals)
+    #max_evals = 1
+    max_evals = min(max_evals, pre_existing_evals + required_new_evals)
 
     # Note that the initial observations count toward max_evals.
     # --Is this actually true?
@@ -305,7 +306,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
                             device_latency=device_latency,
                             timeout=timeout,
                             method="thread",#"subprocess",
-                            run_single_batch="True",
+                            run_single_batch=True,
                             error_return_time=timeout)
                 
                 from tagtune.utils import dump_hjson

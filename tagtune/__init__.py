@@ -1540,14 +1540,18 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
         for subkernel in subkernels[batch*batch_size:(batch+1)*batch_size]:
 
             sk = subkernel.default_entrypoint
-            sk = lp.add_inames_for_unused_hw_axes(sk)
 
             for old_iname in sk.inames.keys():
                 sk = lp.rename_iname(sk, old_iname, old_iname + f"_b{batch}", existing_ok=False, preserve_tags=True)
 
             insn_mappings = {instr.id: [f"batch_{batch}_" + instr.id] for instr in sk.instructions}
             sk = lp.replace_instruction_ids(sk, insn_mappings)
+
+            # This seems to make some inames non-removable
+            sk = lp.add_inames_for_unused_hw_axes(sk)
+            #sk = lp.remove_unused_inames(sk, inames=["idof_ensm2_0_outer"])
             insns = insns + sk.instructions
+            #print(sk)
 
             assert len(sk.domains) == 1
             sk_domains = sk.domains[0]
@@ -1577,22 +1581,26 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
         domain = domain.add_constraints(new_constraints)
         domains.append(domain)
 
+        # TODO: Merge prefetch domains in the same batch where possible.
+
         if batch == 0:
             # Create a single batch knl, which may be faster to tune with
             single_batch_knl = orig_tunit.with_kernel(orig_tunit.default_entrypoint.copy(domains=domains, 
                                     instructions=insns, args=list(args), temporary_variables=temp_args))
             single_batch_knl = lp.tag_inames(single_batch_knl, list(iname_to_tag), ignore_nonexistent=False)
             single_batch_knl = lp.set_options(single_batch_knl, lp.Options(no_numpy=True, return_dict=True))
+            #single_batch_knl = lp.add_inames_for_unused_hw_axes(single_batch_knl)
 
-    #knl = lp.make_kernel(domains, insns, 
-    #        kernel_data=list(args) + list(temp_args.values()), 
-    #        name=orig_tunit.default_entrypoint.name)
+    knl = lp.make_kernel(domains, insns, 
+            kernel_data=list(args) + list(temp_args.values()), 
+            name=orig_tunit.default_entrypoint.name)
 
     # Avoids some weird errors with make_kernel
-    knl = orig_tunit.with_kernel(orig_tunit.default_entrypoint.copy(domains=domains, 
-            instructions=insns, args=list(args), temporary_variables=temp_args))
+    #knl = orig_tunit.with_kernel(orig_tunit.default_entrypoint.copy(domains=domains, 
+    #        instructions=insns, args=list(args), temporary_variables=temp_args))
     knl = lp.tag_inames(knl, list(iname_to_tag), ignore_nonexistent=False)
     knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
+    #knl = lp.add_inames_for_unused_hw_axes(knl)
 
     if True:
         if nbatches > 1: #Pointless of alias temporaries if there is a single batch
@@ -1660,6 +1668,12 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
         print(code)
         end=time.time()
         print(end-start)
+
+
+    #print("SINGLE BATCH KERNEL")
+    #print(single_batch_knl)
+    #print(knl)
+    #exit()
 
     return knl, single_batch_knl
 
@@ -1785,32 +1799,33 @@ def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
                 
                 #"""
                 # Doesn't work. Comparing by prefetch_str is not sufficient. Need to look at domain bounds as well.
-                print(key)
-                if key in prefetch_iname_dict:
-                    existing_fetch_inames = prefetch_iname_dict[key]
-                    from tagtune.utils import get_domain_list
-                    dl = dict(get_domain_list(subkernel))
-                    #print("KEYS", dl.keys())
-                    for entry in dl.keys():
-                        print(entry)
-                    #print("EXISTING", frozenset(existing_fetch_inames))
-                    #print("ADDED", frozenset(added_inames))
-                    #print("DOMAINS", subkernel.default_entrypoint.domains)
-                    #assert frozenset(existing_fetch_inames) in dl
-                    #assert frozenset(added_inames) in dl
-                    #new_inames = (set(subkernel.default_entrypoint.inames.keys()) - orig_inames) - existing_fetch_inames
-                    #print(subkernel)
-                    for remove, keep in zip(sorted(added_inames,reverse=True), sorted(existing_fetch_inames,reverse=True)):
-                        print("RENAMING FETCH INAMES:", remove, "->", keep)
-                        subkernel = lp.rename_iname(subkernel, remove, keep, existing_ok=True,
-                                                    preserve_tags=False, raise_on_domain_mismatch=False)
-                    #exit()
-                else:
-                    #prefetch_inames = (set(subkernel.default_entrypoint.inames.keys()) - orig_inames) - set().union(*(prefetch_iname_dict.values()))
-                    prefetch_iname_dict[key] = added_inames
-                    print("ADDING KEY TO DICTIONARY")
-                    print(prefetch_iname_dict)
-                #"""
+                #print(key)
+                if True:
+                    if key in prefetch_iname_dict:
+                        existing_fetch_inames = prefetch_iname_dict[key]
+                        from tagtune.utils import get_domain_list
+                        dl = dict(get_domain_list(subkernel))
+                        #print("KEYS", dl.keys())
+                        #for entry in dl.keys():
+                        #    print(entry)
+                        #print("EXISTING", frozenset(existing_fetch_inames))
+                        #print("ADDED", frozenset(added_inames))
+                        #print("DOMAINS", subkernel.default_entrypoint.domains)
+                        #assert frozenset(existing_fetch_inames) in dl
+                        #assert frozenset(added_inames) in dl
+                        #new_inames = (set(subkernel.default_entrypoint.inames.keys()) - orig_inames) - existing_fetch_inames
+                        #print(subkernel)
+                        for remove, keep in zip(sorted(added_inames,reverse=True), sorted(existing_fetch_inames,reverse=True)):
+                            print("RENAMING FETCH INAMES:", remove, "->", keep)
+                            subkernel = lp.rename_iname(subkernel, remove, keep, existing_ok=True,
+                                                        preserve_tags=False, raise_on_domain_mismatch=False)
+                        #exit()
+                    else:
+                        #prefetch_inames = (set(subkernel.default_entrypoint.inames.keys()) - orig_inames) - set().union(*(prefetch_iname_dict.values()))
+                        prefetch_iname_dict[key] = added_inames
+                        print("ADDING KEY TO DICTIONARY")
+                        print(prefetch_iname_dict)
+                    #"""
         else:
             print(f"Prefetching on einsum disabled. Einsum uses more than {cutoff} prefetchable arguments.")
 
