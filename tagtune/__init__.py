@@ -1547,7 +1547,7 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
             insn_mappings = {instr.id: [f"batch_{batch}_" + instr.id] for instr in sk.instructions}
             sk = lp.replace_instruction_ids(sk, insn_mappings)
 
-            unused = [iname for iname in sk.inames.keys() if not iname.endswith(f"_f{batch}")]
+            unused = [iname for iname in sk.inames.keys() if not iname.endswith(f"_b{batch}")]
             sk = lp.remove_unused_inames(sk, inames=unused)
 
             # This seems to make some inames non-removable
