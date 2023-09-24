@@ -1547,6 +1547,9 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
             insn_mappings = {instr.id: [f"batch_{batch}_" + instr.id] for instr in sk.instructions}
             sk = lp.replace_instruction_ids(sk, insn_mappings)
 
+            unused = [iname for iname in sk.inames.keys() if iname.endswith(f"_f{batch}")]
+            sk = lp.remove_unused_inames(sk, inames=unused)
+
             # This seems to make some inames non-removable
             sk = lp.add_inames_for_unused_hw_axes(sk)
             #sk = lp.remove_unused_inames(sk, inames=["idof_ensm2_0_outer"])
@@ -1919,9 +1922,10 @@ def apply_transformation_list(tunit, transformations):
             tunit = func(*args, **kwargs)
 
     # Assumes add_prefetch happens last
-    tunit = lp.add_inames_for_unused_hw_axes(tunit)
-    if sb_tunit is not None:
-        sb_tunit = lp.add_inames_for_unused_hw_axes(sb_tunit)
+    # TODO: Only apply this if it is in the transform list.
+    #tunit = lp.add_inames_for_unused_hw_axes(tunit)
+    #if sb_tunit is not None:
+    #    sb_tunit = lp.add_inames_for_unused_hw_axes(sb_tunit)
 
     end = time.time()
 

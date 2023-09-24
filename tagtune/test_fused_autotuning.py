@@ -101,9 +101,10 @@ def strip_unused_dependencies(instructions):
 
     return new_new_instructions
 
+
 def assemble_transformed_macrokernel(macrokernel, subkernels):
     # Get the barrier instructions
-    barriers = [instr for instr in macrokernel.default_entrypoint.instructions if isinstance(instr, lp.BarrierInstruction) and instr.synchronization_kind == "global"]
+    barriers = [instr.copy() for instr in macrokernel.default_entrypoint.instructions if isinstance(instr, lp.BarrierInstruction) and instr.synchronization_kind == "global"]
 
     #print("SUBKERNEL INAMES")
     #for sk in subkernels:
@@ -114,8 +115,20 @@ def assemble_transformed_macrokernel(macrokernel, subkernels):
         for iname, iname_obj in sk.default_entrypoint.inames.items():
             for tag in iname_obj.tags:
                 iname_to_tag.append((iname, tag,))
-    #for sk in subkernels:
-    #    print(sk)
+    
+    # The old scheduler apparently needs explicit nosyncs.
+    # Will this cause problems?
+    # Ideally, the new scheduler would handle ilp or
+    # could be used on a per-schedule basis.
+    #"""
+    for isk, sk in enumerate(subkernels):
+        es_deps_dict = get_internal_einsum_dependencies(sk)
+        for sink, sources in es_deps_dict.items():
+            for source in sources:
+                sk = lp.add_nosync(sk, "global", source, sink, bidirectional=False)
+        subkernels[isk] = sk#lp.linearize(lp.preprocess(sk))
+        #num = isk - 1
+    #"""
 
     assert len(subkernels) - 1 == len(barriers)
     new_instructions_all = []
@@ -125,7 +138,9 @@ def assemble_transformed_macrokernel(macrokernel, subkernels):
     temporaries = macrokernel.default_entrypoint.temporary_variables
     temporaries |= subkernels[0].default_entrypoint.temporary_variables
 
+
     for barrier, subkernel in zip(barriers, subkernels[1:]):
+        
         barrier.depends_on = frozenset([instr.id for instr in new_instructions])
         new_instructions_all.append(barrier)
         domains = domains + subkernel.default_entrypoint.domains
@@ -138,21 +153,30 @@ def assemble_transformed_macrokernel(macrokernel, subkernels):
         new_instructions_all += new_instructions
 
     # Also need to copy the domains and inames
-    #new_macrokernel = macrokernel.default_entrypoint.copy(instructions=new_instructions_all,
-    #                                                      domains=domains,
-    #                                                     temporary_variables=temporaries)
-    new_macrokernel = lp.make_kernel(domains,
-                                     new_instructions_all,
-                                     kernel_data=list(macrokernel.default_entrypoint.args) + list(temporaries.values()),
-                                     name=macrokernel.default_entrypoint.name)
+    new_macrokernel = macrokernel.default_entrypoint.copy(instructions=new_instructions_all,
+                                                          domains=domains,
+                                                         temporary_variables=temporaries)
+    #new_macrokernel = lp.preprocess_program(new_macrokernel)
+    #new_macrokernel = lp.linearize(new_macrokernel)
 
-    new_macrokernel = lp.tag_inames(new_macrokernel, iname_to_tag, ignore_nonexistent=True)
-    new_macrokernel = lp.set_options(new_macrokernel, lp.Options(no_numpy=True, return_dict=True))
-    return new_macrokernel
+    return macrokernel.with_kernel(new_macrokernel)
+
+    #new_macrokernel = lp.make_kernel(domains,
+    #                                 new_instructions_all,
+    #                                 kernel_data=list(macrokernel.default_entrypoint.args) + list(temporaries.values()),
+    #                                 name=macrokernel.default_entrypoint.name)
+
+    #new_macrokernel = lp.tag_inames(new_macrokernel, iname_to_tag, ignore_nonexistent=True)
+    #options = macrokernel.default_entrypoint.options
+    #options = lp.Options(no_numpy=True, return_dict=True, 
+    #                     enforce_variable_access_ordered=True, enforce_array_accesses_within_bounds=True, insert_gbarriers=True)
+    
+    #new_macrokernel = lp.set_options(new_macrokernel, options)
+
+    #return new_macrokernel
     #new_macrokernel = new_macrokernel.default_entrypoint
     #print(new_macrokernel.default_entrypoint.name)
     #exit()
-    #return macrokernel.with_kernel(new_macrokernel)
 
 # FIXME: Needs to look at the csv file instead of the hjson file
 # FIXME: Just return a list of transform dictionaries.
@@ -163,18 +187,29 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None):
         autotune_standalone_subkernels(sk_list, save_path=save_path)
     transformed_subkernels = []
 
-    sk_to_avoid = ["frozen_inv_metric_deriv_vol_0",
+    sk_to_avoid = [#"frozen_inv_metric_deriv_vol_0",
                    #"frozen_inv_metric_deriv_vol_1",
                    #"frozen_inv_metric_deriv_vol_2",
                    #"frozen_inv_metric_deriv_vol_3"
                   ]
-    tunit_to_avoid = []#["frozen_inv_metric_deriv_vol"]
+    tunit_to_avoid = ["rhs"]#["frozen_inv_metric_deriv_vol"]
 
     if tunit_dict[1]["tunit"].default_entrypoint.name in tunit_to_avoid:
         print(len(sk_list))
         for sk in sk_list:
             print(get_einsum_types(sk[1]))
         exit()
+
+
+    platforms = cl.get_platforms()
+    cl_ctx = cl.Context(
+        dev_type=cl.device_type.GPU,
+        properties=[(cl.context_properties.PLATFORM, platforms[0])])
+    queue = cl.CommandQueue(cl_ctx,
+        properties=cl.command_queue_properties.PROFILING_ENABLE)
+
+    from meshmode.array_context import PrefusedFusionContractorArrayContext
+    actx = PrefusedFusionContractorArrayContext(queue)
 
     for pid, sk, csk in sk_list:
 
@@ -202,15 +237,6 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None):
             else:
                 print("Can't find", hjson_file_str)
                 # Should probably apply the default transformations
-                platforms = cl.get_platforms()
-                cl_ctx = cl.Context(
-                    dev_type=cl.device_type.GPU,
-                    properties=[(cl.context_properties.PLATFORM, platforms[0])])
-                queue = cl.CommandQueue(cl_ctx,
-                    properties=cl.command_queue_properties.PROFILING_ENABLE)
-
-                from meshmode.array_context import PrefusedFusionContractorArrayContext
-                actx = PrefusedFusionContractorArrayContext(queue)
                 # Currently fails
 
                 print("TRANSFORMING")
@@ -227,17 +253,54 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None):
         #print("PRE-TRANSFORMATION")
     #print(tunit_dict[1]["tunit"])
     print("REASSEMBLING")
+
+    #orig_tunit = tunit_dict[1]["tunit"]
+    orig_tunit = actx.transform_loopy_program(tunit_dict[1]["tunit"])
+    orig_tunit = lp.preprocess_program(actx.transform_loopy_program(orig_tunit))
+    #print(orig_tunit)
+    #if orig_tunit.default_entrypoint.name == "rhs":
+    #    breakpoint()
+
+    print("ORIGINAL TUNIT")
+    orig_tunit = lp.linearize(orig_tunit)
+    #if orig_tunit.default_entrypoint.name == "rhs":
+    #    print(orig_tunit)
+    #    print(orig_tunit.default_entrypoint.schedule)
+    #    exit()
+
+    transformed_subkernels_2 = []
     for tsk in transformed_subkernels:
         assert lp.has_schedulable_iname_nesting(tsk)
+        tsk = lp.preprocess_program(tsk)
+        # The old scheduler seems to have a problem with unbarriered internal dependencies. Need to add no_sync_with
+        # or find a way to use the schedule from the component subkernels.
+        tsk = lp.linearize(tsk)
+        transformed_subkernels_2.append(tsk)
+    transformed_subkernels = transformed_subkernels_2
+        
     transformed_tunit = assemble_transformed_macrokernel(tunit_dict[1]["tunit"], transformed_subkernels)
     assert lp.has_schedulable_iname_nesting(tunit_dict[1]["tunit"])
     assert lp.has_schedulable_iname_nesting(transformed_tunit)
+
+
+    transformed_tunit = lp.preprocess_program(transformed_tunit)
+    print("NEW TUNIT")
+    print(transformed_tunit)
+    
+    transformed_tunit = lp.linearize(transformed_tunit)
+    #transformed_tunit = lp.save_and_reload_temporaries(transformed_tunit)
     print("DONE REASSEMBLING")    
 
     print("POST_TRANSFORMATION")
     print(transformed_tunit)
+    print(transformed_tunit.default_entrypoint.schedule)
+    #if transformed_tunit.default_entrypoint.name == "rhs":
+    #    exit()
     print("END OF KERNEL")
     
+    #if transformed_tunit.default_entrypoint.name == "rhs":
+    #    run_single_param_set_v2(actx.queue, transformed_tunit, [], generic_test)
+    #    exit()
     return transformed_tunit
 
 # Create a subkernel with the domains and instructions of each cumulative phase
@@ -490,7 +553,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
             ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate,
                              device_memory_bandwidth=device_memory_bandwidth,
                              device_latency=device_latency, timeout=60, save_path=save_path,
-                             max_evals=100, required_new_evals=5, eval_str=eval_str)
+                             max_evals=100, required_new_evals=1, eval_str=eval_str)
         else:
             print("ONLY TESTING THE FIRST 20 transformations")
             from random import shuffle
@@ -518,8 +581,6 @@ def autotune_parts(parts, queue):
     from generators import einsum3to2_kernel_tlist_generator_v2, einsum2to2_kernel_tlist_generator_v2
     #from parallel_autotuning_charm4py_v2 import parallel_autotune
     from parallel_autotuning_mpi4py_v2 import parallel_autotune
-    from run_tests import run_single_param_set_v2
-    from run_tests import generic_test
 
     cum_transformations = []
     transformations = None
@@ -665,9 +726,10 @@ def has_internal_einsum_dependencies(tunit):
         
     return False 
 
-def print_internal_einsum_dependencies(tunit):
+def get_internal_einsum_dependencies(tunit):
     einsum_dict = {instr.id: instr for instr in tunit.default_entrypoint.instructions if any([isinstance(tag, EinsumTag) for tag in instr.tags])}
     instr_dict = {instr.id: instr for instr in tunit.default_entrypoint.instructions}
+    es_deps_dict = {}
     for esid, einsum in einsum_dict.items():
         deps = []
         es_deps = set(einsum.depends_on)
@@ -676,9 +738,9 @@ def print_internal_einsum_dependencies(tunit):
             if dep_id in einsum_dict:
                 deps.append(dep_id)
                 es_deps |=  instr_dict[dep_id].depends_on
-
-        print(esid, "depends on the following einsums:", set(deps))
-
+        es_deps_dict[esid] = set(deps)
+        #print(esid, "depends on the following einsums:", set(deps))
+    return es_deps_dict
 
 def get_pickled_tunits(directory_or_files):
 
@@ -927,7 +989,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                     print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
                     
                     handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
-                    if (non_red_axes, red_axes,) in handled_pairs and not indirection and einsum_count == 4:
+                    if (non_red_axes, red_axes,) in handled_pairs and not indirection and einsum_count <= 10:
                         # Add indirection arrays as a parameter?
                         autotune_standalone_subkernel(sk, queue, program_id=pid,
                                                       max_flop_rate=clpeak_flop_rate,
