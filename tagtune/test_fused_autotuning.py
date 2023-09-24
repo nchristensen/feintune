@@ -989,7 +989,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                     print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
                     
                     handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
-                    if (non_red_axes, red_axes,) in handled_pairs and not indirection and einsum_count <= 10:
+                    if (non_red_axes, red_axes,) in handled_pairs and not indirection and einsum_count <= np.inf:
                         # Add indirection arrays as a parameter?
                         autotune_standalone_subkernel(sk, queue, program_id=pid,
                                                       max_flop_rate=clpeak_flop_rate,

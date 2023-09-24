@@ -1534,7 +1534,6 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
     # Assemble the sub-batches
     print("ASSEMBLING SUB-BATCHES")
     for batch in range(nbatches):
-        print(batch)
         var_names = set()
         constraints = []
         for subkernel in subkernels[batch*batch_size:(batch+1)*batch_size]:
@@ -1543,12 +1542,21 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
 
             for old_iname in sk.inames.keys():
                 sk = lp.rename_iname(sk, old_iname, old_iname + f"_b{batch}", existing_ok=False, preserve_tags=True)
+                sk = lp.remove_unused_inames(sk)
+                assert old_iname not in sk.inames 
 
             insn_mappings = {instr.id: [f"batch_{batch}_" + instr.id] for instr in sk.instructions}
             sk = lp.replace_instruction_ids(sk, insn_mappings)
-
-            unused = [iname for iname in sk.inames.keys() if not iname.endswith(f"_b{batch}")]
-            sk = lp.remove_unused_inames(sk, inames=unused)
+            
+            """
+            # For some reason it won't otherwise consistently delete the unused inames.
+            if any([iname.endswith(f"_b{batch}") for iname in sk.inames.keys()]):
+                unused = [iname for iname in sk.inames.keys() if not iname.endswith(f"_b{batch}")]
+                from tagtune.decouple_domain import decouple_domain
+                if len(unused) > 0:
+                    sk = decouple_domain(sk, unused, frozenset())
+                sk = lp.remove_unused_inames(sk, inames=unused)
+            """
 
             # This seems to make some inames non-removable
             sk = lp.add_inames_for_unused_hw_axes(sk)
@@ -1556,20 +1564,21 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
             insns = insns + sk.instructions
             #print(sk)
 
-            assert len(sk.domains) == 1
-            sk_domains = sk.domains[0]
-            var_names |= set(sk_domains.get_var_dict().keys())
-            args |= set(sk.args)
-            temp_args |= sk.temporary_variables
-            constraints += sk_domains.get_constraints()
+            #assert len(sk.domains) == 1
+            for sk_domains in sk.domains:
+                #sk_domains = sk.domains[0]
+                var_names |= set(sk_domains.get_var_dict().keys())
+                args |= set(sk.args)
+                temp_args |= sk.temporary_variables
+                constraints += sk_domains.get_constraints()
 
-            for iname, iname_obj in sk.inames.items():
-                for tag in iname_obj.tags:
-                    iname_to_tag |= set([(iname, tag,)])
+                for iname, iname_obj in sk.inames.items():
+                    for tag in iname_obj.tags:
+                        iname_to_tag |= set([(iname, tag,)])
 
         # Eliminate redundant (prefetch) instructions:
         insns = list(set(insns))
-
+        
         space = isl.Space.create_from_names(isl.DEFAULT_CONTEXT, set=var_names)
         domain = isl.BasicSet.universe(space)
         new_constraints = set()
@@ -1590,7 +1599,7 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
             # Create a single batch knl, which may be faster to tune with
             single_batch_knl = orig_tunit.with_kernel(orig_tunit.default_entrypoint.copy(domains=domains, 
                                     instructions=insns, args=list(args), temporary_variables=temp_args))
-            single_batch_knl = lp.tag_inames(single_batch_knl, list(iname_to_tag), ignore_nonexistent=False)
+            single_batch_knl = lp.tag_inames(single_batch_knl, list(iname_to_tag), ignore_nonexistent=True)
             single_batch_knl = lp.set_options(single_batch_knl, lp.Options(no_numpy=True, return_dict=True))
             #single_batch_knl = lp.add_inames_for_unused_hw_axes(single_batch_knl)
 
