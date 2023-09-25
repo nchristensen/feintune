@@ -159,6 +159,7 @@ def assemble_transformed_macrokernel(macrokernel, subkernels):
     #new_macrokernel = lp.preprocess_program(new_macrokernel)
     #new_macrokernel = lp.linearize(new_macrokernel)
 
+    new_macrokernel = lp.tag_inames(new_macrokernel, iname_to_tag, ignore_nonexistent=True)
     return macrokernel.with_kernel(new_macrokernel)
 
     #new_macrokernel = lp.make_kernel(domains,
@@ -166,7 +167,6 @@ def assemble_transformed_macrokernel(macrokernel, subkernels):
     #                                 kernel_data=list(macrokernel.default_entrypoint.args) + list(temporaries.values()),
     #                                 name=macrokernel.default_entrypoint.name)
 
-    #new_macrokernel = lp.tag_inames(new_macrokernel, iname_to_tag, ignore_nonexistent=True)
     #options = macrokernel.default_entrypoint.options
     #options = lp.Options(no_numpy=True, return_dict=True, 
     #                     enforce_variable_access_ordered=True, enforce_array_accesses_within_bounds=True, insert_gbarriers=True)
@@ -182,8 +182,10 @@ def assemble_transformed_macrokernel(macrokernel, subkernels):
 # FIXME: Just return a list of transform dictionaries.
 def transform_macrokernel(tunit_dict, save_path, in_actx=None):
     
+    #macrokernels_to_tune = ["rhs"]
     sk_list, pid_counts = collect_subkernels([tunit_dict])
-    if in_actx is None:
+    #macrokernels_to_tune = ["frozen_result"]
+    if in_actx is None:# and tunit_dict[1]["tunit"].default_entrypoint.name in macrokernels_to_tune:
         autotune_standalone_subkernels(sk_list, save_path=save_path)
     transformed_subkernels = []
 
@@ -192,7 +194,7 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None):
                    #"frozen_inv_metric_deriv_vol_2",
                    #"frozen_inv_metric_deriv_vol_3"
                   ]
-    tunit_to_avoid = ["rhs"]#["frozen_inv_metric_deriv_vol"]
+    tunit_to_avoid = ["rhs","frozen_inv_metric_deriv_vol"]
 
     if tunit_dict[1]["tunit"].default_entrypoint.name in tunit_to_avoid:
         print(len(sk_list))

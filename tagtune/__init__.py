@@ -1489,6 +1489,74 @@ def decompose_batched_einsum_kernel(tunit):
 
     return tuple(subkernels)
         
+# Maybe this should be added to loopy
+from loopy.translation_unit import for_each_kernel
+
+@for_each_kernel
+def merge_prefetch_inames(knl, prefetch_inames):
+
+    prefetch_inames = set(prefetch_inames)
+    prefetch_instrs = [instr for instr in knl.instructions if "fetch_rule" in instr.id]
+    iname_limits = get_iname_limits(knl)
+    d = {}
+
+    #new_inames = (set( 
+    # I'm trying to reduce the number of loop domains here by combining prefetch loops.
+    #prefetch_str = prefetch[1][1]
+    #key = (prefetch_str, added_iname_limits,)
+
+    #subkernel = lp.rename_iname(subkernel, remove, keep, existing_ok=True, preserve_tags=False)
+    
+    """
+    # Doesn't work. Comparing by prefetch_str is not sufficient. Need to look at domain bounds as well.
+    #print(key)
+    if key in prefetch_iname_dict:
+        existing_fetch_inames = d[key]
+        #from tagtune.utils import get_domain_list
+        #dl = dict(get_domain_list(subkernel))
+        #print("KEYS", dl.keys())
+        #for entry in dl.keys():
+        #    print(entry)
+        #print("EXISTING", frozenset(existing_fetch_inames))
+        #print("ADDED", frozenset(added_inames))
+        #print("DOMAINS", subkernel.default_entrypoint.domains)
+        #assert frozenset(existing_fetch_inames) in dl
+        #assert frozenset(added_inames) in dl
+        #new_inames = (set(subkernel.default_entrypoint.inames.keys()) - orig_inames) - existing_fetch_inames
+        #print(subkernel)
+        for remove, keep in zip(sorted(added_inames,reverse=True), sorted(existing_fetch_inames,reverse=True)):
+            print("RENAMING FETCH INAMES:", remove, "->", keep)
+            subkernel = lp.rename_iname(subkernel, remove, keep, existing_ok=True,
+                                        preserve_tags=False, raise_on_domain_mismatch=False)
+        #exit()
+    else:
+        #prefetch_inames = (set(subkernel.default_entrypoint.inames.keys()) - orig_inames) - set().union(*(prefetch_iname_dict.values()))
+        prefetch_iname_dict[key] = added_inames
+        print("ADDING KEY TO DICTIONARY")
+        print(prefetch_iname_dict)
+    """
+
+    
+    for prefetch in prefetch_instrs:
+        print("PREFETCH INAMES", prefetch_inames)
+        outer_inames = prefetch.within_inames - prefetch_inames
+        print("OUTER INAMES", outer_inames)
+        inner_inames = sorted(prefetch.within_inames - outer_inames, key=lambda iname: str(prefetch).index(iname))
+        print("INNER INAMES", inner_inames)
+        prefetch_iname_limits = tuple(sorted([iname_limits[prefetch_iname] for prefetch_iname in inner_inames]))
+        key = (tuple(sorted(outer_inames)), prefetch_iname_limits)         
+        if key in d:
+            existing_fetch_inames = d[key]
+            for remove, keep in zip(inner_inames, existing_fetch_inames):
+                print("RENAMING BATCH FETCH INAMES:", remove, "->", keep)
+                if remove != keep:
+                    knl = lp.rename_iname(knl, remove, keep, existing_ok=True, preserve_tags=False, raise_on_domain_mismatch=False)
+        else:
+            print("ADDING", key, "TO PREFETCH DICT")
+            d[key] = inner_inames
+    
+    return knl
+
 
 def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
     import islpy as isl    
@@ -1533,6 +1601,8 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
 
     # Assemble the sub-batches
     print("ASSEMBLING SUB-BATCHES")
+
+    prefetch_inames = []
     for batch in range(nbatches):
         var_names = set()
         constraints = []
@@ -1541,8 +1611,23 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
             sk = subkernel.default_entrypoint
 
             for old_iname in sk.inames.keys():
+                if old_iname not in orig_tunit.default_entrypoint.inames:
+                    prefetch_inames.append(old_iname + f"_b{batch}")
+
                 sk = lp.rename_iname(sk, old_iname, old_iname + f"_b{batch}", existing_ok=False, preserve_tags=True)
                 sk = lp.remove_unused_inames(sk)
+                # For some reason it doesn't always remove inames with constant constraints
+                if old_iname in sk.inames:
+                    new_domains = []
+                    for domain in sk.domains:
+                        dt, idx = domain.get_var_dict()[old_iname]
+                        new_domains.append(domain.remove_dims(dt, idx, 1))
+                    ins = [instr.copy(within_inames=instr.within_inames - frozenset([old_iname])) for instr in sk.instructions]
+                    sk = sk.copy(domains=new_domains, instructions=ins)
+                    # If this doesn't work, will need to go through and manually remove from each iname
+                    
+                    #sk = lp.untag_inames(sk, old_iname, loopy.kernel.data.InameImplementationTag)
+                print(sk)
                 assert old_iname not in sk.inames 
 
             insn_mappings = {instr.id: [f"batch_{batch}_" + instr.id] for instr in sk.instructions}
@@ -1594,7 +1679,7 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
         domains.append(domain)
 
         # TODO: Merge prefetch domains in the same batch where possible.
-
+        # DONE
         if batch == 0:
             # Create a single batch knl, which may be faster to tune with
             single_batch_knl = orig_tunit.with_kernel(orig_tunit.default_entrypoint.copy(domains=domains, 
@@ -1612,6 +1697,7 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
     #        instructions=insns, args=list(args), temporary_variables=temp_args))
     knl = lp.tag_inames(knl, list(iname_to_tag), ignore_nonexistent=False)
     knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
+    knl = merge_prefetch_inames(knl, prefetch_inames)
     #knl = lp.add_inames_for_unused_hw_axes(knl)
 
     if True:
@@ -1787,7 +1873,7 @@ def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
         #    print("EINSUM has more than one prefetch")
         #    exit()
 
-        print(subkernel)
+        #print(subkernel)
 
         if len(subknl_prefetches) <= cutoff:
             # Should this be restricted to read args only? How should deeply nested if-statements be handled?
@@ -1799,7 +1885,10 @@ def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
                 after_inames = set(subkernel.default_entrypoint.inames.keys())
                 added_inames = sorted(after_inames - before_inames)
 
-                iname_limits = get_iname_limits(subkernel)
+                #TODO: Switch to merge_prefetch_inames implementation.
+                subkernel = merge_prefetch_inames(subkernel, added_inames)
+                '''
+                iname_limits = get_iname_limits(subkernel.default_entrypoint)
                 added_iname_limits = tuple([iname_limits[added_iname] for added_iname in added_inames])
 
                 #new_inames = (set( 
@@ -1815,8 +1904,8 @@ def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
                 if True:
                     if key in prefetch_iname_dict:
                         existing_fetch_inames = prefetch_iname_dict[key]
-                        from tagtune.utils import get_domain_list
-                        dl = dict(get_domain_list(subkernel))
+                        #from tagtune.utils import get_domain_list
+                        #dl = dict(get_domain_list(subkernel))
                         #print("KEYS", dl.keys())
                         #for entry in dl.keys():
                         #    print(entry)
@@ -1838,6 +1927,7 @@ def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
                         print("ADDING KEY TO DICTIONARY")
                         print(prefetch_iname_dict)
                     #"""
+                '''
         else:
             print(f"Prefetching on einsum disabled. Einsum uses more than {cutoff} prefetchable arguments.")
 

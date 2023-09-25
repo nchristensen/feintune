@@ -88,9 +88,11 @@ def get_domain_list(tunit):
 
 #Map an iname to a tuple of its min and max value assuming
 # these are constants
+from loopy.translation_unit import for_each_kernel
+
 @memoize
-def get_iname_limits(tunit):
-    domains = tunit.default_entrypoint.domains
+def get_iname_limits(knl):
+    domains = knl.domains
     iname_limits = {}
     for domain in domains:
         id_dict = domain.get_id_dict()
