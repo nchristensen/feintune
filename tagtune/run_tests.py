@@ -1007,15 +1007,18 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     print(temp_dict)
     base_storage_dict = {}
 
+    # This doesn't account for global barriers.
     for temp, tarray in temp_dict.items():
         if tarray.base_storage not in base_storage_dict:
-            if tarray.base_storage is not None:
+            if tarray.base_storage is None:
+                # Storage isn't aliased
+                base_storage_dict[tarray.name] = np.product(tarray.shape)*tarray.dtype.dtype.itemsize
+            else:
+                # Storage is aliased
                 if tarray.base_storage not in base_storage_dict:
                     base_storage_dict[tarray.base_storage] = np.product(tarray.shape)*tarray.dtype.dtype.itemsize
-                elif np.product(tarray.shape) > base_storage_dict[tarray.base_storage]:
+                elif np.product(tarray.shape)*tarray.dtype.dtype.itemsize > base_storage_dict[tarray.base_storage]:
                     base_storage_dict[tarray.base_storage] = np.product(tarray.shape)*tarray.dtype.dtype.itemsize
-            else:
-                base_storage_dict[tarray.name] = np.product(tarray.shape)*tarray.dtype.dtype.itemsize
 
     print("BASE STORAGE DICT")
     print(base_storage_dict)
@@ -1083,7 +1086,8 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             "single_batch": run_single_batch, 
             "neinsums": neinsums,
             "error_return_time": error_return_time,
-            "timeout": timeout}
+            "timeout": timeout,
+            "local_memory_used": local_memory_used}
 
 
     bw_dict = analyze_knl_bandwidth(knl, avg_time, device_latency=measured_latency)
