@@ -194,7 +194,7 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None):
                    #"frozen_inv_metric_deriv_vol_2",
                    #"frozen_inv_metric_deriv_vol_3"
                   ]
-    tunit_to_avoid = ["rhs","frozen_inv_metric_deriv_vol"]
+    tunit_to_avoid = []#["frozen_inv_metric_deriv_vol"]#["rhs","frozen_inv_metric_deriv_vol"]
 
     if tunit_dict[1]["tunit"].default_entrypoint.name in tunit_to_avoid:
         print(len(sk_list))
@@ -215,6 +215,8 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None):
 
     for pid, sk, csk in sk_list:
 
+        #TODO If the transformation selected is one that timed out, should
+        # use the default transformations instead.
 
         if in_actx is not None:
             default_transformed_sk = in_actx.transform_loopy_program(sk)
@@ -542,6 +544,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
     indirection = len(get_indirection_arrays(sk)) > 0
 
     handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
+    timeout = 120
     if (len(est[0]), len(est[1]),) in handled_pairs and not indirection:
         if use_ytopt:
             # Won't work with charm. But the charm4py executor is broken anyway.
@@ -554,8 +557,8 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
             print("TESTING YTOPT")
             ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate,
                              device_memory_bandwidth=device_memory_bandwidth,
-                             device_latency=device_latency, timeout=60, save_path=save_path,
-                             max_evals=100, required_new_evals=1, eval_str=eval_str)
+                             device_latency=device_latency, timeout=timeout, save_path=save_path,
+                             max_evals=100, required_new_evals=0, eval_str=eval_str)
         else:
             print("ONLY TESTING THE FIRST 20 transformations")
             from random import shuffle
@@ -565,7 +568,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
             tdict = parallel_autotune(sk, 0, trans_list_list[:10], program_id=program_id,
                         max_flop_rate=max_flop_rate, device_latency=device_latency,
                         device_memory_bandwidth=device_memory_bandwidth, save_path=save_path,
-                        timeout=60)
+                        timeout=timeout)
     else:
         print("Not tuning", sk.default_entrypoint.name)
         #raise(ValueError(f"Unhandled einsum type: {est}"))
@@ -1286,3 +1289,4 @@ if __name__ == "__main__":
         charm.exit()
     else:
         main(0)
+

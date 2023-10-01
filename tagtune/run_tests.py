@@ -1087,7 +1087,8 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             "neinsums": neinsums,
             "error_return_time": error_return_time,
             "timeout": timeout,
-            "local_memory_used": local_memory_used}
+            "local_memory_used": local_memory_used,
+            "name": knl_base.default_entrypoint.name}
 
 
     bw_dict = analyze_knl_bandwidth(knl, avg_time, device_latency=measured_latency)

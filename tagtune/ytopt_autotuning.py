@@ -245,6 +245,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
         print("======FINISHING SEARCHING========")
     else:
         print("=======SKIPPING SEARCH: EXISTING EVALS >= MAX_EVALS")
+        print(pre_existing_evals, max_evals)
 
     best_result = None
 
@@ -260,57 +261,62 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
             column_names = row_list[0]
             rows = list(row_list)[1:]
             rows.sort(key=lambda row: row[-2])
-            #batch_size,iii,iio,ji,kii,kio,objective,elapsed_sec
-            p = dict(zip(column_names, [int(item) for item in rows[0][:-2]]))
-            
-            params = (p["batch_size"],
-                      p["kio"]*p["kii"],
-                      p["kii"],
-                      p["iio"]*p["iii"],
-                      p["iii"],
-                      p["ji"],)
-
-            from tagtune.generators import get_trans_list
-            trans_list = get_trans_list(knl, params)
-
-
-            """
-            test_id = get_test_id(trans_list)
-            args = frozendict({"timeout": timeout,
-                    "cur_test": None,
-                    "total_tests": None,
-                    "test_id": test_id,
-                    "platform_id": platform_id,
-                    "knl": knl,
-                    "tlist": trans_list,
-                    "test_fn": generic_test,
-                    "max_flop_rate": max_flop_rate,
-                    "device_latency": device_latency,
-                    "device_memory_bandwidth": device_memory_bandwidth,
-                    "eval_str": eval_str
-                    })
-            """
-
-            #test_id, tdict = test(args)
-
-            # Re-run to obtain performance data and null-kernel latency
-            # since ytopt doesn't appear to have a way to return ancillary data.
-            # Could have each rank/process/thread write to a file and then recombine the 
-            # results.
-            hjson_file_str = save_path + "/" + pid + ".hjson"
-
-            if not exists(hjson_file_str) or pre_existing_evals < max_evals:
-                tdict = run_single_param_set_v2(in_queue, knl, trans_list, generic_test,
-                            max_flop_rate=max_flop_rate,
-                            device_memory_bandwidth=device_memory_bandwidth,
-                            device_latency=device_latency,
-                            timeout=timeout,
-                            method="thread",#"subprocess",
-                            run_single_batch=True,
-                            error_return_time=timeout)
+            if float(rows[0][-2]) < timeout:
+                #batch_size,iii,iio,ji,kii,kio,objective,elapsed_sec
+                p = dict(zip(column_names, [int(item) for item in rows[0][:-2]]))
                 
-                from tagtune.utils import dump_hjson
-                dump_hjson(hjson_file_str, tdict)
+                params = (p["batch_size"],
+                          p["kio"]*p["kii"],
+                          p["kii"],
+                          p["iio"]*p["iii"],
+                          p["iii"],
+                          p["ji"],)
+
+                from tagtune.generators import get_trans_list
+                trans_list = get_trans_list(knl, params)
+
+
+                """
+                test_id = get_test_id(trans_list)
+                args = frozendict({"timeout": timeout,
+                        "cur_test": None,
+                        "total_tests": None,
+                        "test_id": test_id,
+                        "platform_id": platform_id,
+                        "knl": knl,
+                        "tlist": trans_list,
+                        "test_fn": generic_test,
+                        "max_flop_rate": max_flop_rate,
+                        "device_latency": device_latency,
+                        "device_memory_bandwidth": device_memory_bandwidth,
+                        "eval_str": eval_str
+                        })
+                """
+
+                #test_id, tdict = test(args)
+
+                # Re-run to obtain performance data and null-kernel latency
+                # since ytopt doesn't appear to have a way to return ancillary data.
+                # Could have each rank/process/thread write to a file and then recombine the 
+                # results.
+                hjson_file_str = save_path + "/" + pid + ".hjson"
+
+                if not exists(hjson_file_str) or pre_existing_evals < max_evals:
+                    tdict = run_single_param_set_v2(in_queue, knl, trans_list, generic_test,
+                                max_flop_rate=max_flop_rate,
+                                device_memory_bandwidth=device_memory_bandwidth,
+                                device_latency=device_latency,
+                                timeout=timeout,
+                                method="thread",#"subprocess",
+                                run_single_batch=True,
+                                error_return_time=timeout)
+                    if tdict["data"]["avg_time_predicted"] < timeout:
+                        from tagtune.utils import dump_hjson
+                        dump_hjson(hjson_file_str, tdict)
+                    else:
+                        print("Run return error return time. Not dumping to hjson.")
+    else:
+        print("Run return error return time. Not dumping to hjson.")
 
     print("======RETURNING FROM SEARCH========")
     #exit()
