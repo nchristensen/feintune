@@ -157,21 +157,23 @@ class MyDepMapper(DependencyMapper):
         #print("MAP CONSTANT", expr)
         #return frozenset()
 
-tunit = lp.make_kernel(
-    "{[i, j]: 0<=i,j<10}",
-    """
-    y[map[i], j] = j*sin(x[i, map[2*i]]) {id=foo}
-    """,
-    [lp.GlobalArg("x,y", shape=None),
-     ...],
-    lang_version=(2018, 2))
+# Some test code
+if False:
+    tunit = lp.make_kernel(
+        "{[i, j]: 0<=i,j<10}",
+        """
+        y[map[i], j] = j*sin(x[i, map[2*i]]) {id=foo}
+        """,
+        [lp.GlobalArg("x,y", shape=None),
+         ...],
+        lang_version=(2018, 2))
 
-knl = tunit.default_entrypoint
-dep_mapper = MyDepMapper(include_subscripts=False)
-result = set()
-for insn in knl.instructions:
-    result.update(dep_mapper(insn.expression, should_record=False))
-print("RHS index deps are:", result)
+    knl = tunit.default_entrypoint
+    dep_mapper = MyDepMapper(include_subscripts=False)
+    result = set()
+    for insn in knl.instructions:
+        result.update(dep_mapper(insn.expression, should_record=False))
+    print("RHS index deps are:", result)
 
 def get_index_deps(tunit):
     knl = tunit.default_entrypoint

@@ -264,13 +264,15 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
                     results.sort(key=sort_key)
                     dump_hjson(test_results_file, dict(results)) 
                     # Should probably surround in try-except
+                """
                     if timeout is not None:
-                        timeout = min(initial_timeout, 3*results[0][1]["data"]["wall_clock_time"])
+                        timeout = min(initial_timeout, 10*results[0][1]["data"]["wall_clock_time"])
 
                 # Broadcast the updated timeout: problem - for fast kernels the wall-clock
                 # time is much larger than the execution time, and the process can be
                 # slow for reasons unrelated to the kernel execution
                 timeout = comm.bcast(timeout)
+                """
 
 
     results.sort(key=sort_key)
@@ -279,6 +281,7 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
     if comm.Get_rank() == 0:
         print(result)
         dump_hjson(hjson_file_str, result)
+    comm.Barrier()
 
     return result
 

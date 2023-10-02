@@ -43,7 +43,7 @@ lp.set_caching_enabled(False)
 import loopy.options
 loopy.options.ALLOW_TERMINAL_COLORS = False
 
-from tagtune.__init__ import (gen_diff_knl, gen_diff_knl_fortran2,
+from .apply_transformations import (gen_diff_knl, gen_diff_knl_fortran2,
     apply_transformation_list, gen_elwise_linear_knl, gen_face_mass_knl, gen_face_mass_knl_merged)
 from tagtune.grudge_tags import (IsDOFArray, IsSepVecDOFArray, IsOpArray,
     IsSepVecOpArray, IsFaceDOFArray, IsFaceMassOpArray, IsVecDOFArray, IsVecOpArray, IsFourAxisDOFArray)
@@ -202,6 +202,7 @@ def test_face_mass_merged(kern, backend="OPENCL", nruns=10, warmup=True):
 def measure_execution_time(queue, tunit, arg_dict, nruns, warmup_runs):
     print("Warming up")
     for i in range(warmup_runs):
+        print("Warmup run", i)
         tunit(queue, **arg_dict)
     #queue.finish()
 
@@ -939,7 +940,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     #    print(knl_base)
     #    exit()
 
-    from tagtune.__init__ import get_einsums
+    from .apply_transformations import get_einsums
     neinsums = len(get_einsums(knl_base))
     batch_size = neinsums # No batching is equivalent to one batch
 
@@ -1688,7 +1689,7 @@ if __name__ == "__main__":
     unpickle_and_run_test(*sys.argv[1:])
 
     """
-    from tagtune.__init__ import gen_diff_knl, load_transformations_from_file, apply_transformation_list
+    from .apply_transformations import gen_diff_knl, load_transformations_from_file, apply_transformation_list
     from grudge.execution import diff_prg, elwise_linear_prg, face_mass_prg
 
     # Test existing optimizations

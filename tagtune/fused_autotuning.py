@@ -11,6 +11,9 @@ import hjson
 from tagtune.generators import createConfigSpace
 from tagtune.ytopt_autotuning import ytopt_tuning
 from time import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 use_charm=False
 if use_charm:
@@ -179,15 +182,23 @@ def assemble_transformed_macrokernel(macrokernel, subkernels):
     #exit()
 
 # FIXME: Needs to look at the csv file instead of the hjson file
-# FIXME: Just return a list of transform dictionaries.
-def transform_macrokernel(tunit_dict, save_path, in_actx=None):
-    
+# FIXME: Just return a list of transform dictionaries. --Why?
+
+# Searches for a transform file matching each macrokernel's subkernel's program id
+# in save_path. Uses those transformations if a transform file is found
+# otherwise uses the transformations of PrefusedFusionContractorArrayContext.
+# Can optionally perform tuning.
+
+def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False):
+
+    logger.info("Transforming macrokernel")
     #macrokernels_to_tune = ["rhs"]
     sk_list, pid_counts = collect_subkernels([tunit_dict])
     #macrokernels_to_tune = ["frozen_result"]
-    if in_actx is None:# and tunit_dict[1]["tunit"].default_entrypoint.name in macrokernels_to_tune:
+    #if in_actx is None:# and tunit_dict[1]["tunit"].default_entrypoint.name in macrokernels_to_tune:
+    if tune:
         autotune_standalone_subkernels(sk_list, save_path=save_path)
-    transformed_subkernels = []
+        logger.info("Done tuning macrokernel")
 
     sk_to_avoid = [#"frozen_inv_metric_deriv_vol_0",
                    #"frozen_inv_metric_deriv_vol_1",
@@ -196,13 +207,13 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None):
                   ]
     tunit_to_avoid = []#["frozen_inv_metric_deriv_vol"]#["rhs","frozen_inv_metric_deriv_vol"]
 
-    if tunit_dict[1]["tunit"].default_entrypoint.name in tunit_to_avoid:
-        print(len(sk_list))
-        for sk in sk_list:
-            print(get_einsum_types(sk[1]))
-        exit()
+    #if tunit_dict[1]["tunit"].default_entrypoint.name in tunit_to_avoid:
+    #    print(len(sk_list))
+    #    for sk in sk_list:
+    #        print(get_einsum_types(sk[1]))
+    #    exit()
 
-
+    # Should probably use in_actx instead.
     platforms = cl.get_platforms()
     cl_ctx = cl.Context(
         dev_type=cl.device_type.GPU,
@@ -213,6 +224,7 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None):
     from meshmode.array_context import PrefusedFusionContractorArrayContext
     actx = PrefusedFusionContractorArrayContext(queue)
 
+    transformed_subkernels = []
     for pid, sk, csk in sk_list:
 
         #TODO If the transformation selected is one that timed out, should
@@ -231,11 +243,9 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None):
                #sk.default_entrypoint.name not in sk_to_avoid and \
                 print("Found", hjson_file_str)
                 hjson = load_hjson(hjson_file_str)
-                from tagtune.__init__ import apply_transformation_list
+                print("HJSON", hjson_file_str, hjson)
+                from .apply_transformations import apply_transformation_list
                 tsk = apply_transformation_list(sk, hjson["transformations"])[0] 
-                if sk.default_entrypoint.name in sk_to_avoid:
-                    print(tsk)
-                    #exit()
                 transformed_subkernels.append(tsk)
 
             else:
@@ -408,7 +418,7 @@ def generate_subkernels(tunit, barriers, phases):
     return subkernels
 
 
-from tagtune.__init__ import get_einsums, get_einsum_counts, get_einsum_types
+from .apply_transformations import get_einsums, get_einsum_counts, get_einsum_types
 
 def dump_subkernels_from_pickled(arg):
 
@@ -545,6 +555,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
 
     handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
     timeout = 120
+
     if (len(est[0]), len(est[1]),) in handled_pairs and not indirection:
         if use_ytopt:
             # Won't work with charm. But the charm4py executor is broken anyway.
@@ -552,13 +563,13 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
                 eval_str = "threadpool"
             else:
                 eval_str = "mpi_comm_executor"
-            #eval_str = "mpi_pool_executor"
+                #eval_str = "mpi_pool_executor"
             input_space = createConfigSpace(queue, sk)
             print("TESTING YTOPT")
             ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate,
                              device_memory_bandwidth=device_memory_bandwidth,
                              device_latency=device_latency, timeout=timeout, save_path=save_path,
-                             max_evals=100, required_new_evals=0, eval_str=eval_str)
+                             max_evals=100, required_new_evals=10, eval_str=eval_str)
         else:
             print("ONLY TESTING THE FIRST 20 transformations")
             from random import shuffle
@@ -1178,13 +1189,14 @@ def collect_subkernels(tunit_dicts):
     return out_list, pid_counts
 
 
-
+# TODO. Make load and save paths arguments
 def main(arg):
 
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
-    directories = [#"./pickled_programs_y3_prediction_order_1_eager",
-                    "../pickled_programs_y3_prediction_order_2_lazy",
+    directories = ["./pickled_programs"
+                    #"./pickled_programs_y3_prediction_order_1_eager",
+                    #"../pickled_programs_y3_prediction_order_2_lazy",
                     #"./pickled_programs_wave",
                     #"./pickled_programs_prediction_order_1",
                     #"./pickled_programs_y3_prediction_order_1",
@@ -1204,12 +1216,12 @@ def main(arg):
     # Or just have the size be a parameter in the Bayesian optimization space.
 
     for directory in directories:
-        save_path = directory + "/hjson3"
+        save_path = "./autotuning_files"#directory + "/hjson3"
         # Really a tuple, not a dict
         tunit_dicts = get_pickled_tunits(directory)
 
 
-        if False: # Tune a single macrokernel at a time.
+        if True: # Tune a single macrokernel at a time.
 
             platforms = cl.get_platforms()
             cl_ctx = cl.Context(
@@ -1226,7 +1238,7 @@ def main(arg):
 
             for tunit_dict in tunit_dicts:
 
-                transformed_tunit = transform_macrokernel(tunit_dict, save_path, actx=actx)
+                transformed_tunit = transform_macrokernel(tunit_dict, save_path, in_actx=actx, tune=True)
 
                 # Would need to save the indirection arrays with the kernel
                 #if not any([arg.dtype.dtype == np.int8 for arg in transformed_tunit.default_entrypoint.args]):
@@ -1240,7 +1252,7 @@ def main(arg):
  
 
 
-        if True: # Tune all of the subkernels
+        if False: # Tune all of the subkernels
             print("Done collecting tunits")
             # ID changes based on whether python was run with -O
             sk_list, pid_dict = collect_subkernels(tunit_dicts)

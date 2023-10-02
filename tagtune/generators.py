@@ -6,7 +6,7 @@ from tagtune.grudge_tags import (IsDOFArray, IsSepVecDOFArray,
     IsOpArray, IsSepVecOpArray, IsFaceDOFArray, IsFaceMassOpArray,
     IsVecDOFArray, IsVecOpArray, IsFourAxisDOFArray)
 from pytools import memoize
-from tagtune.__init__ import get_einsums
+from .apply_transformations import get_einsums
 from tagtune.utils import get_indirection_arrays
 
 def k_inner_inner_options(start_val=None):
@@ -749,7 +749,7 @@ def get_args_and_arrays(knl):
 @memoize
 def get_inames(knl):
 
-    from tagtune.__init__ import get_einsum_types
+    from .apply_transformations import get_einsum_types
     ## Figure out what the inames are called
 
     # Hacky, is there a better way to get this?
