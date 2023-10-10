@@ -974,6 +974,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
         print("Transformation, preprocessing, and obtaining grid sizes timed out")
         transformed = False
         knl = knl_base
+        sb_knl = None
         local_sizes = []
 
     #local_sizes = set()
