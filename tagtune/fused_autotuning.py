@@ -189,7 +189,7 @@ def assemble_transformed_macrokernel(macrokernel, subkernels):
 # otherwise uses the transformations of PrefusedFusionContractorArrayContext.
 # Can optionally perform tuning.
 
-def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False):
+def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, device_latency=None, device_memory_bandwidth=None, peak_flop_rate=None):
 
     logger.info("Transforming macrokernel")
     #macrokernels_to_tune = ["rhs"]
@@ -197,7 +197,7 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False):
     #macrokernels_to_tune = ["frozen_result"]
     #if in_actx is None:# and tunit_dict[1]["tunit"].default_entrypoint.name in macrokernels_to_tune:
     if tune:
-        autotune_standalone_subkernels(sk_list, save_path=save_path)
+        autotune_standalone_subkernels(sk_list, save_path=save_path, device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, peak_flop_rate=peak_flop_rate)
         logger.info("Done tuning macrokernel")
 
     sk_to_avoid = [#"frozen_inv_metric_deriv_vol_0",
@@ -232,7 +232,7 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False):
 
         if in_actx is not None:
             default_transformed_sk = in_actx.transform_loopy_program(sk)
-            transformed_subkernels.append(default_transformed_sk)
+            transformed_subkernels.append((pid,default_transformed_sk,))
         else:
 
             #pid = unique_program_id(sk)
@@ -246,7 +246,7 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False):
                 print("HJSON", hjson_file_str, hjson)
                 from .apply_transformations import apply_transformation_list
                 tsk = apply_transformation_list(sk, hjson["transformations"])[0] 
-                transformed_subkernels.append(tsk)
+                transformed_subkernels.append((pid,tsk,))
 
             else:
                 print("Can't find", hjson_file_str)
@@ -255,7 +255,7 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False):
 
                 print("TRANSFORMING")
                 tsk = actx.transform_loopy_program(sk)
-                transformed_subkernels.append(tsk)
+                transformed_subkernels.append((pid,tsk,))
                 print("DONE TRANSFORMING")
                 #transformed_subkernels.append(sk)
             # Transform ...
@@ -266,33 +266,33 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False):
 
         #print("PRE-TRANSFORMATION")
     #print(tunit_dict[1]["tunit"])
-    print("REASSEMBLING")
+    #print("REASSEMBLING")
 
     #orig_tunit = tunit_dict[1]["tunit"]
-    orig_tunit = actx.transform_loopy_program(tunit_dict[1]["tunit"])
-    orig_tunit = lp.preprocess_program(actx.transform_loopy_program(orig_tunit))
+    #orig_tunit = actx.transform_loopy_program(tunit_dict[1]["tunit"])
+    #orig_tunit = lp.preprocess_program(actx.transform_loopy_program(orig_tunit))
     #print(orig_tunit)
     #if orig_tunit.default_entrypoint.name == "rhs":
     #    breakpoint()
 
-    print("ORIGINAL TUNIT")
-    orig_tunit = lp.linearize(orig_tunit)
+    #print("ORIGINAL TUNIT")
+    #orig_tunit = lp.linearize(orig_tunit)
     #if orig_tunit.default_entrypoint.name == "rhs":
     #    print(orig_tunit)
     #    print(orig_tunit.default_entrypoint.schedule)
     #    exit()
 
     transformed_subkernels_2 = []
-    for tsk in transformed_subkernels:
+    for pid, tsk in transformed_subkernels:
         assert lp.has_schedulable_iname_nesting(tsk)
         tsk = lp.preprocess_program(tsk)
         # The old scheduler seems to have a problem with unbarriered internal dependencies. Need to add no_sync_with
         # or find a way to use the schedule from the component subkernels.
         tsk = lp.linearize(tsk)
-        transformed_subkernels_2.append(tsk)
+        transformed_subkernels_2.append((pid,tsk,))
     transformed_subkernels = transformed_subkernels_2
         
-    transformed_tunit = assemble_transformed_macrokernel(tunit_dict[1]["tunit"], transformed_subkernels)
+    transformed_tunit = assemble_transformed_macrokernel(tunit_dict[1]["tunit"], [tsk[1] for tsk in transformed_subkernels])
     assert lp.has_schedulable_iname_nesting(tunit_dict[1]["tunit"])
     assert lp.has_schedulable_iname_nesting(transformed_tunit)
 
@@ -315,7 +315,7 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False):
     #if transformed_tunit.default_entrypoint.name == "rhs":
     #    run_single_param_set_v2(actx.queue, transformed_tunit, [], generic_test)
     #    exit()
-    return transformed_tunit
+    return transformed_tunit, transformed_subkernels
 
 # Create a subkernel with the domains and instructions of each cumulative phase
 def generate_cumulative_subkernels(tunit, barriers, phases):
@@ -940,7 +940,7 @@ def get_device_roofline_data(queue):
     return device_latency, device_memory_bandwidth, clpeak_flop_rate
 
 
-def autotune_standalone_subkernels(sk_list, save_path=None):
+def autotune_standalone_subkernels(sk_list, save_path=None, device_latency=None, device_memory_bandwidth=None, peak_flop_rate=None):
 
     platforms = cl.get_platforms()
     cl_ctx = cl.Context(
@@ -953,27 +953,29 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
         save_path = "./hjson"
 
     # TODO: Cache the roofline result or pass it in as an argument.
+    """
     if False:
         if not use_charm:
             if comm.Get_rank() == 0:
                 # The latency is now obtained per-kernel so it probably needn't be obtained here.
                 # Bandwidth microbenchmark could be improved to handle asymmetric numbers of reads and
                 # writes.
-                device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
+                device_latency, device_memory_bandwidth, peak_flop_rate = get_device_roofline_data(queue)
             else:
                 device_memory_bandwidth = None
                 device_latency = None
-                clpeak_flop_rate = None
+                peak_flop_rate = None
 
             device_memory_bandwidth = comm.bcast(device_memory_bandwidth)
             device_latency = comm.bcast(device_latency)
             clpeak_flop_rate = comm.bcast(clpeak_flop_rate)
         else:
-            device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
+            device_latency, device_memory_bandwidth, peak_flop_rate = get_device_roofline_data(queue)
     else:
         device_memory_bandwidth = None
         device_latency = None
-        clpeak_flop_rate = None
+        peak_flop_rate = None
+    """
 
     for pid, sk, csk in sk_list:
 
@@ -1008,47 +1010,47 @@ def autotune_standalone_subkernels(sk_list, save_path=None):
                     if (non_red_axes, red_axes,) in handled_pairs and not indirection and einsum_count <= np.inf:
                         # Add indirection arrays as a parameter?
                         autotune_standalone_subkernel(sk, queue, program_id=pid,
-                                                      max_flop_rate=clpeak_flop_rate,
+                                                      max_flop_rate=peak_flop_rate,
                                                       device_latency=device_latency,
                                                       device_memory_bandwidth=device_memory_bandwidth,
                                                       save_path=save_path)
 
 
-
-def test_default_transforms(sk_list, save_path=None):
+# 
+def test_kernels(sk_list, queue, save_path=None, profile_device=False, device_latency=None, device_memory_bandwidth=None, peak_flop_rate=None):
 
     if save_path is None:
-        save_path = "default_transforms_hjson"
+        save_path = "kernel_tests_hjson"
 
     os.makedirs(save_path, exist_ok=True)
 
-    platforms = cl.get_platforms()
-    cl_ctx = cl.Context(
-        dev_type=cl.device_type.GPU,
-        properties=[(cl.context_properties.PLATFORM, platforms[0])])
-    queue = cl.CommandQueue(cl_ctx,
-        properties=cl.command_queue_properties.PROFILING_ENABLE)
+    #platforms = cl.get_platforms()
+    #cl_ctx = cl.Context(
+    #    dev_type=cl.device_type.GPU,
+    #    properties=[(cl.context_properties.PLATFORM, platforms[0])])
+    #queue = cl.CommandQueue(cl_ctx,
+    #    properties=cl.command_queue_properties.PROFILING_ENABLE)
 
-    from meshmode.array_context import FusionContractorArrayContext, PrefusedFusionContractorArrayContext
+    #from meshmode.array_context import FusionContractorArrayContext, PrefusedFusionContractorArrayContext
     #actx = FusionContractorArrayContext(queue)
-    actx = PrefusedFusionContractorArrayContext(queue)
+    #actx = PrefusedFusionContractorArrayContext(queue)
 
     device_latency=None
     device_memory_bandwidth = None
     clpeak_flop_rate = None
 
-    if False:
+    if profile_device:
         device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
 
     gen_times = []
 
-    for pid, sk, csk in sk_list:
+    for pid, sk in sk_list:
     #for sk in sk_list:
         #print(f"Testing subkernel: {pid}")
 
         einsum_counts = list(get_einsum_counts(sk).items())
         indirection = len(get_indirection_arrays(sk)) > 0
-        if len(einsum_counts) > 0:
+        if len(einsum_counts) > 0 and not indirection:
             #if len(einsum_counts) > 1:
             #    raise ValueError("Subkernel has multiple einsum types")
 
@@ -1060,8 +1062,9 @@ def test_default_transforms(sk_list, save_path=None):
 
             handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
             #if True:
-            if (non_red_axes, red_axes,) in handled_pairs and einsum_count >= 100:
+            if (non_red_axes, red_axes,) in handled_pairs and einsum_count > 0:
 
+                """
                 start = time()
                 try:
                     transformed_sk = actx.transform_loopy_program(sk)
@@ -1070,6 +1073,7 @@ def test_default_transforms(sk_list, save_path=None):
                 end = time()
                 transform_time = end - start
                 start = time()
+                """
                 """
                 code = lp.generate_code_v2(transformed_sk).device_code()
                 end = time()
@@ -1081,8 +1085,8 @@ def test_default_transforms(sk_list, save_path=None):
                 gen_times.append([name, transform_time, codegen_time])
                 """
                 #"""
-                ret_dict = run_single_param_set_v2(queue, transformed_sk, [], generic_test,
-                            max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
+                ret_dict = run_single_param_set_v2(queue, sk, [], generic_test,
+                            max_flop_rate=peak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
                             device_latency=device_latency)
                 
                 #ret_dict = dict(ret_dict)
@@ -1094,6 +1098,7 @@ def test_default_transforms(sk_list, save_path=None):
                 out_file = open(hjson_file_str, "wt")
                 hjson.dump(ret_dict, out_file, default=convert)
                 out_file.close()
+
                 #"""
     #print("PRINTING RESULTS")
     #for name, transform_time, codegen_time in gen_times:
@@ -1215,6 +1220,33 @@ def main(arg):
 
     # Or just have the size be a parameter in the Bayesian optimization space.
 
+    #platforms = cl.get_platforms()
+    #cl_ctx = cl.Context(
+    #    dev_type=cl.device_type.GPU,
+    #    properties=[(cl.context_properties.PLATFORM, platforms[0])])
+    #queue = cl.CommandQueue(cl_ctx,
+    #    properties=cl.command_queue_properties.PROFILING_ENABLE)
+    platforms = cl.get_platforms()
+    devices = platforms[0].get_devices(device_type=cl.device_type.GPU)
+    if comm is not None:
+        cl_ctx = cl.Context(
+            devices=[devices[comm.Get_rank()%len(devices)]])
+            #properties=[(cl.context_properties.PLATFORM, platforms[0])])
+    else:
+         cl_ctx = cl.Context(devices=devices)
+    queue = cl.CommandQueue(cl_ctx,
+            properties=cl.command_queue_properties.PROFILING_ENABLE)
+
+
+
+    device_latency = None
+    device_memory_bandwidth = None
+    clpeak_flop_rate = None
+    device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
+
+    from meshmode.array_context import PrefusedFusionContractorArrayContext
+    actx = PrefusedFusionContractorArrayContext(queue)
+
     for directory in directories:
         save_path = "./autotuning_files"#directory + "/hjson3"
         # Really a tuple, not a dict
@@ -1223,22 +1255,14 @@ def main(arg):
 
         if True: # Tune a single macrokernel at a time.
 
-            platforms = cl.get_platforms()
-            cl_ctx = cl.Context(
-                dev_type=cl.device_type.GPU,
-                properties=[(cl.context_properties.PLATFORM, platforms[0])])
-            queue = cl.CommandQueue(cl_ctx,
-                properties=cl.command_queue_properties.PROFILING_ENABLE)
-
-            #device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
-
-            from meshmode.array_context import PrefusedFusionContractorArrayContext
-            #actx = PrefusedFusionContractorArrayContext(queue)
-            actx = None
 
             for tunit_dict in tunit_dicts:
 
-                transformed_tunit = transform_macrokernel(tunit_dict, save_path, in_actx=actx, tune=True)
+                transformed_tunit, transformed_subkernels = transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=True, 
+                                                                device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, peak_flop_rate=clpeak_flop_rate)
+                transformed_tunit_default, transformed_subkernels_default = transform_macrokernel(tunit_dict, save_path + "_default", in_actx=actx, tune=False)
+                
+                test_kernels(transformed_subkernels_default, queue, save_path=None, device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, peak_flop_rate=clpeak_flop_rate)
 
                 # Would need to save the indirection arrays with the kernel
                 #if not any([arg.dtype.dtype == np.int8 for arg in transformed_tunit.default_entrypoint.args]):
