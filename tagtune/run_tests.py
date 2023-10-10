@@ -1068,7 +1068,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
         avg_time, wall_clock_time = error_return_time, error_return_time # Don't run and return return a large run time
 
 
-    if measured_latency is None:
+    if measured_latency is None or measured_latency == 0:
         measured_latency = device_latency
 
     print(trans_list)
