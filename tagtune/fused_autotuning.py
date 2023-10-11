@@ -570,6 +570,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
                              device_memory_bandwidth=device_memory_bandwidth,
                              device_latency=device_latency, timeout=timeout, save_path=save_path,
                              max_evals=100, required_new_evals=50, eval_str=eval_str)
+            #comm.Barrier()
         else:
             print("ONLY TESTING THE FIRST 20 transformations")
             from random import shuffle
@@ -1017,7 +1018,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None, device_latency=None,
 
 
 # 
-def test_kernels(sk_list, queue, save_path=None, profile_device=False, device_latency=None, device_memory_bandwidth=None, peak_flop_rate=None):
+def test_default_transforms(sk_list, queue, save_path=None, profile_device=False, device_latency=None, device_memory_bandwidth=None, peak_flop_rate=None):
 
     if save_path is None:
         save_path = "kernel_tests_hjson"
@@ -1260,9 +1261,9 @@ def main(arg):
 
                 transformed_tunit, transformed_subkernels = transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=True, 
                                                                 device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, peak_flop_rate=clpeak_flop_rate)
-                transformed_tunit_default, transformed_subkernels_default = transform_macrokernel(tunit_dict, save_path + "_default", in_actx=actx, tune=False)
+                #transformed_tunit_default, transformed_subkernels_default = transform_macrokernel(tunit_dict, save_path + "_default", in_actx=actx, tune=False)
                 
-                test_kernels(transformed_subkernels_default, queue, save_path=None, device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, peak_flop_rate=clpeak_flop_rate)
+                #test_kernels(transformed_subkernels_default, queue, save_path=None, device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, peak_flop_rate=clpeak_flop_rate)
 
                 # Would need to save the indirection arrays with the kernel
                 #if not any([arg.dtype.dtype == np.int8 for arg in transformed_tunit.default_entrypoint.args]):

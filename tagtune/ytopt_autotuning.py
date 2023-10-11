@@ -319,6 +319,8 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
                 if True: # See what the performance is with the full kernel.
                     hjson_file_str = save_path + "/" + pid + "_full" + ".hjson"
                     if True:#not exists(hjson_file_str) or pre_existing_evals < max_evals:
+            
+                        print("GENERATING AND EXECUTING FULL KERNEL")
                         tdict = run_single_param_set_v2(in_queue, knl, trans_list, generic_test,
                                     max_flop_rate=max_flop_rate,
                                     device_memory_bandwidth=device_memory_bandwidth,
@@ -327,15 +329,13 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
                                     method="thread",#"subprocess",
                                     run_single_batch=False,
                                     error_return_time=timeout)
+                        print("DONE GENERATING AND EXECUTING FULL KERNEL")
                         if tdict["data"]["avg_time_predicted"] < timeout:
                             from tagtune.utils import dump_hjson
                             dump_hjson(hjson_file_str, tdict)
                         else:
                             print("Run return error return time. Not dumping to hjson.")
 
-
-    else:
-        print("Run return error return time. Not dumping to hjson.")
 
     print("======RETURNING FROM SEARCH========")
     #exit()
