@@ -1602,6 +1602,7 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
     # Assemble the sub-batches
     print("ASSEMBLING SUB-BATCHES")
 
+    saved_count = 0
     prefetch_inames = []
     for batch in range(nbatches):
         var_names = set()
@@ -1678,15 +1679,28 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
         domain = domain.add_constraints(new_constraints)
         domains.append(domain)
 
-        # TODO: Merge prefetch domains in the same batch where possible.
-        # DONE
-        if batch == 0:
-            # Create a single batch knl, which may be faster to tune with
-            single_batch_knl = orig_tunit.with_kernel(orig_tunit.default_entrypoint.copy(domains=domains, 
-                                    instructions=insns, args=list(args), temporary_variables=temp_args))
-            single_batch_knl = lp.tag_inames(single_batch_knl, list(iname_to_tag), ignore_nonexistent=True)
-            single_batch_knl = lp.set_options(single_batch_knl, lp.Options(no_numpy=True, return_dict=True))
-            #single_batch_knl = lp.add_inames_for_unused_hw_axes(single_batch_knl)
+
+        #if batch == 0:
+        # Create a single batch knl, which may be faster to tune with
+        my_single_batch_knl = orig_tunit.with_kernel(orig_tunit.default_entrypoint.copy(domains=domains, 
+                                instructions=insns, args=list(args), temporary_variables=temp_args))
+        my_single_batch_knl = lp.tag_inames(my_single_batch_knl, list(iname_to_tag), ignore_nonexistent=True)
+        my_single_batch_knl = lp.set_options(my_single_batch_knl, lp.Options(no_numpy=True, return_dict=True))
+        #single_batch_knl = lp.add_inames_for_unused_hw_axes(single_batch_knl)
+
+        # Find the subkernel with the most global arguments and temp args. Use that one for the single batch tests
+        count = 0
+        for arg in my_single_batch_knl.default_entrypoint.args:
+            if isinstance(arg, lp.ArrayArg) and (arg.address_space == lp.AddressSpace.GLOBAL or arg.address_space is None):
+                count += 1
+        for arg in my_single_batch_knl.default_entrypoint.temporary_variables.values():
+            if arg.address_space == lp.AddressSpace.GLOBAL or arg.address_space is None:
+                count += 1
+
+        if count > saved_count:
+            saved_count = count
+            single_batch_knl = my_single_batch_knl
+
 
     knl = lp.make_kernel(domains, insns, 
             kernel_data=list(args) + list(temp_args.values()), 
