@@ -1599,6 +1599,24 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
     ## the number of prefetches.
     """
 
+    # Find the subkernel with the most global arguments and temp args. Use that one for the single batch tests
+    saved_count = 0
+    sk_num_for_single_batch = 0
+    for sk_num, sk in enumerate(subkernels):
+        count = 0
+        for arg in sk.default_entrypoint.args:
+            if isinstance(arg, lp.ArrayArg) and (arg.address_space == lp.AddressSpace.GLOBAL or arg.address_space is None):
+                count += 1
+        for arg in sk.default_entrypoint.temporary_variables.values():
+            if arg.address_space == lp.AddressSpace.GLOBAL or arg.address_space is None:
+                count += 1
+
+        if count > saved_count:
+            saved_count = count
+            sk_num_for_single_batch = sk_num
+
+    print(f"USING SUBKERNEL {sk_num_for_single_batch} WITH {saved_count} GLOBAL ARGS FOR SINGLE BATCH TESTS")
+
     # Assemble the sub-batches
     print("ASSEMBLING SUB-BATCHES")
 
@@ -1680,7 +1698,7 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
 
         # TODO: Merge prefetch domains in the same batch where possible.
         # DONE
-        if batch == 0:
+        if batch == sk_num_for_single_batch:
             # Create a single batch knl, which may be faster to tune with
             single_batch_knl = orig_tunit.with_kernel(orig_tunit.default_entrypoint.copy(domains=domains, 
                                     instructions=insns, args=list(args), temporary_variables=temp_args))
