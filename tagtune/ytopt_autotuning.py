@@ -315,7 +315,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
                                 method="thread",#"thread",#"subprocess",
                                 run_single_batch=True,
                                 error_return_time=timeout)
-                    if tdict["data"]["avg_time"] < timeout:
+                    if tdict["data"]["avg_time_predicted"] < timeout:
                         from tagtune.utils import dump_hjson
                         dump_hjson(hjson_file_str, tdict)
                     else:
@@ -335,7 +335,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
                                     run_single_batch=False,
                                     error_return_time=timeout)
                         print("DONE GENERATING AND EXECUTING FULL KERNEL")
-                        if tdict["data"]["avg_time"] < timeout:
+                        if tdict["data"]["avg_time_predicted"] < timeout:
                             from tagtune.utils import dump_hjson
                             dump_hjson(hjson_file_str, tdict)
                         else:
