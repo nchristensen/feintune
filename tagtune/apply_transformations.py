@@ -1607,13 +1607,25 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
     for batch in range(nbatches):
         var_names = set()
         constraints = []
+
+        batch_instructions = []
+        batch_domains = []
+        batch_temporaries = {}
+        batch_args = {}
+        batch_prefetch_inames = []
+
         for subkernel in subkernels[batch*batch_size:(batch+1)*batch_size]:
 
             sk = subkernel.default_entrypoint
 
+            for arg in sk.args:
+                batch_args[arg.name] = arg
+            batch_temporaries |= sk.temporary_variables
+
             for old_iname in sk.inames.keys():
                 if old_iname not in orig_tunit.default_entrypoint.inames:
                     prefetch_inames.append(old_iname + f"_b{batch}")
+                    batch_prefetch_inames.append(old_iname + f"_b{batch}")
 
                 sk = lp.rename_iname(sk, old_iname, old_iname + f"_b{batch}", existing_ok=False, preserve_tags=True)
                 sk = lp.remove_unused_inames(sk)
@@ -1628,7 +1640,7 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
                     # If this doesn't work, will need to go through and manually remove from each iname
                     
                     #sk = lp.untag_inames(sk, old_iname, loopy.kernel.data.InameImplementationTag)
-                print(sk)
+                #print(sk)
                 assert old_iname not in sk.inames 
 
             insn_mappings = {instr.id: [f"batch_{batch}_" + instr.id] for instr in sk.instructions}
@@ -1647,6 +1659,7 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
             # This seems to make some inames non-removable
             sk = lp.add_inames_for_unused_hw_axes(sk)
             #sk = lp.remove_unused_inames(sk, inames=["idof_ensm2_0_outer"])
+            batch_instructions = batch_instructions + sk.instructions
             insns = insns + sk.instructions
             #print(sk)
 
@@ -1663,6 +1676,8 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
                         iname_to_tag |= set([(iname, tag,)])
 
         # Eliminate redundant (prefetch) instructions:
+        # This can happen when two einsums within a batch prefetch the same array.
+        #prefetches_inames_by_batch.append(prefetch_inames)
         insns = list(set(insns))
         
         space = isl.Space.create_from_names(isl.DEFAULT_CONTEXT, set=var_names)
@@ -1677,96 +1692,108 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
             new_constraints |= set([new_constraint])
 
         domain = domain.add_constraints(new_constraints)
+        batch_domains.append(domain)
         domains.append(domain)
 
 
         #if batch == 0:
         # Create a single batch knl, which may be faster to tune with
-        my_single_batch_knl = orig_tunit.with_kernel(orig_tunit.default_entrypoint.copy(domains=domains, 
-                                instructions=insns, args=list(args), temporary_variables=temp_args))
-        my_single_batch_knl = lp.tag_inames(my_single_batch_knl, list(iname_to_tag), ignore_nonexistent=True)
-        my_single_batch_knl = lp.set_options(my_single_batch_knl, lp.Options(no_numpy=True, return_dict=True))
-        #single_batch_knl = lp.add_inames_for_unused_hw_axes(single_batch_knl)
+       #single_batch_knl = lp.add_inames_for_unused_hw_axes(single_batch_knl)
 
         # Find the subkernel with the most global arguments and temp args. Use that one for the single batch tests
         count = 0
-        for arg in my_single_batch_knl.default_entrypoint.args:
+        for arg in batch_args.values():
             if isinstance(arg, lp.ArrayArg) and (arg.address_space == lp.AddressSpace.GLOBAL or arg.address_space is None):
                 count += 1
-        for arg in my_single_batch_knl.default_entrypoint.temporary_variables.values():
+        for arg in batch_temporaries.values():
             if arg.address_space == lp.AddressSpace.GLOBAL or arg.address_space is None:
                 count += 1
 
         if count > saved_count:
             saved_count = count
-            single_batch_knl = my_single_batch_knl
-
-
-    knl = lp.make_kernel(domains, insns, 
-            kernel_data=list(args) + list(temp_args.values()), 
-            name=orig_tunit.default_entrypoint.name)
+            saved_batch_domains = batch_domains
+            saved_batch_instructions = batch_instructions
+            saved_batch_args = batch_args
+            saved_batch_temporaries = batch_temporaries 
+            saved_batch_num = batch
+            saved_batch_prefetch_inames = batch_prefetch_inames
 
     # Avoids some weird errors with make_kernel
     #knl = orig_tunit.with_kernel(orig_tunit.default_entrypoint.copy(domains=domains, 
     #        instructions=insns, args=list(args), temporary_variables=temp_args))
+    knl = lp.make_kernel(domains, insns, 
+            kernel_data=list(args) + list(temp_args.values()), 
+            name=orig_tunit.default_entrypoint.name)
     knl = lp.tag_inames(knl, list(iname_to_tag), ignore_nonexistent=False)
     knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
     knl = merge_prefetch_inames(knl, prefetch_inames)
+
+    print(f"USING BATCH {saved_batch_num} FOR THE SINGLE BATCH KERNEL")
+    single_batch_knl = orig_tunit.with_kernel(orig_tunit.default_entrypoint.copy(domains=saved_batch_domains, 
+                            instructions=list(set(saved_batch_instructions)), args=list(saved_batch_args.values()),
+                            temporary_variables=saved_batch_temporaries))
+    single_batch_knl = lp.tag_inames(single_batch_knl, list(iname_to_tag), ignore_nonexistent=True)
+    single_batch_knl = lp.set_options(single_batch_knl, lp.Options(no_numpy=True, return_dict=True))
+    single_batch_knl = merge_prefetch_inames(single_batch_knl, saved_batch_prefetch_inames)
     #knl = lp.add_inames_for_unused_hw_axes(knl)
 
-    if True:
-        if nbatches > 1: #Pointless of alias temporaries if there is a single batch
-            print("ALIASING TEMPORARIES")
-            for i in range(1, nbatches):
-                j = i - 1
-                knl = lp.add_dependency(knl, f"id:batch_{i}_*", f"id:batch_{j}_*")
+    def alias_temporaries(knl, nbatches):
+        if True:
+            if nbatches > 1: #Pointless of alias temporaries if there is a single batch
+                print("ALIASING TEMPORARIES")
+                for i in range(1, nbatches):
+                    j = i - 1
+                    knl = lp.add_dependency(knl, f"id:batch_{i}_*", f"id:batch_{j}_*")
 
-            if True:
+                if True:
 
-                #from loopy.transform.realize_reduction import realize_reduction
-                print("PREPROCESSING PROGRAM")
-                pp_tunit = lp.preprocess_program(knl) # Realizes the reductions so we can access the accumulators and fill in lp.auto memory spaces
-                # realize_reduction doesn't fill in lp.auto memory spaces
-                #pp_tunit = realize_reduction(tunit.with_kernel(knl), unknown_types_ok=True)
-                #knl = b_tunit.default_entrypoint
-                print("LOCAL: GETTING BATCH TEMPORARIES BY SIZE")
-                batch_temps_by_size = get_batch_temporaries_by_size(pp_tunit, nbatches, lp.AddressSpace.LOCAL) 
-                print("LOCAL: GETTING ALIAS SETS")
-                alias_sets = get_alias_sets(batch_temps_by_size)
-                print("LOCAL: CALLING ALIAS TEMPORARIES")
-                for s in alias_sets:
-                    print(sorted(s))
-                    # Synchronizing for exclusive use make loopy fall back to the slow scheduler
-                    # ILP also causes use of the slow scheduler, but oh well.
-                    knl = lp.alias_temporaries(knl, list(s), synchronize_for_exclusive_use=False)
+                    #from loopy.transform.realize_reduction import realize_reduction
+                    print("PREPROCESSING PROGRAM")
+                    pp_tunit = lp.preprocess_program(knl) # Realizes the reductions so we can access the accumulators and fill in lp.auto memory spaces
+                    # realize_reduction doesn't fill in lp.auto memory spaces
+                    #pp_tunit = realize_reduction(tunit.with_kernel(knl), unknown_types_ok=True)
+                    #knl = b_tunit.default_entrypoint
+                    print("LOCAL: GETTING BATCH TEMPORARIES BY SIZE")
+                    batch_temps_by_size = get_batch_temporaries_by_size(pp_tunit, nbatches, lp.AddressSpace.LOCAL) 
+                    print("LOCAL: GETTING ALIAS SETS")
+                    alias_sets = get_alias_sets(batch_temps_by_size)
+                    print("LOCAL: CALLING ALIAS TEMPORARIES")
+                    for s in alias_sets:
+                        print(sorted(s))
+                        # Synchronizing for exclusive use make loopy fall back to the slow scheduler
+                        # ILP also causes use of the slow scheduler, but oh well.
+                        knl = lp.alias_temporaries(knl, list(s), synchronize_for_exclusive_use=False)
 
-                # Doesn't seem to do anything for OpenCL but for other targets it might do something
-                print("PRIVATE: GETTING BATCH TEMPORARIES BY SIZE")
-                batch_temps_by_size = get_batch_temporaries_by_size(pp_tunit, nbatches, lp.AddressSpace.PRIVATE) 
-                print("PRIVATE: GETTING ALIAS SETS")
-                alias_sets = get_alias_sets(batch_temps_by_size)
-                print("PRIVATE: CALLING ALIAS SETS")
-                for s in alias_sets:
-                    knl = lp.alias_temporaries(knl, list(s), synchronize_for_exclusive_use=False)
+                    # Doesn't seem to do anything for OpenCL but for other targets it might do something
+                    print("PRIVATE: GETTING BATCH TEMPORARIES BY SIZE")
+                    batch_temps_by_size = get_batch_temporaries_by_size(pp_tunit, nbatches, lp.AddressSpace.PRIVATE) 
+                    print("PRIVATE: GETTING ALIAS SETS")
+                    alias_sets = get_alias_sets(batch_temps_by_size)
+                    print("PRIVATE: CALLING ALIAS SETS")
+                    for s in alias_sets:
+                        knl = lp.alias_temporaries(knl, list(s), synchronize_for_exclusive_use=False)
 
-        if False:
+            if False:
 
-            # Using global barriers helps, but not by much. It still takes minutes
-            # to generate the code.
+                # Using global barriers helps, but not by much. It still takes minutes
+                # to generate the code.
 
-            # Seems to conflict with add_inames_for_unused_hw_axes.
+                # Seems to conflict with add_inames_for_unused_hw_axes.
 
-            store_insns = ["id:"+instr.id for instr in knl.default_entrypoint.instructions if "_store" in instr.id]
-            fetch_insns = ["id:"+instr.id for instr in knl.default_entrypoint.instructions if "_fetch" in instr.id]
-            print("STORE INSTRUCTIONS")
-            print(store_insns)
-            print("FETCH INSTRUCTIONS")
-            print(fetch_insns)
-            #exit()
-            for i in range(1,nbatches,1):
-                knl = lp.add_barrier(knl, insn_before=store_insns[i-1], insn_after=fetch_insns[i])
-            
-   
+                store_insns = ["id:"+instr.id for instr in knl.default_entrypoint.instructions if "_store" in instr.id]
+                fetch_insns = ["id:"+instr.id for instr in knl.default_entrypoint.instructions if "_fetch" in instr.id]
+                print("STORE INSTRUCTIONS")
+                print(store_insns)
+                print("FETCH INSTRUCTIONS")
+                print(fetch_insns)
+                #exit()
+                for i in range(1,nbatches,1):
+                    knl = lp.add_barrier(knl, insn_before=store_insns[i-1], insn_after=fetch_insns[i])
+                
+        return knl
+
+    knl = alias_temporaries(knl, nbatches)
+    single_batch_knl = alias_temporaries(single_batch_knl, 1) 
 
     if False:
         knl = lp.add_inames_for_unused_hw_axes(knl)
