@@ -88,7 +88,7 @@ def test(args):
             device_memory_bandwidth=args["device_memory_bandwidth"],
             device_latency=args["device_latency"],
             timeout=args["timeout"],
-            method="thread",#"subprocess",#None
+            method="thread",#"thread",#"subprocess",#None
             run_single_batch=True,
             error_return_time=args["timeout"])
 
@@ -312,7 +312,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
                                 device_memory_bandwidth=device_memory_bandwidth,
                                 device_latency=device_latency,
                                 timeout=timeout,
-                                method="thread",#"subprocess",
+                                method="thread",#"thread",#"subprocess",
                                 run_single_batch=True,
                                 error_return_time=timeout)
                     if tdict["data"]["avg_time"] < timeout:
