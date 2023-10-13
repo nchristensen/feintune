@@ -261,7 +261,10 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
             column_names = row_list[0]
             rows = list(row_list)[1:]
             rows.sort(key=lambda row: row[-2])
-            if float(rows[0][-2]) < timeout:
+
+            print("MEASURED VS TIMEOUT", rows[0][-1], timeout)
+
+            if (timeout is None) or (float(rows[0][-2]) < timeout):
                 #batch_size,iii,iio,ji,kii,kio,objective,elapsed_sec
                 p = dict(zip(column_names, [int(item) for item in rows[0][:-2]]))
                 
@@ -300,6 +303,8 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
                 # Could have each rank/process/thread write to a file and then recombine the 
                 # results.
                 hjson_file_str = save_path + "/" + pid + ".hjson"
+                # Kernels that use too much memory still aren't prevented from running.
+                # In particular, if the timout time is None or infinity
 
                 if True:#not exists(hjson_file_str) or pre_existing_evals < max_evals:
                     tdict = run_single_param_set_v2(in_queue, knl, trans_list, generic_test,
@@ -310,7 +315,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
                                 method="thread",#"subprocess",
                                 run_single_batch=True,
                                 error_return_time=timeout)
-                    if tdict["data"]["avg_time_predicted"] < timeout:
+                    if tdict["data"]["avg_time"] < timeout:
                         from tagtune.utils import dump_hjson
                         dump_hjson(hjson_file_str, tdict)
                     else:
@@ -330,7 +335,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
                                     run_single_batch=False,
                                     error_return_time=timeout)
                         print("DONE GENERATING AND EXECUTING FULL KERNEL")
-                        if tdict["data"]["avg_time_predicted"] < timeout:
+                        if tdict["data"]["avg_time"] < timeout:
                             from tagtune.utils import dump_hjson
                             dump_hjson(hjson_file_str, tdict)
                         else:
