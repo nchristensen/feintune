@@ -262,7 +262,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
             rows = list(row_list)[1:]
             rows.sort(key=lambda row: row[-2])
 
-            if float(rows[0][-2]) < timeout:
+            if (timeout is None) or (float(rows[0][-2]) < timeout):
                 #batch_size,iii,iio,ji,kii,kio,objective,elapsed_sec
                 p = dict(zip(column_names, [int(item) for item in rows[0][:-2]]))
                 
@@ -301,6 +301,8 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
                 # Could have each rank/process/thread write to a file and then recombine the 
                 # results.
                 hjson_file_str = save_path + "/" + pid + ".hjson"
+                # Kernels that use too much memory still aren't prevented from running.
+                # In particular, if the timout time is None or infinity
 
                 if True:#not exists(hjson_file_str) or pre_existing_evals < max_evals:
                     tdict = run_single_param_set_v2(in_queue, knl, trans_list, generic_test,
