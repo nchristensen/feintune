@@ -261,6 +261,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
             column_names = row_list[0]
             rows = list(row_list)[1:]
             rows.sort(key=lambda row: row[-2])
+
             if float(rows[0][-2]) < timeout:
                 #batch_size,iii,iio,ji,kii,kio,objective,elapsed_sec
                 p = dict(zip(column_names, [int(item) for item in rows[0][:-2]]))
