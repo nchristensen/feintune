@@ -282,32 +282,32 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, devic
     #    print(orig_tunit.default_entrypoint.schedule)
     #    exit()
 
-    transformed_subkernels_2 = []
-    for pid, tsk in transformed_subkernels:
-        assert lp.has_schedulable_iname_nesting(tsk)
-        tsk = lp.preprocess_program(tsk)
+    #transformed_subkernels_2 = []
+    #for pid, tsk in transformed_subkernels:
+    #    assert lp.has_schedulable_iname_nesting(tsk)
+    #    tsk = lp.preprocess_program(tsk)
         # The old scheduler seems to have a problem with unbarriered internal dependencies. Need to add no_sync_with
         # or find a way to use the schedule from the component subkernels.
-        tsk = lp.linearize(tsk)
-        transformed_subkernels_2.append((pid,tsk,))
-    transformed_subkernels = transformed_subkernels_2
+    #    tsk = lp.linearize(tsk)
+    #    transformed_subkernels_2.append((pid,tsk,))
+    #transformed_subkernels = transformed_subkernels_2
         
     transformed_tunit = assemble_transformed_macrokernel(tunit_dict[1]["tunit"], [tsk[1] for tsk in transformed_subkernels])
-    assert lp.has_schedulable_iname_nesting(tunit_dict[1]["tunit"])
+    #assert lp.has_schedulable_iname_nesting(tunit_dict[1]["tunit"])
     assert lp.has_schedulable_iname_nesting(transformed_tunit)
 
 
-    transformed_tunit = lp.preprocess_program(transformed_tunit)
+    #transformed_tunit = lp.preprocess_program(transformed_tunit)
     print("NEW TUNIT")
-    print(transformed_tunit)
+    #print(transformed_tunit)
     
-    transformed_tunit = lp.linearize(transformed_tunit)
+    #transformed_tunit = lp.linearize(transformed_tunit)
     #transformed_tunit = lp.save_and_reload_temporaries(transformed_tunit)
     print("DONE REASSEMBLING")    
 
     print("POST_TRANSFORMATION")
-    print(transformed_tunit)
-    print(transformed_tunit.default_entrypoint.schedule)
+    #print(transformed_tunit)
+    #print(transformed_tunit.default_entrypoint.schedule)
     #if transformed_tunit.default_entrypoint.name == "rhs":
     #    exit()
     print("END OF KERNEL")
@@ -1014,95 +1014,6 @@ def autotune_standalone_subkernels(sk_list, save_path=None, device_latency=None,
                                                       device_latency=device_latency,
                                                       device_memory_bandwidth=device_memory_bandwidth,
                                                       save_path=save_path)
-
-
-# 
-def test_default_transforms(sk_list, queue, save_path=None, profile_device=False, device_latency=None, device_memory_bandwidth=None, peak_flop_rate=None):
-
-    if save_path is None:
-        save_path = "kernel_tests_hjson"
-
-    os.makedirs(save_path, exist_ok=True)
-
-    #platforms = cl.get_platforms()
-    #cl_ctx = cl.Context(
-    #    dev_type=cl.device_type.GPU,
-    #    properties=[(cl.context_properties.PLATFORM, platforms[0])])
-    #queue = cl.CommandQueue(cl_ctx,
-    #    properties=cl.command_queue_properties.PROFILING_ENABLE)
-
-    #from meshmode.array_context import FusionContractorArrayContext, PrefusedFusionContractorArrayContext
-    #actx = FusionContractorArrayContext(queue)
-    #actx = PrefusedFusionContractorArrayContext(queue)
-
-    device_latency=None
-    device_memory_bandwidth = None
-    clpeak_flop_rate = None
-
-    if profile_device:
-        device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
-
-    gen_times = []
-
-    for pid, sk in sk_list:
-    #for sk in sk_list:
-        #print(f"Testing subkernel: {pid}")
-
-        einsum_counts = list(get_einsum_counts(sk).items())
-        indirection = len(get_indirection_arrays(sk)) > 0
-        if len(einsum_counts) > 0 and not indirection:
-            #if len(einsum_counts) > 1:
-            #    raise ValueError("Subkernel has multiple einsum types")
-
-            einsum_type, einsum_count = einsum_counts[0]
-            non_red_axes = len(einsum_type[0])
-            red_axes = len(einsum_type[1])
-            total_axes = non_red_axes + red_axes
-            out_axes = total_axes - red_axes
-
-            handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
-            #if True:
-            if (non_red_axes, red_axes,) in handled_pairs and einsum_count > 0:
-
-                """
-                start = time()
-                try:
-                    transformed_sk = actx.transform_loopy_program(sk)
-                except NotImplementedError:
-                    transformed_sk = sk
-                end = time()
-                transform_time = end - start
-                start = time()
-                """
-                """
-                code = lp.generate_code_v2(transformed_sk).device_code()
-                end = time()
-                codegen_time = end - start
-
-                name = transformed_sk.default_entrypoint.name
-                print(name, transform_time, codegen_time)
-                
-                gen_times.append([name, transform_time, codegen_time])
-                """
-                #"""
-                ret_dict = run_single_param_set_v2(queue, sk, [], generic_test,
-                            max_flop_rate=peak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
-                            device_latency=device_latency)
-                
-                #ret_dict = dict(ret_dict)
-                #ret_dict["data"]["transform_time"] = transform_time
-                #ret_dict["data"]["codegen_time"] = codegen_time
-                #print(ret_dict["data"])
-                # Should this functionality be a utility function
-                hjson_file_str = save_path + f"/{pid}.hjson"
-                out_file = open(hjson_file_str, "wt")
-                hjson.dump(ret_dict, out_file, default=convert)
-                out_file.close()
-
-                #"""
-    #print("PRINTING RESULTS")
-    #for name, transform_time, codegen_time in gen_times:
-    #    print(name, transform_time, codegen_time)
 
 
 def test_feinsum_transforms(tunits):

@@ -49,6 +49,92 @@ from tagtune.grudge_tags import (IsDOFArray, IsSepVecDOFArray, IsOpArray,
     IsSepVecOpArray, IsFaceDOFArray, IsFaceMassOpArray, IsVecDOFArray, IsVecOpArray, IsFourAxisDOFArray)
 #import  grudge.grudge_array_context as gac#import set_memory_layout
 
+def test_default_transforms(sk, queue, save_path=None, device_latency=None, device_memory_bandwidth=None, peak_flop_rate=None):
+
+    if save_path is None:
+        save_path = "kernel_tests_hjson"
+
+    os.makedirs(save_path, exist_ok=True)
+
+    #platforms = cl.get_platforms()
+    #cl_ctx = cl.Context(
+    #    dev_type=cl.device_type.GPU,
+    #    properties=[(cl.context_properties.PLATFORM, platforms[0])])
+    #queue = cl.CommandQueue(cl_ctx,
+    #    properties=cl.command_queue_properties.PROFILING_ENABLE)
+
+    from meshmode.array_context import PrefusedFusionContractorArrayContext
+    actx = PrefusedFusionContractorArrayContext(queue)
+
+    #device_latency=None
+    #device_memory_bandwidth = None
+    #clpeak_flop_rate = None
+
+    #if profile_device:
+    #    device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
+
+    #gen_times = []
+
+    for pid, sk in sk_list:
+    #for sk in sk_list:
+        #print(f"Testing subkernel: {pid}")
+
+        einsum_counts = list(get_einsum_counts(sk).items())
+        indirection = len(get_indirection_arrays(sk)) > 0
+        if len(einsum_counts) > 0 and not indirection:
+            #if len(einsum_counts) > 1:
+            #    raise ValueError("Subkernel has multiple einsum types")
+
+            einsum_type, einsum_count = einsum_counts[0]
+            non_red_axes = len(einsum_type[0])
+            red_axes = len(einsum_type[1])
+            total_axes = non_red_axes + red_axes
+            out_axes = total_axes - red_axes
+
+            handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
+            #if True:
+            if (non_red_axes, red_axes,) in handled_pairs and einsum_count > 0:
+
+                start = time()
+                #try:
+                transformed_sk = actx.transform_loopy_program(sk)
+                #except NotImplementedError:
+                #    transformed_sk = sk
+                #end = time()
+                #transform_time = end - start
+                #start = time()
+                #"""
+                #"""
+                #code = lp.generate_code_v2(transformed_sk).device_code()
+                #end = time()
+                #codegen_time = end - start
+
+                #name = transformed_sk.default_entrypoint.name
+                #print(name, transform_time, codegen_time)
+                
+                #gen_times.append([name, transform_time, codegen_time])
+                #"""
+                #"""
+                ret_dict = run_single_param_set_v2(queue, sk, [], generic_test,
+                            max_flop_rate=peak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
+                            device_latency=device_latency)
+                
+                #ret_dict = dict(ret_dict)
+                #ret_dict["data"]["transform_time"] = transform_time
+                #ret_dict["data"]["codegen_time"] = codegen_time
+                #print(ret_dict["data"])
+                # Should this functionality be a utility function
+                hjson_file_str = save_path + f"/{pid}.hjson"
+                out_file = open(hjson_file_str, "wt")
+                hjson.dump(ret_dict, out_file, default=convert)
+                out_file.close()
+
+                #"""
+    #print("PRINTING RESULTS")
+    #for name, transform_time, codegen_time in gen_times:
+    #    print(name, transform_time, codegen_time)
+
+
 def testBandwidth(fp_format=np.float32, nruns=100):
 
     from pyopencl.array import sum as clsum

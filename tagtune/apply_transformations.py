@@ -2097,4 +2097,5 @@ def apply_transformation_list(tunit, transformations):
         print("Codegen time:", end-start)
         #exit()
 
+    print("RETURNING FROM APPLYING TRANSFORMATIONS")
     return tunit, sb_tunit

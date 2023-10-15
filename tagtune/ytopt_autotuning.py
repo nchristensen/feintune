@@ -340,8 +340,30 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
                             dump_hjson(hjson_file_str, tdict)
                         else:
                             print("Run return error return time. Not dumping to hjson.")
+                if True:
+                    from meshmode.array_context import PrefusedFusionContractorArrayContext
+                    hjson_file_str = save_path + "/" + pid + "_default" + ".hjson"
+                    actx = PrefusedFusionContractorArrayContext(in_queue)
+                    knl_with_default_transformations = actx.transform_loopy_program(knl)
 
+                    print("GENERATING AND EXECUTING DEFAULT TRANSFORMED KERNEL")
+                    tdict = run_single_param_set_v2(in_queue, knl_with_default_transformations, [], generic_test,
+                                max_flop_rate=max_flop_rate,
+                                device_memory_bandwidth=device_memory_bandwidth,
+                                device_latency=device_latency,
+                                timeout=timeout,
+                                method="thread",#"subprocess",
+                                run_single_batch=False,
+                                error_return_time=timeout)
+                    print("DONE GENERATING AND EXECUTING DEFAULT TRANSFORMED KERNEL")
 
+                    if tdict["data"]["avg_time_predicted"] < timeout:
+                        from tagtune.utils import dump_hjson
+                        dump_hjson(hjson_file_str, tdict)
+                    else:
+                        print("Run return error return time. Not dumping to hjson.")
+ 
+                    
     print("======RETURNING FROM SEARCH========")
     #exit()
     return True
