@@ -1,3 +1,4 @@
+import mpi4py.MPI as MPI
 from dataclasses import dataclass
 from typing import Union, Optional
 from tagtune.generators import get_trans_list
@@ -57,7 +58,6 @@ def test(args):
         # ordered the same, needs to order the devices by some pci_id first
         # Also, are pids contiguous?
         if eval_str == "mpi_comm_executor" or eval_str == "mpi_pool_executor":
-            import mpi4py.MPI as MPI
             comm = MPI.COMM_WORLD
             exec_id = comm.Get_rank()
         elif eval_str == "charm4py_pool_executor":
@@ -88,7 +88,7 @@ def test(args):
             device_memory_bandwidth=args["device_memory_bandwidth"],
             device_latency=args["device_latency"],
             timeout=args["timeout"],
-            method="thread",#"thread",#"subprocess",#None
+            method="thread",#"subprocess",#None
             run_single_batch=True,
             error_return_time=args["timeout"])
 
@@ -310,7 +310,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
                                 device_memory_bandwidth=device_memory_bandwidth,
                                 device_latency=device_latency,
                                 timeout=timeout,
-                                method="thread",#"thread",#"subprocess",
+                                method="thread",#"subprocess",
                                 run_single_batch=True,
                                 error_return_time=timeout)
                     if tdict["data"]["avg_time_predicted"] < timeout:
@@ -360,8 +360,11 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
                         dump_hjson(hjson_file_str, tdict)
                     else:
                         print("Run return error return time. Not dumping to hjson.")
- 
-                    
+
+    if "mpi" in eval_str:
+        print("WAITING AT BARRIER") 
+        comm = MPI.COMM_WORLD
+        comm.Barrier()                
     print("======RETURNING FROM SEARCH========")
     #exit()
     return True

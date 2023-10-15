@@ -253,10 +253,10 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, devic
                 # Should probably apply the default transformations
                 # Currently fails
 
-                print("TRANSFORMING")
+                logger.info("ACTX TRANSFORMING")
                 tsk = actx.transform_loopy_program(sk)
                 transformed_subkernels.append((pid,tsk,))
-                print("DONE TRANSFORMING")
+                logger.info("ACTX DONE TRANSFORMING")
                 #transformed_subkernels.append(sk)
             # Transform ...
 
@@ -1106,7 +1106,7 @@ def collect_subkernels(tunit_dicts):
 
 
 # TODO. Make load and save paths arguments
-def main(arg):
+def main(args):
 
     #dump_subkernels_from_pickled(None)
     #directory = "./pickled_programs_prediction"
@@ -1153,7 +1153,9 @@ def main(arg):
     device_latency = None
     device_memory_bandwidth = None
     clpeak_flop_rate = None
-    device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
+    print("BENCHMARK", args.benchmark)
+    if args.benchmark:
+        device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
 
     from meshmode.array_context import PrefusedFusionContractorArrayContext
     actx = PrefusedFusionContractorArrayContext(queue)
