@@ -1098,15 +1098,16 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     # This doesn't account for global barriers.
     for temp, tarray in temp_dict.items():
         if tarray.base_storage not in base_storage_dict:
+            storage_size = np.product(tarray.shape)*tarray.dtype.dtype.itemsize
             if tarray.base_storage is None:
                 # Storage isn't aliased
-                base_storage_dict[tarray.name] = np.product(tarray.shape)*tarray.dtype.dtype.itemsize
+                base_storage_dict[tarray.name] = storage_size
             else:
                 # Storage is aliased
                 if tarray.base_storage not in base_storage_dict:
-                    base_storage_dict[tarray.base_storage] = np.product(tarray.shape)*tarray.dtype.dtype.itemsize
-                elif np.product(tarray.shape)*tarray.dtype.dtype.itemsize > base_storage_dict[tarray.base_storage]:
-                    base_storage_dict[tarray.base_storage] = np.product(tarray.shape)*tarray.dtype.dtype.itemsize
+                    base_storage_dict[tarray.base_storage] = storage_size
+                elif storage_size > base_storage_dict[tarray.base_storage]:
+                    base_storage_dict[tarray.base_storage] = storage_size
 
     print("BASE STORAGE DICT")
     print(base_storage_dict)

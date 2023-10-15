@@ -262,8 +262,6 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
             rows = list(row_list)[1:]
             rows.sort(key=lambda row: row[-2])
 
-            print("MEASURED VS TIMEOUT", rows[0][-1], timeout)
-
             if (timeout is None) or (float(rows[0][-2]) < timeout):
                 #batch_size,iii,iio,ji,kii,kio,objective,elapsed_sec
                 p = dict(zip(column_names, [int(item) for item in rows[0][:-2]]))
