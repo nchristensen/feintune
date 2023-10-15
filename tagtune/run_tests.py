@@ -43,7 +43,7 @@ lp.set_caching_enabled(False)
 import loopy.options
 loopy.options.ALLOW_TERMINAL_COLORS = False
 
-from .apply_transformations import (gen_diff_knl, gen_diff_knl_fortran2,
+from tagtune.apply_transformations import (gen_diff_knl, gen_diff_knl_fortran2,
     apply_transformation_list, gen_elwise_linear_knl, gen_face_mass_knl, gen_face_mass_knl_merged)
 from tagtune.grudge_tags import (IsDOFArray, IsSepVecDOFArray, IsOpArray,
     IsSepVecOpArray, IsFaceDOFArray, IsFaceMassOpArray, IsVecDOFArray, IsVecOpArray, IsFourAxisDOFArray)
