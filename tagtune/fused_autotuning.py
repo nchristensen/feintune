@@ -1156,6 +1156,8 @@ def main(args):
     print("BENCHMARK", args.benchmark)
     if args.benchmark:
         device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
+    if comm is not None:
+        comm.Barrier()
 
     from meshmode.array_context import PrefusedFusionContractorArrayContext
     actx = PrefusedFusionContractorArrayContext(queue)
