@@ -319,8 +319,11 @@ def measure_execution_latency(queue, tunit, arg_dict, nruns, warmup_runs):
 
     otunit = lp.set_argument_order(tunit, arg_names)
     code = lp.generate_code_v2(otunit).device_code()
+    from tagtune.matching_brackets import matching_brackets_dict
+    fn_brackets = sorted(matching_brackets_dict(code, opening_bracket="{", closing_bracket="}").items(), key=lambda l: l[1], reverse=True)[0]
     
-    null_kernel_code = code.split("{")[0] + "{}"
+    null_kernel_code = code[:fn_brackets[0] + 1] + code[fn_brackets[1]:]
+    #null_kernel_code = code.split("{")[0] + "{}"
     search_str = "reqd_work_group_size("
     start_ind = null_kernel_code.index(search_str) + len(search_str)
     sub_str = null_kernel_code[start_ind:].split(",")
@@ -497,8 +500,8 @@ def generic_test(queue, kern, backend="OPENCL", nruns=5, warmup_runs=2):
         print("STARTING EXECUTION")
         start = time.time()
 
-        print("Setting measured execution latency to zero")
-        measured_latency = 0#measure_execution_latency(queue, kern, arg_dict, nruns, warmup_runs)
+        #print("Setting measured execution latency to zero")
+        measured_latency = measure_execution_latency(queue, kern, arg_dict, nruns, warmup_runs)
         avg_time = measure_execution_time(queue, kern, arg_dict, nruns, warmup_runs) 
 
         end = time.time()
@@ -1170,7 +1173,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             batch_size = trans[1][0]
 
     data = {"avg_time": avg_time,
-            "avg_time_predicted": avg_time*(neinsums/batch_size) if (run_single_batch and avg_time != error_return_time) else avg_time,
+            "avg_time_predicted": measured_latency + (avg_time - measured_latency)*(neinsums/batch_size) if (run_single_batch and avg_time != error_return_time) else avg_time,
             "wall_clock_time": wall_clock_time, 
             "single_batch": run_single_batch, 
             "neinsums": neinsums,
