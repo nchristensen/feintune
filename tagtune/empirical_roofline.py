@@ -177,7 +177,7 @@ def loopy_bandwidth_test_with_queues_like(
     return tuple([loopy_bandwidth_test(q, dtype_in=dtype_in,
                     fill_on_device=fill_on_device, fast=fast) for q in queues])
 
-
+# TODO: Calculate latency of a null kernel (a copy kernel stripped of instructions)
 def loopy_bandwidth_test(queue, n_in_max=None, dtype_in=None, n_out_max=None,
                         dtype_out=None, fill_on_device=True,
                         ntrials=100, fast=True, print_results=False,
@@ -665,6 +665,8 @@ def calc_latency_adjusted_bandwidth(latency, total_time, bytes_transferred):
 def calc_effective_bandwidth(latency, bandwidth, bytes_transferred):
     return bytes_transferred / ((bytes_transferred / bandwidth) + latency)
 
+# TODO: Use empty kernl to calculate latency. The latency of a copy
+# kernel is not necessarily the lowest possible latency.
 def get_min_device_latency(results_list):
     sorted_list = sorted(results_list, reverse=False,
                          key=lambda result: result.tmin)
