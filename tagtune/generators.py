@@ -386,7 +386,7 @@ def createConfigSpace(queue, knl):
     # this may not affect the quality of the autotuning results.
     prefetch_hyp = cs.OrdinalHyperparameter("prefetch", [0,1] if prefetch else [0], default_value=1)
     a_s.add_hyperparameter(prefetch_hyp)
-    if prefetch:
+    if prefetch and "NVIDIA" in str(queue.device.vendor):
         a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["prefetch"], 0))
 
     if True:#n_elem*n_out > 1024:
