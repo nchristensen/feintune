@@ -560,7 +560,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
         if use_ytopt:
             # Won't work with charm. But the charm4py executor is broken anyway.
             if comm.Get_size() <= 1:
-                eval_str = "threadpool"
+                eval_str = "processpool"#"threadpool"
             else:
                 eval_str = "mpi_comm_executor"
                 #eval_str = "mpi_pool_executor"
