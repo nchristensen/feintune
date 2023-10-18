@@ -560,7 +560,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
         if use_ytopt:
             # Won't work with charm. But the charm4py executor is broken anyway.
             if comm.Get_size() <= 1:
-                eval_str = "processpool"#"threadpool"
+                eval_str = "threadpool"
             else:
                 eval_str = "mpi_comm_executor"
                 #eval_str = "mpi_pool_executor"
@@ -1168,7 +1168,7 @@ def main(args):
         tunit_dicts = get_pickled_tunits(directory)
 
 
-        if True: # Tune a single macrokernel at a time.
+        if False: # Tune a single macrokernel at a time.
 
 
             for tunit_dict in tunit_dicts:
@@ -1191,10 +1191,12 @@ def main(args):
  
 
 
-        if False: # Tune all of the subkernels
+        if True: # Tune all of the subkernels
             print("Done collecting tunits")
             # ID changes based on whether python was run with -O
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
+            from tagtune.run_tests import get_knl_flops
+            sk_list = sorted(sk_list, key=lambda e: get_knl_flops(e[1]), reverse=True)
             #sk_list = [tunit_dict[1]["tunit"] for tunit_dict in tunit_dicts]
             #"""
             #sk_list = [sk for _, sk, _ in sk_list]
@@ -1225,9 +1227,9 @@ def main(args):
             #get_lazy_einsum_info(tunit_dicts, hjson_dir=save_path)
             #exit()
 
-            test_default_transforms(sk_list, save_path=directory + "/default_transforms_hjson")
+            #test_default_transforms(sk_list, save_path=directory + "/default_transforms_hjson")
 
-            #autotune_standalone_subkernels(sk_list, save_path=save_path)
+            autotune_standalone_subkernels(sk_list, save_path=save_path)
 
             #compare_weighted_avg_frac_rooflines(directory, pid_dict)
 
