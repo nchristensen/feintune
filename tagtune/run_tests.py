@@ -411,6 +411,9 @@ def generic_test(queue, kern, backend="OPENCL", nruns=5, warmup_runs=2):
         start = time.time()
         allocator = ImmediateAllocator(queue)
         mem_pool = MemoryPool(allocator)
+        #mem_pool = get_reasonable_memory_pool(queue)
+        #print("USING MEMORY POOL OF TYPE", type(mem_pool))
+        #exit()
 
         arg_dict = {}
 
@@ -821,6 +824,50 @@ def run_single_param_set(queue, knl_base, tlist_generator, params, test_fn, max_
 
     retval = {"transformations": trans_list, "data": data}
     return retval
+
+
+# Ripped from mirgecom
+def get_reasonable_memory_pool(queue: cl.CommandQueue,
+                               force_buffer: bool = False,
+                               force_non_pool: bool = False):
+    """Return an SVM or buffer memory pool based on what the device supports.
+
+    By default, it prefers SVM allocations over CL buffers, and memory
+    pools over direct allocations.
+    """
+    import pyopencl.tools as cl_tools
+    from pyopencl.characterize import has_coarse_grain_buffer_svm
+    ctx = queue.context
+
+    if force_buffer and force_non_pool:
+        #logger.info(f"Using non-pooled CL buffer allocations on {queue.device}.")
+        return cl_tools.DeferredAllocator(ctx)
+
+    if force_buffer:
+        #logger.info(f"Using pooled CL buffer allocations on {queue.device}.")
+        return cl_tools.MemoryPool(cl_tools.ImmediateAllocator(queue))
+
+    if force_non_pool and has_coarse_grain_buffer_svm(queue.device):
+        #logger.info(f"Using non-pooled SVM allocations on {queue.device}.")
+        return cl_tools.SVMAllocator(  # pylint: disable=no-member
+            ctx, alignment=0, queue=queue)
+
+    if has_coarse_grain_buffer_svm(queue.device) and hasattr(cl_tools, "SVMPool"):
+        #logger.info(f"Using SVM-based memory pool on {queue.device}.")
+        return cl_tools.SVMPool(cl_tools.SVMAllocator(  # pylint: disable=no-member
+            ctx, alignment=0, queue=queue))
+    else:
+        from warnings import warn
+        if not has_coarse_grain_buffer_svm(queue.device):
+            warn(f"No SVM support on {queue.device}, returning a CL buffer-based "
+                  "memory pool. If you are running with PoCL-cuda, please update "
+                  "your PoCL installation.")
+        else:
+            warn("No SVM memory pool support with your version of PyOpenCL, "
+                 f"returning a CL buffer-based memory pool on {queue.device}. "
+                 "Please update your PyOpenCL version.")
+        return cl_tools.MemoryPool(cl_tools.ImmediateAllocator(queue))
+
 
 
 # Useful elsewhere. Maybe move to utils or as a utility function in pyopencl

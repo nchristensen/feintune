@@ -88,7 +88,7 @@ def test(args):
             device_memory_bandwidth=args["device_memory_bandwidth"],
             device_latency=args["device_latency"],
             timeout=args["timeout"],
-            method="subprocess",#"subprocess",#None
+            method="thread",#"subprocess",#None
             run_single_batch=True,
             error_return_time=args["timeout"])
 
@@ -140,7 +140,7 @@ class ObjectiveFunction(object):
                 "eval_str": self.eval_str
                 })
 
-        print(self.knl)
+        #print(self.knl)
         print(tlist)
 
         test_id, result = test(args)
@@ -310,7 +310,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
                                 device_memory_bandwidth=device_memory_bandwidth,
                                 device_latency=device_latency,
                                 timeout=timeout,
-                                method="subprocess",#"subprocess",
+                                method="thread",#"subprocess",
                                 run_single_batch=True,
                                 error_return_time=timeout)
                     if tdict["data"]["avg_time_predicted"] < timeout:
@@ -329,7 +329,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
                                     device_memory_bandwidth=device_memory_bandwidth,
                                     device_latency=device_latency,
                                     timeout=timeout,
-                                    method="subprocess",#"subprocess",
+                                    method="thread",#"subprocess",
                                     run_single_batch=False,
                                     error_return_time=timeout)
                         print("DONE GENERATING AND EXECUTING FULL KERNEL")
@@ -350,7 +350,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
                                 device_memory_bandwidth=device_memory_bandwidth,
                                 device_latency=device_latency,
                                 timeout=timeout,
-                                method="subprocess",#"subprocess",
+                                method="thread",#"subprocess",
                                 run_single_batch=False,
                                 error_return_time=timeout)
                     print("DONE GENERATING AND EXECUTING DEFAULT TRANSFORMED KERNEL")
