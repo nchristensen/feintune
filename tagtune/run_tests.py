@@ -571,7 +571,12 @@ def get_knl_flops(tunit):
                                             "summing_if_branches_ops"])))
 
     # There is a more complex version of this in meshmode.arraycontext
-    op_map = lp.get_op_map(tunit, count_within_subscripts=False, subgroup_size=1)
+    try:
+        op_map = lp.get_op_map(tunit, count_within_subscripts=False, subgroup_size=1)
+    except AssertionError:
+        # For some kernels, lp.get_op_map fails
+        return 0
+
     map_flops = 0
     for val in op_map.values():
         map_flops += val.eval_with_dict({})
