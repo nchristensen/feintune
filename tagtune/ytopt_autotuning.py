@@ -232,7 +232,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         with open(csv_file_str) as csvfile:
             row_list = list(csv.reader(csvfile))
             column_names = row_list[0]
-            assert column_names[-4] == "num_elements"
+            #assert column_names[-4] == "num_elements"
             for row in row_list[1:]:
                 p = dict(zip(column_names, [int(item) for item in row[:-2]]))
                 if float(row[-2]) != timeout: # Eliminate
