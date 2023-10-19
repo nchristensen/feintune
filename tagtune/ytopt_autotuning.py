@@ -88,7 +88,7 @@ def test(args):
             device_memory_bandwidth=args["device_memory_bandwidth"],
             device_latency=args["device_latency"],
             timeout=args["timeout"],
-            method=None,#"thread",#"subprocess",#None
+            method="thread",#"subprocess",#None
             run_single_batch=True,
             error_return_time=args["timeout"])
 
