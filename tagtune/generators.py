@@ -475,7 +475,7 @@ def createConfigSpace(queue, knl):
     # to store 10^8 ints. Actually, doesn't it use NormalFloat Hyperparameter under the hood?
     # Breaks at the moment
     num_elements = cs.NormalIntegerHyperparameter(name="num_elements", mu=n_elem, sigma=0, lower=0, upper=1e8, default_value=n_elem)
-    #a_s.add_hyperparameter(num_elements)
+    a_s.add_hyperparameter(num_elements)
 
     return a_s
 
