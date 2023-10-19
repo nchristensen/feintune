@@ -820,7 +820,7 @@ def get_inames(knl):
 
     return e, i, j, x, f, r
 
-
+# Should prefetch just be added to params?
 def get_trans_list(knl, params, prefetch=True):
 
     e, i, j, x, f, r = get_inames(knl)       
