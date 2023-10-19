@@ -88,7 +88,7 @@ def test(args):
             device_memory_bandwidth=args["device_memory_bandwidth"],
             device_latency=args["device_latency"],
             timeout=args["timeout"],
-            method="thread",#"subprocess",#None
+            method=None,#"thread",#"subprocess",#None
             run_single_batch=True,
             error_return_time=args["timeout"])
 
@@ -155,15 +155,21 @@ class ObjectiveFunction(object):
 
 
 # TODO: Change default max_evals
-def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, save_path=None, max_evals=10, required_new_evals=0, eval_str="threadpool"):
+def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, normalized_program_id=None, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, save_path=None, max_evals=10, required_new_evals=0, eval_str="threadpool"):
 
     global exec_id
 
+    from tagtune.utils import unique_program_id
     if program_id is None:
-        from tagtune.utils import unique_program_id
-        pid = unique_program_id(knl)
+        pid = unique_program_id(knl, attempt_normalization=False)
     else:
         pid = program_id
+
+    if normalized_program_id is None:
+        npid = unique_program_id(knl, attempt_normalization=True)
+    else:
+        npid = normalized_program_id
+
 
     if save_path is None:
         save_path = "./"
@@ -203,7 +209,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
     #    print(p)
     #    print(obj_func(p))
      
-    output_file_base = save_path + "/" +  pid 
+    output_file_base = save_path + "/" +  npid 
     #learner = "DUMMY"
     #learner = "RF"
     #learner = "ET"
@@ -216,23 +222,29 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
 
     initial_observations = []
 
+    #from .generators import get_inames
+    #nelem = i
+
     # Maybe use pandas instead?
+    pre_existing_evals = 0
     if exists(csv_file_str):
         print(f"Loading saved data from {csv_file_str}")
         with open(csv_file_str) as csvfile:
             row_list = list(csv.reader(csvfile))
             column_names = row_list[0]
+            assert column_names[-4] == "num_elements"
             for row in row_list[1:]:
                 p = dict(zip(column_names, [int(item) for item in row[:-2]]))
-                initial_observations.append((p, float(row[-2]),))
+                if float(row[-2]) != timeout: # Eliminate
+                    initial_observations.append((p, float(row[-2]),))
+                #if int(row[-4]) == nelem:
+                #    pre_existing_evals += 1
+
         num_random = 0
     else:
         print("No saved data found.")
-        num_random = 1
+        num_random = 2
 
-    pre_existing_evals = len(initial_observations)
-
-    #max_evals = 1
     max_evals = min(max_evals, pre_existing_evals + required_new_evals)
 
     # Note that the initial observations count toward max_evals.
@@ -259,6 +271,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
             # parameters. The kio and iio need to be changed.
             row_list = list(csv.reader(csvfile))
             column_names = row_list[0]
+            #rows = [row for row in list(row_list)[1:] if int(row[-4]) == nelem]
             rows = list(row_list)[1:]
             rows.sort(key=lambda row: row[-2])
 
@@ -299,7 +312,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, max_f
                 # Re-run to obtain performance data and null-kernel latency
                 # since ytopt doesn't appear to have a way to return ancillary data.
                 # Could have each rank/process/thread write to a file and then recombine the 
-                # results.
+                # results. Note, this writes to pid.hjson, not npid.hjson
                 hjson_file_str = save_path + "/" + pid + ".hjson"
                 # Kernels that use too much memory still aren't prevented from running.
                 # In particular, if the timout time is None or infinity

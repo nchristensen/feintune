@@ -1093,6 +1093,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     try:
         if timeout is None:
             knl, sb_knl = apply_transformation_list(knl_base, trans_list)
+            exit()
             knl = lp.preprocess_kernel(knl)
             insn_ids = tuple([insn.id for insn in knl.default_entrypoint.instructions])
             group_sizes, local_sizes = knl.default_entrypoint.get_grid_sizes_for_insn_ids(insn_ids, None)
@@ -1117,6 +1118,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
         knl = knl_base
         sb_knl = None
         local_sizes = []
+    #exit()
 
     #local_sizes = set()
         #elif trans[0] = "add_prefetch":

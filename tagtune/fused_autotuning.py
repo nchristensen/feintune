@@ -225,7 +225,9 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, devic
     actx = PrefusedFusionContractorArrayContext(queue)
 
     transformed_subkernels = []
-    for pid, sk, csk in sk_list:
+    for sk_dict in sk_list:
+        pid = sk_dict["pid"]
+        sk = sk_dict["sk"]
 
         #TODO If the transformation selected is one that timed out, should
         # use the default transformations instead.
@@ -540,7 +542,7 @@ def apply_feinsum_transformations(t_unit, queue):
         return t_unit
 
 # Only works for subkernels that have no dependency on a prior subkernel
-def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None, save_path=None):
+def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None, save_path=None):
 
     if save_path is None:
         save_path = "./hjson"
@@ -566,7 +568,8 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, max_flop_rate=None
                 #eval_str = "mpi_pool_executor"
             input_space = createConfigSpace(queue, sk)
             print("TESTING YTOPT")
-            ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, max_flop_rate=max_flop_rate,
+            ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, normalized_program_id=normalized_program_id,
+                             max_flop_rate=max_flop_rate,
                              device_memory_bandwidth=device_memory_bandwidth,
                              device_latency=device_latency, timeout=timeout, save_path=save_path,
                              max_evals=100, required_new_evals=30, eval_str=eval_str)
@@ -977,7 +980,10 @@ def autotune_standalone_subkernels(sk_list, save_path=None, device_latency=None,
         peak_flop_rate = None
     """
 
-    for pid, sk, csk in sk_list:
+    for sk_dict in sk_list:
+        pid = sk_dict["pid"]
+        npid = sk_dict["npid"]
+        sk = sk_dict["sk"]
 
         if False: # Feinsum autotuning
             feinsum_autotune(tunit, queue)
@@ -1004,12 +1010,12 @@ def autotune_standalone_subkernels(sk_list, save_path=None, device_latency=None,
                     total_axes = non_red_axes + red_axes
                     out_axes = total_axes - red_axes
                     
-                    print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid)
+                    print("EINSUM INFO:", total_axes, non_red_axes, red_axes, indirection, einsum_count, pid, npid)
                     
                     handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
                     if (non_red_axes, red_axes,) in handled_pairs and not indirection and einsum_count <= np.inf:
                         # Add indirection arrays as a parameter?
-                        autotune_standalone_subkernel(sk, queue, program_id=pid,
+                        autotune_standalone_subkernel(sk, queue, program_id=pid, normalized_program_id=npid,
                                                       max_flop_rate=peak_flop_rate,
                                                       device_latency=device_latency,
                                                       device_memory_bandwidth=device_memory_bandwidth,
@@ -1091,10 +1097,12 @@ def collect_subkernels(tunit_dicts):
 
         for sk, csk in sks:
             # This may change the identifier so needs to be set beforehand
-            assert sk.default_entrypoint.options.no_numpy
-            assert sk.default_entrypoint.options.return_dict
-            pid = unique_program_id(sk)
-            out_list.append((pid, sk, csk,))
+            #assert sk.default_entrypoint.options.no_numpy
+            #assert sk.default_entrypoint.options.return_dict
+            pid = unique_program_id(sk, attempt_normalization=False)
+            npid = unique_program_id(sk, attempt_normalization=True)
+            #out_list.append((pid, sk, csk,))
+            out_list.append({"pid": pid, "npid": pid, "sk": sk, "csk": csk})
 
             # Could also do this with Collections.Counter
             if pid in pid_counts:
@@ -1196,7 +1204,7 @@ def main(args):
             # ID changes based on whether python was run with -O
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
             from tagtune.run_tests import get_knl_flops
-            sk_list = sorted(sk_list, key=lambda e: get_knl_flops(e[1]), reverse=True)
+            sk_list = sorted(sk_list, key=lambda e: get_knl_flops(e["sk"]), reverse=True)
             #sk_list = [tunit_dict[1]["tunit"] for tunit_dict in tunit_dicts]
             #"""
             #sk_list = [sk for _, sk, _ in sk_list]

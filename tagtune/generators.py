@@ -14,6 +14,7 @@ def k_inner_inner_options(start_val=None):
     #options = [64, 32, 16, 8]
     options = [8, 16, 32, 64]
     #options = [32, 16]
+    #options = [8]
     start_ind = 0 if start_val is None else options.index(start_val)
     options = options[start_ind:]
     return options
@@ -386,8 +387,8 @@ def createConfigSpace(queue, knl):
     # this may not affect the quality of the autotuning results.
     prefetch_hyp = cs.OrdinalHyperparameter("prefetch", [0,1] if prefetch else [0], default_value=1)
     a_s.add_hyperparameter(prefetch_hyp)
-    if prefetch and "NVIDIA" in str(queue.device.vendor):
-        a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["prefetch"], 0))
+    #if prefetch and "NVIDIA" in str(queue.device.vendor):
+    #    a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["prefetch"], 0))
 
     if True:#n_elem*n_out > 1024:
         kii = cs.OrdinalHyperparameter("kii", k_inner_inner_options())
@@ -473,7 +474,7 @@ def createConfigSpace(queue, knl):
     # Maybe this should be a NormalFloatHyperparameter and cast to an int so it doesn't need
     # to store 10^8 ints. Actually, doesn't it use NormalFloat Hyperparameter under the hood?
     # Breaks at the moment
-    #num_elements = cs.NormalIntegerHyperparameter(name="num_elements", mu=n_elem, sigma=0, lower=0, upper=1e8, default_value=n_elem)
+    num_elements = cs.NormalIntegerHyperparameter(name="num_elements", mu=n_elem, sigma=0, lower=0, upper=1e8, default_value=n_elem)
     #a_s.add_hyperparameter(num_elements)
 
     return a_s

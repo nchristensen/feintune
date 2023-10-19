@@ -114,7 +114,8 @@ def test(args):
             max_flop_rate=max_flop_rate, 
             device_memory_bandwidth=device_memory_bandwidth,
             device_latency=device_latency,
-            timeout=timeout)
+            timeout=timeout,
+            method=None)
     #print(mem_top())
     #h = hpy()
     #print(h.heap())
