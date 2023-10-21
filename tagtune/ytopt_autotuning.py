@@ -235,7 +235,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
             #assert column_names[-4] == "num_elements"
             for row in row_list[1:]:
                 p = dict(zip(column_names, [int(item) for item in row[:-2]]))
-                if float(row[-2]) != timeout: # Eliminate
+                if float(row[-2]) < timeout: # Eliminate
                     initial_observations.append((p, float(row[-2]),))
                 #if int(row[-4]) == nelem:
                 #    pre_existing_evals += 1
@@ -340,7 +340,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                                     max_flop_rate=max_flop_rate,
                                     device_memory_bandwidth=device_memory_bandwidth,
                                     device_latency=device_latency,
-                                    timeout=timeout,
+                                    timeout=None,
                                     method="thread",#"subprocess",
                                     run_single_batch=False,
                                     error_return_time=timeout)
@@ -350,9 +350,10 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                             dump_hjson(hjson_file_str, tdict)
                         else:
                             print("Run return error return time. Not dumping to hjson.")
-                if True:
+
+                hjson_file_str = save_path + "/" + pid + "_default" + ".hjson"
+                if not exists(hjson_file_str):
                     from meshmode.array_context import PrefusedFusionContractorArrayContext
-                    hjson_file_str = save_path + "/" + pid + "_default" + ".hjson"
                     actx = PrefusedFusionContractorArrayContext(in_queue)
                     knl_with_default_transformations = actx.transform_loopy_program(knl)
 
@@ -361,7 +362,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                                 max_flop_rate=max_flop_rate,
                                 device_memory_bandwidth=device_memory_bandwidth,
                                 device_latency=device_latency,
-                                timeout=timeout,
+                                timeout=None,
                                 method="thread",#"subprocess",
                                 run_single_batch=False,
                                 error_return_time=timeout)
