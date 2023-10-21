@@ -12,7 +12,8 @@ from tagtune.utils import get_indirection_arrays
 def k_inner_inner_options(start_val=None):
     #options = [8, 16, 4, 32]
     #options = [64, 32, 16, 8]
-    options = [8, 16, 32, 64]
+    #options = [8, 16, 32, 64]
+    options = np.arange(1,65)
     #options = [32, 16]
     #options = [8]
     start_ind = 0 if start_val is None else options.index(start_val)
@@ -41,7 +42,8 @@ def k_inner_outer_options(n_in, k_inner_inner, sm_size,
     return options
 
 def i_inner_inner_options(n_out, k_inner_inner=1, max_work_group_size=1024, start_val=None):
-    factors = np.arange(1, n_out+1)[(n_out % np.arange(1, n_out+1)) == 0]
+    factors = np.arange(1, n_out+1)
+    #factors = np.arange(1, n_out+1)[(n_out % np.arange(1, n_out+1)) == 0]
     # Ensure total number of workitems is less than maximum
     usable_factors = factors[factors*k_inner_inner <= max_work_group_size]
     options = sorted(usable_factors.tolist(), reverse=False)
@@ -77,6 +79,9 @@ def j_inner_options(n_in, start_val=None):
 
 def batch_size_options(knl):    
     neinsums = len(get_einsums(knl))
+    batch_size_list = np.arange(1, neinsums + 1)
+    # Restricted version
+    """
     batch_size_list = [(batch_size, int(np.ceil(neinsums/batch_size))) for batch_size in range(1, neinsums + 1)]
     nbatches_dict = {}
 
@@ -90,7 +95,7 @@ def batch_size_options(knl):
         else:
             nbatches_dict[nbatches] = batch_size
     batch_size_list = sorted(nbatches_dict.values())
-
+    #"""
     # Could also just use this.
     #batch_size_list = list(range(1,neinsums + 1))
 
@@ -387,9 +392,6 @@ def createConfigSpace(queue, knl):
     # this may not affect the quality of the autotuning results.
     prefetch_hyp = cs.OrdinalHyperparameter("prefetch", [0,1] if prefetch else [0], default_value=1)
     a_s.add_hyperparameter(prefetch_hyp)
-    #if prefetch and "NVIDIA" in str(queue.device.vendor):
-    #    a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["prefetch"], 0))
-
     if True:#n_elem*n_out > 1024:
         kii = cs.OrdinalHyperparameter("kii", k_inner_inner_options())
         iii = cs.OrdinalHyperparameter("iii", i_inner_inner_options(n_out, max_work_group_size=max_work_group_size))
@@ -409,6 +411,16 @@ def createConfigSpace(queue, knl):
         # Will need to calculate kii*kio for the transformations
         kio = cs.OrdinalHyperparameter("kio", np.arange(1,7))
         a_s.add_hyperparameter(kio)
+
+        if prefetch and "NVIDIA" in str(queue.device.vendor):
+            pass
+            #a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["kio"], 6))
+            #a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["kio"], 5))
+            #a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["kio"], 4))
+            #a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["kio"], 3))
+            #a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["kio"], 2))
+            #a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["kii"], 32))
+
 
         def k_block_limit(kii, kio):
             return (kii*kio > n_elem) and (kio > 1)
