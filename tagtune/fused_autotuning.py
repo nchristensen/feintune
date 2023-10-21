@@ -557,6 +557,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
 
     handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
     timeout = 120
+    platform_id = 0 # Set to 1 to use Nvidia OpenCL on Monza
 
     if (len(est[0]), len(est[1]),) in handled_pairs and not indirection:
         if use_ytopt:
@@ -568,7 +569,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
                 #eval_str = "mpi_pool_executor"
             input_space = createConfigSpace(queue, sk)
             print("TESTING YTOPT")
-            ytopt_tuning(queue, sk, 0, input_space, program_id=program_id, normalized_program_id=normalized_program_id,
+            ytopt_tuning(queue, sk, platform_id, input_space, program_id=program_id, normalized_program_id=normalized_program_id,
                              max_flop_rate=max_flop_rate,
                              device_memory_bandwidth=device_memory_bandwidth,
                              device_latency=device_latency, timeout=timeout, save_path=save_path,
@@ -579,7 +580,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
             trans_list_list = einsum3to2_kernel_tlist_generator_v2(queue, sk)
             shuffle(trans_list_list)
 
-            tdict = parallel_autotune(sk, 0, trans_list_list[:10], program_id=program_id,
+            tdict = parallel_autotune(sk, platform_id, trans_list_list[:10], program_id=program_id,
                         max_flop_rate=max_flop_rate, device_latency=device_latency,
                         device_memory_bandwidth=device_memory_bandwidth, save_path=save_path,
                         timeout=timeout)
@@ -1162,8 +1163,13 @@ def main(args):
     device_memory_bandwidth = None
     clpeak_flop_rate = None
     print("BENCHMARK", args.benchmark)
+    # Need to handle oversubscribed GPU by profiling in waves or by communicating results.
+    # Actually, communicating is probably the better way to do this. Just have the first
+    # rank profile.
     if args.benchmark:
-        device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
+        if comm.Get_rank() == 0:
+            device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(queue)
+        comm.Barrier()
     if comm is not None:
         comm.Barrier()
     
