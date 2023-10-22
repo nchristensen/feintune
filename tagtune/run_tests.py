@@ -299,7 +299,7 @@ def measure_execution_time(queue, tunit, arg_dict, nruns, warmup_runs):
     for i in range(nruns):
         evt, out = tunit(queue, **arg_dict)
         events.append(evt)
-
+    queue.finish()
     cl.wait_for_events(events)
     for evt in events:
         sum_time += evt.profile.end - evt.profile.start
@@ -312,7 +312,7 @@ def measure_execution_time(queue, tunit, arg_dict, nruns, warmup_runs):
 # argument setting, etc, requires. This assumes there is only
 # one kernel or function in the generated code
 def measure_execution_latency(queue, tunit, arg_dict, nruns, warmup_runs):
-    
+    print("Starting measuring latency") 
     args = arg_dict.items()
     arg_names = [entry[0] for entry in args]
     arg_vals = [entry[1].data for entry in args]
@@ -332,8 +332,8 @@ def measure_execution_latency(queue, tunit, arg_dict, nruns, warmup_runs):
     for i in range(3):
         lwork_size.append(np.int32(sub_str[i].split(")")[0].replace(" ", "")))
 
-    print(null_kernel_code)
-    print(lwork_size)
+    #print(null_kernel_code)
+    #print(lwork_size)
 
     program = cl.Program(queue.context, null_kernel_code).build()
     cl_knl = program.all_kernels()[0]
@@ -345,13 +345,14 @@ def measure_execution_latency(queue, tunit, arg_dict, nruns, warmup_runs):
     #    ind = name_to_ind[key]
     #    cl_knl.set_arg(ind, val)
 
+    print("Launching null kernel")
     for i in range(warmup_runs):
         cl.enqueue_nd_range_kernel(queue, cl_knl, lwork_size, lwork_size)
 
     events = []
     for i in range(warmup_runs):
         events.append(cl.enqueue_nd_range_kernel(queue, cl_knl, lwork_size, lwork_size))
-
+    queue.finish()
     cl.wait_for_events(events)
     sum_time = 0.0
     min_latency = np.inf
@@ -363,6 +364,7 @@ def measure_execution_latency(queue, tunit, arg_dict, nruns, warmup_runs):
     
     min_latency = min_latency / 1e9
     avg_latency = sum_time / 1e9 / nruns
+    print("Finished measuring latency")
     return min_latency
 
 
@@ -1093,7 +1095,6 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     try:
         if timeout is None:
             knl, sb_knl = apply_transformation_list(knl_base, trans_list)
-            exit()
             knl = lp.preprocess_kernel(knl)
             insn_ids = tuple([insn.id for insn in knl.default_entrypoint.instructions])
             group_sizes, local_sizes = knl.default_entrypoint.get_grid_sizes_for_insn_ids(insn_ids, None)
