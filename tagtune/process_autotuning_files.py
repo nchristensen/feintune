@@ -3,8 +3,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-directory = ("./autotuning_files/")
-#directory = ("./autotuning_files_order_3/")
+#directory = ("./autotuning_files/")
+directory = ("./autotuning_files_order_2/")
 files = os.listdir(directory)
 files = [file for file in files if str(file).endswith(".hjson")]
 pids = [file[:-6] for file in files if not (str(file).endswith("full.hjson") or str(file).endswith("default.hjson"))]
@@ -87,19 +87,43 @@ avg_roofline_default_only_worse = np.average(default_df_only_worse["frac_rooflin
 """
 
 # Weight each kernel by default transformed kernel execution time
-avg_roofline_full = np.average(full_df["frac_roofline_flop_rate"], weights=full_execution_times)
-avg_roofline_default = np.average(default_df["frac_roofline_flop_rate"], weights=default_df["avg_time"])
-avg_roofline_predicted = np.average(batch_df["frac_roofline_flop_rate"], weights=batch_df["avg_time"])
-avg_roofline_faster = np.average(faster_df["frac_roofline_flop_rate"], weights=faster_df["avg_time"])
-avg_roofline_faster_only_tuned = np.average(faster_df_only_tuned["frac_roofline_flop_rate"], weights=faster_df_only_tuned["avg_time"])
-avg_roofline_faster_only_tuned_better = np.average(faster_df_only_tuned_better["frac_roofline_flop_rate"])#, weights=faster_df_only_tuned_better["avg_time"])
-avg_roofline_default_only_worse = np.average(default_df_only_worse["frac_roofline_flop_rate"])#, weights=default_df_only_worse["avg_time"])
-avg_roofline_faster_consistent_weights = np.average(faster_df_only_default_exists["frac_roofline_flop_rate"], weights=default_df["avg_time"])
+from scipy.stats import gmean as average
+avg_roofline_full = average(full_df["frac_roofline_flop_rate"], weights=full_execution_times)
+avg_roofline_default = average(default_df["frac_roofline_flop_rate"], weights=default_df["avg_time"])
+avg_roofline_predicted = average(batch_df["frac_roofline_flop_rate"], weights=batch_df["avg_time"])
+avg_roofline_faster = average(faster_df["frac_roofline_flop_rate"], weights=faster_df["avg_time"])
+avg_roofline_faster_only_tuned = average(faster_df_only_tuned["frac_roofline_flop_rate"], weights=faster_df_only_tuned["avg_time"])
+avg_roofline_faster_only_tuned_better = average(faster_df_only_tuned_better["frac_roofline_flop_rate"])#, weights=faster_df_only_tuned_better["avg_time"])
+avg_roofline_default_only_worse = average(default_df_only_worse["frac_roofline_flop_rate"])#, weights=default_df_only_worse["avg_time"])
+avg_roofline_faster_consistent_weights = average(faster_df_only_default_exists["frac_roofline_flop_rate"], weights=default_df["avg_time"])
 
 #avg_max_roofline = np.average(np.maximum(default_df["frac_roofline_flop_rate"].to_numpy(), full_df["frac_roofline_flop_rate"]), weights=np.minimum(default_df["avg_time"], full_df["avg_time"]))
 
-print(avg_roofline_predicted, avg_roofline_full, avg_roofline_default, avg_roofline_faster, avg_roofline_faster_only_tuned, avg_roofline_faster_only_tuned_better, avg_roofline_default_only_worse)
+#print(avg_roofline_predicted, avg_roofline_full, avg_roofline_default, avg_roofline_faster, avg_roofline_faster_only_tuned, avg_roofline_faster_only_tuned_better, avg_roofline_default_only_worse)
 
+print("Total execution time")
+default_avg_time = np.sum(default_df["avg_time"])
+faster_avg_time_total = np.sum(faster_df["avg_time"])
+speedup = default_avg_time / faster_avg_time_total
+
+tuning_potential = faster_df["avg_time"].to_numpy()*(1 - faster_df["frac_roofline_flop_rate"])
+remaining_speedup = faster_avg_time_total/(faster_avg_time_total - np.sum(tuning_potential))
+print(np.sum(default_df["avg_time"]), faster_avg_time_total, speedup, remaining_speedup)
+
+plt.plot(sorted(tuning_potential, reverse=True)/faster_avg_time_total)
+plt.show()
+
+#ngroups = 2
+#pos1 = np.arange(0, ngroups*len(default_df["avg_time"]), ngroups)
+#pos2 = np.arange(1, ngroups*len(default_df["avg_time"]) + 1, ngroups)
+
+
+#fix, ax = plt.subplots(nrows=2, ncols=1, layout="constrained")
+#ax[0].bar(pos1, default_df.sort_values("avg_time", ascending=False)["frac_roofline_flop_rate"])
+#ax[1].bar(np.arange(len(default_df["avg_time"])), sorted(default_df["avg_time"], reverse=True))
+#ax[1].bar(np.arange(len(full_df["avg_time"])), sorted(default_df["avg_time"], reverse=True))
+
+"""
 plt.semilogy(sorted(full_df["avg_time"], reverse=True), label="Autotuned transformations")
 plt.semilogy(sorted(default_df["avg_time"], reverse=True), label="Default transformations")
 #plt.semilogy(sorted(batch_df["avg_time_predicted"], reverse=True), label="Single batch predicted")
@@ -111,5 +135,6 @@ plt.xlabel("Ranking", fontsize=12)
 plt.ylabel("Kernel execution time", fontsize=12)
 plt.xticks(fontsize=11)
 plt.yticks(fontsize=11)
+"""
 
 plt.show()
