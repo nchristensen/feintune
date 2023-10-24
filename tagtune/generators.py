@@ -409,7 +409,7 @@ def createConfigSpace(queue, knl):
 
         # This just gives the maximum number of allowed ilp blocks.
         # Will need to calculate kii*kio for the transformations
-        kio = cs.OrdinalHyperparameter("kio", np.arange(1,7))
+        kio = cs.OrdinalHyperparameter("kio", np.arange(1,13))
         a_s.add_hyperparameter(kio)
 
         if prefetch and "NVIDIA" in str(queue.device.vendor):
@@ -460,7 +460,7 @@ def createConfigSpace(queue, knl):
         a_s.add_forbidden_clause(limit_work_groups)
         a_s.add_forbidden_clause(limit_local_memory_use)
         a_s.add_forbidden_clause(avoid_pointless_i_blocks)
-        a_s.add_forbidden_clause(enforce_factor_of_n_out)
+        #a_s.add_forbidden_clause(enforce_factor_of_n_out)
 
     else:
 
@@ -487,7 +487,7 @@ def createConfigSpace(queue, knl):
     # to store 10^8 ints. Actually, doesn't it use NormalFloat Hyperparameter under the hood?
     # Breaks at the moment
     num_elements = cs.NormalIntegerHyperparameter(name="num_elements", mu=n_elem, sigma=0, lower=0, upper=1e8, default_value=n_elem)
-    a_s.add_hyperparameter(num_elements)
+    #a_s.add_hyperparameter(num_elements)
 
     return a_s
 
