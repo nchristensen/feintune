@@ -556,7 +556,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
     indirection = len(get_indirection_arrays(sk)) > 0
 
     handled_pairs = set([(2,1,),(3,2,),(2,2,),(2,3)])
-    timeout = 120
+    timeout = 240
     platform_id = 0 # Set to 1 to use Nvidia OpenCL on Monza
 
     if (len(est[0]), len(est[1]),) in handled_pairs and not indirection:
@@ -573,7 +573,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
                              max_flop_rate=max_flop_rate,
                              device_memory_bandwidth=device_memory_bandwidth,
                              device_latency=device_latency, timeout=timeout, save_path=save_path,
-                             max_evals=100, required_new_evals=50, eval_str=eval_str)
+                             max_evals=50, required_new_evals=50, eval_str=eval_str)
         else:
             print("ONLY TESTING THE FIRST 20 transformations")
             from random import shuffle
@@ -1210,7 +1210,7 @@ def main(args):
             # ID changes based on whether python was run with -O
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
             from tagtune.run_tests import get_knl_flops
-            sk_list = sorted(sk_list, key=lambda e: get_knl_flops(e["sk"]), reverse=True)
+            sk_list = sorted(sk_list, key=lambda e: get_knl_flops(e["sk"]), reverse=True)[0:]
             #sk_list = [tunit_dict[1]["tunit"] for tunit_dict in tunit_dicts]
             #"""
             #sk_list = [sk for _, sk, _ in sk_list]
