@@ -30,6 +30,16 @@ def set_queue(exec_id, platform_num):
     platforms = cl.get_platforms()
 
     gpu_devices = platforms[platform_num].get_devices(device_type=cl.device_type.GPU)
+
+    # Not sure if gpu_devices has a defined order, so sort it by bus id to prevent 
+    # oversubscription of a GPU
+    if "NVIDIA" in gpu_devices[0].vendor:
+        gpu_devices = sorted(gpu_devices, key=lambda d: d.pci_bus_id_nv)
+    elif "Advanced Micro Devices" in d.vendor:
+        gpu_devices = sorted(gpu_devices, key=lambda d: d.topology_amd.bus)
+    else:
+        print("Unrecognized vendor, not sorting GPU list")
+
     ctx = cl.Context(devices=[gpu_devices[exec_id % len(gpu_devices)]])
     queue = cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
 
