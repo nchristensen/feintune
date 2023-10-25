@@ -978,7 +978,7 @@ def get_trans_list(knl, params, prefetch=True):
         
 
 
-    return trans_list
+    return tuple(trans_list)
 
 
 # Is there any real reason to separate this from the tspace kernel. Why not
