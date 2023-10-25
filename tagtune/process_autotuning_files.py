@@ -3,8 +3,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-#directory = ("./autotuning_files/")
-directory = ("./autotuning_files_order_2/")
+directory = ("./autotuning_files/")
+#directory = ("./autotuning_files_order_1/")
 files = os.listdir(directory)
 files = [file for file in files if str(file).endswith(".hjson")]
 pids = [file[:-6] for file in files if not (str(file).endswith("full.hjson") or str(file).endswith("default.hjson"))]
@@ -102,16 +102,41 @@ avg_roofline_faster_consistent_weights = average(faster_df_only_default_exists["
 #print(avg_roofline_predicted, avg_roofline_full, avg_roofline_default, avg_roofline_faster, avg_roofline_faster_only_tuned, avg_roofline_faster_only_tuned_better, avg_roofline_default_only_worse)
 
 print("Total execution time")
-default_avg_time = np.sum(default_df["avg_time"])
-faster_avg_time_total = np.sum(faster_df["avg_time"])
+
+def get_weighted_avg_time(df):
+    import json
+    import os
+    this_dir, this_filename = os.path.split(__file__)
+    JSON_PATH = os.path.join(this_dir, "saved_call_count_1.json")
+    d = load_hjson(JSON_PATH)
+
+    weighted_times = []
+    for name, time in zip(df["name"], df["avg_time"]):
+        print(name)
+        basename = name[:name.rfind("_")]
+        if basename in d:
+            weighted_times.append(d[basename]*time)
+        elif name in d:
+            weighted_times.append(d[name]*time)
+        else:
+            raise KeyError
+
+    return weighted_times
+        
+
+default_df = default_df.assign(weighted_avg_time=pd.Series(get_weighted_avg_time(default_df)).values)
+faster_df = faster_df.assign(weighted_avg_time=pd.Series(get_weighted_avg_time(faster_df)).values)
+
+default_avg_time = np.sum(default_df["weighted_avg_time"])
+faster_avg_time_total = np.sum(faster_df["weighted_avg_time"])
 speedup = default_avg_time / faster_avg_time_total
 
-tuning_potential = faster_df["avg_time"].to_numpy()*(1 - faster_df["frac_roofline_flop_rate"])
+tuning_potential = faster_df["weighted_avg_time"].to_numpy()*(1 - faster_df["frac_roofline_flop_rate"])
 remaining_speedup = faster_avg_time_total/(faster_avg_time_total - np.sum(tuning_potential))
-print(np.sum(default_df["avg_time"]), faster_avg_time_total, speedup, remaining_speedup)
+print(np.sum(default_df["weighted_avg_time"]), faster_avg_time_total, speedup, remaining_speedup)
 
-plt.plot(sorted(tuning_potential, reverse=True)/faster_avg_time_total)
-plt.show()
+#plt.plot(sorted(tuning_potential, reverse=True)/faster_avg_time_total)
+#plt.show()
 
 #ngroups = 2
 #pos1 = np.arange(0, ngroups*len(default_df["avg_time"]), ngroups)
@@ -123,9 +148,9 @@ plt.show()
 #ax[1].bar(np.arange(len(default_df["avg_time"])), sorted(default_df["avg_time"], reverse=True))
 #ax[1].bar(np.arange(len(full_df["avg_time"])), sorted(default_df["avg_time"], reverse=True))
 
-"""
+#"""
 plt.semilogy(sorted(full_df["avg_time"], reverse=True), label="Autotuned transformations")
-plt.semilogy(sorted(default_df["avg_time"], reverse=True), label="Default transformations")
+plt.semilogy(sorted(default_df["avg_time"], reverse=True), label="Handtuned transformations")
 #plt.semilogy(sorted(batch_df["avg_time_predicted"], reverse=True), label="Single batch predicted")
 plt.legend(fontsize=10)
 
@@ -135,6 +160,6 @@ plt.xlabel("Ranking", fontsize=12)
 plt.ylabel("Kernel execution time", fontsize=12)
 plt.xticks(fontsize=11)
 plt.yticks(fontsize=11)
-"""
+#"""
 
 plt.show()
