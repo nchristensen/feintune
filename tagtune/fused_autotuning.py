@@ -798,25 +798,38 @@ def get_pickled_tunits(directory_or_files):
         _, filename = os.path.split(f)
         filename = str(filename)
 
-        print(filename)
-        print(os.path.isfile(f))
-        print(filename.startswith("prefeinsum"))
-        print(filename.endswith(".pickle"))
+        #print(filename)
+        #print(os.path.isfile(f))
+        #print(filename.startswith("prefeinsum"))
+        #print(filename.endswith(".pickle"))
 
         # TODO: Change the pickle file prefix. Prefix is needed because other non-kernel pickle objects may be in the directory
         if os.path.isfile(f) and filename.startswith("prefeinsum") and (filename.endswith(".pickle") or filename.endswith(".pkl")):
             #if os.path.isfile(f) and (filename.endswith(".pickle") or filename.endswith(".pkl")):
-            f = open(f, "rb")
-            fdict = pickle.load(f)
+
+            if False: # POSIX file reading
+                f = open(f, "rb")
+                fdict = pickle.load(f)
+                f.close()
+            else: # MPI IO
+                print("Beginning MPI IO")
+                fsize = os.path.getsize(f)
+                buf = bytearray(fsize)
+                f = MPI.File.Open(MPI.COMM_WORLD, f)
+                f.Read_all(buf)
+                fdict = pickle.loads(buf)
+                f.Close()
+                print("Ending MPI IO")
+                
+            tunit_dicts.append((filename,fdict,))
+                
             #pid = filename.split("_")[1]
             #print(fdict["tunit"])
 
-            tunit_dicts.append((filename,fdict,))
             #tunit_dicts.append((filename,fdict,call_count_dict[pid]))
 
             #tunits.append((filename, tunit, args,))
             #tunit, args = pickle.load(f)
-            f.close()
 
     #exit()
     return tunit_dicts
@@ -1210,7 +1223,7 @@ def main(args):
             # ID changes based on whether python was run with -O
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
             from tagtune.run_tests import get_knl_flops
-            sk_list = sorted(sk_list, key=lambda e: get_knl_flops(e["sk"]), reverse=True)[0:]
+            sk_list = sorted(sk_list, key=lambda e: get_knl_flops(e["sk"]), reverse=True)[6:]
             #sk_list = [tunit_dict[1]["tunit"] for tunit_dict in tunit_dicts]
             #"""
             #sk_list = [sk for _, sk, _ in sk_list]
