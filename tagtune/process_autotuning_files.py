@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 #directory = ("./autotuning_files/")
-directory = ("./autotuning_files_order_1/")
+directory = ("./autotuning_files_order_4/")
 files = os.listdir(directory)
 files = [file for file in files if str(file).endswith(".hjson")]
 pids = [file[:-6] for file in files if not (str(file).endswith("full.hjson") or str(file).endswith("default.hjson"))]
@@ -151,6 +151,13 @@ remaining_speedup2 = faster_only_better_avg_time_total/(faster_only_better_avg_t
 print("All kernels", np.sum(default_df["weighted_avg_time"]), faster_avg_time_total, speedup, remaining_speedup)
 print("Sped up kernels", np.sum(default_df_only_worse["weighted_avg_time"]), faster_only_better_avg_time_total, speedup2, remaining_speedup2)
 
+data_dict = {}
+for entry in zip(default_df["name"],default_df["flops"], faster_df["avg_time"], faster_df["frac_roofline_flop_rate"], default_df["frac_roofline_flop_rate"]):
+    data_dict[entry[0]] = entry
+
+print(data_dict)
+for entry in data_dict.values():
+    print(entry)
 
 #plt.plot(sorted(tuning_potential, reverse=True)/faster_avg_time_total)
 #plt.show()
