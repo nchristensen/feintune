@@ -3,8 +3,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-directory = ("./autotuning_files/")
-#directory = ("./autotuning_files_order_1/")
+#directory = ("./autotuning_files/")
+directory = ("./autotuning_files_order_1/")
 files = os.listdir(directory)
 files = [file for file in files if str(file).endswith(".hjson")]
 pids = [file[:-6] for file in files if not (str(file).endswith("full.hjson") or str(file).endswith("default.hjson"))]
@@ -95,7 +95,6 @@ avg_roofline_faster = average(faster_df["frac_roofline_flop_rate"], weights=fast
 avg_roofline_faster_only_tuned = average(faster_df_only_tuned["frac_roofline_flop_rate"], weights=faster_df_only_tuned["avg_time"])
 avg_roofline_faster_only_tuned_better = average(faster_df_only_tuned_better["frac_roofline_flop_rate"])#, weights=faster_df_only_tuned_better["avg_time"])
 avg_roofline_default_only_worse = average(default_df_only_worse["frac_roofline_flop_rate"])#, weights=default_df_only_worse["avg_time"])
-avg_roofline_faster_consistent_weights = average(faster_df_only_default_exists["frac_roofline_flop_rate"], weights=default_df["avg_time"])
 
 #avg_max_roofline = np.average(np.maximum(default_df["frac_roofline_flop_rate"].to_numpy(), full_df["frac_roofline_flop_rate"]), weights=np.minimum(default_df["avg_time"], full_df["avg_time"]))
 
@@ -133,7 +132,25 @@ speedup = default_avg_time / faster_avg_time_total
 
 tuning_potential = faster_df["weighted_avg_time"].to_numpy()*(1 - faster_df["frac_roofline_flop_rate"])
 remaining_speedup = faster_avg_time_total/(faster_avg_time_total - np.sum(tuning_potential))
-print(np.sum(default_df["weighted_avg_time"]), faster_avg_time_total, speedup, remaining_speedup)
+
+
+
+faster_df_only_tuned_better = faster_df_only_tuned_better.assign(weighted_avg_time=pd.Series(get_weighted_avg_time(faster_df_only_tuned_better)).values)
+default_df_only_worse = default_df_only_worse.assign(weighted_avg_time=pd.Series(get_weighted_avg_time(default_df_only_worse)).values)
+
+
+default_only_worse_avg_time = np.sum(default_df_only_worse["weighted_avg_time"])
+faster_only_better_avg_time_total = np.sum(faster_df_only_tuned_better["weighted_avg_time"])
+
+speedup2 = default_only_worse_avg_time / faster_only_better_avg_time_total
+
+tuning_potential2 = faster_df_only_tuned_better["weighted_avg_time"].to_numpy()*(1 - faster_df_only_tuned_better["frac_roofline_flop_rate"])
+remaining_speedup2 = faster_only_better_avg_time_total/(faster_only_better_avg_time_total - np.sum(tuning_potential2))
+
+
+print("All kernels", np.sum(default_df["weighted_avg_time"]), faster_avg_time_total, speedup, remaining_speedup)
+print("Sped up kernels", np.sum(default_df_only_worse["weighted_avg_time"]), faster_only_better_avg_time_total, speedup2, remaining_speedup2)
+
 
 #plt.plot(sorted(tuning_potential, reverse=True)/faster_avg_time_total)
 #plt.show()
