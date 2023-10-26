@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 #directory = ("./autotuning_files/")
-directory = ("./autotuning_files_order_4/")
+directory = ("./autotuning_files_order_2/")
 files = os.listdir(directory)
 files = [file for file in files if str(file).endswith(".hjson")]
 pids = [file[:-6] for file in files if not (str(file).endswith("full.hjson") or str(file).endswith("default.hjson"))]
@@ -173,14 +173,14 @@ for entry in data_dict.values():
 #ax[1].bar(np.arange(len(full_df["avg_time"])), sorted(default_df["avg_time"], reverse=True))
 
 #"""
-plt.semilogy(sorted(full_df["avg_time"], reverse=True), label="Autotuned transformations")
+plt.semilogy(sorted(faster_df["avg_time"], reverse=True), label="Autotuned transformations")
 plt.semilogy(sorted(default_df["avg_time"], reverse=True), label="Handtuned transformations")
 #plt.semilogy(sorted(batch_df["avg_time_predicted"], reverse=True), label="Single batch predicted")
 plt.legend(fontsize=10)
 
 plt.suptitle("Ranked Y3 Prediction Smoke-test KS 3D Kernels", fontsize=13) 
 plt.title("Order 2, Nvidia Titan V", fontsize=12)
-plt.xlabel("Ranking", fontsize=12)
+plt.xlabel("Execution time ranking", fontsize=12)
 plt.ylabel("Kernel execution time", fontsize=12)
 plt.xticks(fontsize=11)
 plt.yticks(fontsize=11)
