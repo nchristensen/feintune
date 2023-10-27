@@ -576,7 +576,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
 
     handled_pairs = set([(2, 1,), (3, 2,), (2, 2,), (2, 3)])
     timeout = 240
-    platform_id = 0  # Set to 1 to use Nvidia OpenCL on Monza
+    platform_id = 0  # Set to 1 to use Nvidia OpenCL on Monza. Need more robust way.
 
     if (len(est[0]), len(est[1]),) in handled_pairs and not indirection:
         if use_ytopt:
@@ -794,7 +794,6 @@ def get_internal_einsum_dependencies(tunit):
 def get_pickled_tunits(directory_or_files):
 
     if isinstance(directory_or_files, str):
-        # [directory_or_files + "/" + file for file in os.listdir(directory_or_files)]
         files = os.listdir(directory_or_files)
         directory = directory_or_files
     else:
@@ -803,21 +802,6 @@ def get_pickled_tunits(directory_or_files):
         directory = None
 
     tunit_dicts = []
-
-    '''
-    # Doesn't seem to capture the true call count
-    call_count_dict = {}
-    for filename in list(sorted(files)):
-        if filename.startswith("call_count_") and (filename.endswith(".pickle") or filename.endswith(".pkl")):
-            f = os.path.join(directory,filename)
-            f = open(f, "rb")
-            fdict = pickle.load(f)
-            f.close()
-            call_count_dict = fdict | call_count_dict # Give rank 0 the priority
-
-    print(call_count_dict)
-    exit()
-    '''
 
     for num, filename in list(enumerate(sorted(files))):
         if directory is not None:
@@ -828,40 +812,27 @@ def get_pickled_tunits(directory_or_files):
         _, filename = os.path.split(f)
         filename = str(filename)
 
-        # print(filename)
-        # print(os.path.isfile(f))
-        # print(filename.startswith("prefeinsum"))
-        # print(filename.endswith(".pickle"))
-
-        # TODO: Change the pickle file prefix. Prefix is needed because other non-kernel pickle objects may be in the directory
-        if os.path.isfile(f) and filename.startswith("prefeinsum") and (filename.endswith(".pickle") or filename.endswith(".pkl")):
-            # if os.path.isfile(f) and (filename.endswith(".pickle") or filename.endswith(".pkl")):
+        if os.path.isfile(f) and (filename.endswith(".pickle") or filename.endswith(".pkl")):
 
             if False:  # POSIX file reading
                 f = open(f, "rb")
                 fdict = pickle.load(f)
                 f.close()
             else:  # MPI IO
-                print("Beginning MPI IO")
+                #print("Beginning MPI IO")
                 fsize = os.path.getsize(f)
                 buf = bytearray(fsize)
                 f = MPI.File.Open(MPI.COMM_WORLD, f)
                 f.Read_all(buf)
                 fdict = pickle.loads(buf)
                 f.Close()
-                print("Ending MPI IO")
+                #print("Ending MPI IO")
 
-            tunit_dicts.append((filename, fdict,))
+            if isinstance(fdict["tunit"], lp.TranslationUnit):
+                tunit_dicts.append((filename, fdict,))
 
-            # pid = filename.split("_")[1]
             # print(fdict["tunit"])
 
-            # tunit_dicts.append((filename,fdict,call_count_dict[pid]))
-
-            # tunits.append((filename, tunit, args,))
-            # tunit, args = pickle.load(f)
-
-    # exit()
     return tunit_dicts
 
 
@@ -1257,7 +1228,7 @@ def main(args):
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
             from tagtune.run_tests import get_knl_flops
             sk_list = sorted(sk_list, key=lambda e: get_knl_flops(
-                e["sk"]), reverse=False)[35:]
+                e["sk"]), reverse=False)[0:]
             # sk_list = [tunit_dict[1]["tunit"] for tunit_dict in tunit_dicts]
             # """
             # sk_list = [sk for _, sk, _ in sk_list]
