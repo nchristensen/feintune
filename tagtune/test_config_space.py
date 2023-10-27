@@ -1,3 +1,5 @@
+from ConfigSpace.read_and_write import json as cs_json
+from dataclasses import dataclass
 import ConfigSpace as cs
 from ConfigSpace import *
 
@@ -16,11 +18,8 @@ cspace = cs.ConfigurationSpace()
 cspace.add_hyperparameter(a)
 cspace.add_hyperparameter(b)
 
-#print(cspace["a"] < cspace["b"])
+# print(cspace["a"] < cspace["b"])
 
-
-from dataclasses import dataclass
-from ConfigSpace.read_and_write import json as cs_json
 
 @dataclass
 class ProductGreaterThan:
@@ -28,6 +27,7 @@ class ProductGreaterThan:
 
     def __call__(self, a, b):
         return a*b > self.limit
+
 
 forbid = ProductGreaterThan(25)
 print(forbid.__class__.__qualname__)
@@ -50,4 +50,3 @@ with open('configspace.json', 'r') as f:
 print(cspace_loaded)
 
 exit()
-

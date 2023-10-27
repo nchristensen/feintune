@@ -1,10 +1,10 @@
-#from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
-#from charm4py.pool import PoolScheduler, Pool
-#from charm4py.charm import Charm, CharmRemote
-#from charm4py.chare import GROUP, MAINCHARE, ARRAY, CHARM_TYPES, Mainchare, Group, ArrayMap
-#from charm4py.sections import SectionManager
-#import inspect
-#import sys
+# from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
+# from charm4py.pool import PoolScheduler, Pool
+# from charm4py.charm import Charm, CharmRemote
+# from charm4py.chare import GROUP, MAINCHARE, ARRAY, CHARM_TYPES, Mainchare, Group, ArrayMap
+# from charm4py.sections import SectionManager
+# import inspect
+# import sys
 import hjson
 import pyopencl as cl
 import numpy as np
@@ -15,24 +15,28 @@ import loopy as lp
 from os.path import exists
 from grudge.loopy_dg_kernels.run_tests import run_single_param_set, generic_test
 from grudge.grudge_array_context import convert
-#from grudge.execution import diff_prg, elwise_linear
+# from grudge.execution import diff_prg, elwise_linear
 import mpi4py.MPI as MPI
 from schwimmbad import SerialPool, MPIPool
-#from schwimmbad.mpi import MPIAsyncPool
+# from schwimmbad.mpi import MPIAsyncPool
+
 
 def get_queue(pe_num, platform_num):
     platforms = cl.get_platforms()
-    gpu_devices = platforms[platform_num].get_devices(device_type=cl.device_type.GPU)
+    gpu_devices = platforms[platform_num].get_devices(
+        device_type=cl.device_type.GPU)
     ctx = cl.Context(devices=[gpu_devices[pe_num % len(gpu_devices)]])
-    queue = cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
+    queue = cl.CommandQueue(
+        ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
     return queue
 
 
 def test(args):
     platform_id, knl, tlist_generator, params, test_fn = args
-    comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
+    # Assume we're using COMM_WORLD. May need to change this in the future
+    comm = MPI.COMM_WORLD
     queue = get_queue(comm.Get_rank(), platform_id)
-    result = run_single_param_set(queue, knl, tlist_generator, params, test_fn) 
+    result = run_single_param_set(queue, knl, tlist_generator, params, test_fn)
     return result
 
 
@@ -57,9 +61,10 @@ def autotune_pickled_kernels(path, platform_id, actx_class, comm):
             knl_id = knl_id.split("_")[-1]
             print("Kernel ID", knl_id)
             print("New kernel ID", gac.unique_program_id(knl))
-            
+
             assert knl_id == gac.unique_program_id(knl)
-            knl = lp.set_options(knl, lp.Options(no_numpy=True, return_dict=True))
+            knl = lp.set_options(knl, lp.Options(
+                no_numpy=True, return_dict=True))
             knl = gac.set_memory_layout(knl)
             assert knl_id == gac.unique_program_id(knl)
 
@@ -76,12 +81,12 @@ def parallel_autotune(knl, platform_id, actx_class, comm):
 
     # Create queue, assume all GPUs on the machine are the same
     platforms = cl.get_platforms()
-    gpu_devices = platforms[platform_id].get_devices(device_type=cl.device_type.GPU)
+    gpu_devices = platforms[platform_id].get_devices(
+        device_type=cl.device_type.GPU)
     n_gpus = len(gpu_devices)
     ctx = cl.Context(devices=[gpu_devices[comm.Get_rank() % n_gpus]])
     profiling = cl.command_queue_properties.PROFILING_ENABLE
-    queue = cl.CommandQueue(ctx, properties=profiling)    
-
+    queue = cl.CommandQueue(ctx, properties=profiling)
 
     import pyopencl.tools as cl_tools
     actx = actx_class(
@@ -95,52 +100,51 @@ def parallel_autotune(knl, platform_id, actx_class, comm):
     os.makedirs(os.path.dirname("./hjson"), exist_ok=True)
     hjson_file_str = f"hjson/{knl.default_entrypoint.name}_{pid}.hjson"
 
-    #assert comm.Get_size() > 1
-    #assert charm.numPes() > 1
-    #assert charm.numPes() - 1 <= charm.numHosts()*len(gpu_devices)
-    #assert charm.numPes() <= charm.numHosts()*(len(gpu_devices) + 1)
+    # assert comm.Get_size() > 1
+    # assert charm.numPes() > 1
+    # assert charm.numPes() - 1 <= charm.numHosts()*len(gpu_devices)
+    # assert charm.numPes() <= charm.numHosts()*(len(gpu_devices) + 1)
     # Check that it can assign one PE to each GPU
     # The first PE is used for scheduling
     # Not certain how this will work with multiple nodes
 
     from run_tests import run_single_param_set
-    
+
     tlist_generator, pspace_generator = actx.get_generators(knl)
     params_list = pspace_generator(actx.queue, knl)
 
     # Could make a massive list with all kernels and parameters
-    args = [(platform_id, knl, tlist_generator, p, generic_test,) for p in params_list]
-
+    args = [(platform_id, knl, tlist_generator, p, generic_test,)
+            for p in params_list]
 
     # May help to balance workload
     # Should test if shuffling matters
     from random import shuffle
     shuffle(args)
 
+    # a = Array(AutotuneTask, dims=(len(args)), args=args[0])
+    # a.get_queue()
 
-    #a = Array(AutotuneTask, dims=(len(args)), args=args[0])
-    #a.get_queue()
-   
-    #result = charm.pool.map(do_work, args)
+    # result = charm.pool.map(do_work, args)
 
-    #pool_proxy = Chare(BalancedPoolScheduler, onPE=0) # Need to use own charm++ branch to make work
+    # pool_proxy = Chare(BalancedPoolScheduler, onPE=0) # Need to use own charm++ branch to make work
 
-    #pool_proxy = Chare(PoolScheduler, onPE=0)
-    #mypool = MPIAsyncPool()
-    mypool = MPIPool()#Pool(pool_proxy)
-    #mypool = SerialPool()
+    # pool_proxy = Chare(PoolScheduler, onPE=0)
+    # mypool = MPIAsyncPool()
+    mypool = MPIPool()  # Pool(pool_proxy)
+    # mypool = SerialPool()
     if isinstance(mypool, MPIPool) and not mypool.is_master():
         mypool.wait()
         sys.exit(0)
 
-    sort_key = lambda entry: entry[0]
+    def sort_key(entry): return entry[0]
     transformations = {}
-    if len(args) > 0: # Guard against empty list
+    if len(args) > 0:  # Guard against empty list
         results = list(mypool.map(test, args))
         mypool.close()
         results.sort(key=sort_key)
-        
-        #for r in results:
+
+        # for r in results:
         #    print(r)
         # Workaround for pocl CUDA bug
         # whereby times are imprecise
@@ -153,13 +157,14 @@ def parallel_autotune(knl, platform_id, actx_class, comm):
         avg_time, transformations, data = results[ret_index]
     else:
         mypool.close()
-    
+
     od = {"transformations": transformations}
     out_file = open(hjson_file_str, "wt+")
-    hjson.dump(od, out_file,default=convert)
+    hjson.dump(od, out_file, default=convert)
     out_file.close()
 
     return transformations
+
 
 """
 def main(args):
@@ -207,14 +212,16 @@ def main(args):
         print(r)
 """
 
+
 def main():
     from mirgecom.array_context import MirgecomAutotuningArrayContext as Maac
     comm = MPI.COMM_WORLD
-    
+
     autotune_pickled_kernels("./pickled_programs", 0, Maac, comm)
 
     print("DONE!")
     exit()
+
 
 """
 def worker(task):
@@ -238,9 +245,8 @@ if __name__ == "__main__":
     import sys
     main()
 
-    #pool = MPIPool()
+    # pool = MPIPool()
 
-    #if not pool.is_master():
+    # if not pool.is_master():
     #    pool.wait()
     #    sys.exit(0)
-

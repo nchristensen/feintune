@@ -1,4 +1,9 @@
 
+from collections.abc import Collection
+from loopy.diagnostic import LoopyError
+from loopy.kernel import LoopKernel
+from loopy.translation_unit import for_each_kernel
+import islpy as isl
 ght__ = "Copyright (C) 2023 Kaushik Kulkarni"
 
 __license__ = """
@@ -26,13 +31,6 @@ __doc__ = """
 
 .. autofunction:: decouple_domain
 """
-
-import islpy as isl
-
-from loopy.translation_unit import for_each_kernel
-from loopy.kernel import LoopKernel
-from loopy.diagnostic import LoopyError
-from collections.abc import Collection
 
 
 @for_each_kernel

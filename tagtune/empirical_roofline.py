@@ -24,7 +24,6 @@ def get_queues_like(queue):
     return queues
 
 
-
 @dataclass
 class BandwidthTestResult():
 
@@ -48,10 +47,11 @@ class BandwidthTestResult():
     def min_bandwidth(self):
         return self.bytes_transferred/self.tmax
 
+
 def get_theoretical_maximum_flop_rate(queue, dtype):
     clock_speed = queue.device.max_clock_frequency * 1.0e6
     compute_units = queue.device.max_compute_units
-    madd_rate = 2 # Number of multiply add ops per cycle
+    madd_rate = 2  # Number of multiply add ops per cycle
     try:
         simd_size = queue.device.preferred_work_group_size_multiple
     except cl._cl.LogicError:
@@ -66,7 +66,7 @@ def get_theoretical_maximum_flop_rate(queue, dtype):
     simd_multiple = 2 if 'NVIDIA' in queue.device.vendor else 1
 
     shading_units = compute_units*simd_size*simd_multiple
-    
+
     # May vary depending on the data type
     if dtype == np.float32:
         cycles_per_flop = 1
@@ -77,7 +77,7 @@ def get_theoretical_maximum_flop_rate(queue, dtype):
     else:
         raise ValueError("Unhandled flop type")
 
-    return (clock_speed*shading_units*madd_rate) // cycles_per_flop 
+    return (clock_speed*shading_units*madd_rate) // cycles_per_flop
 
 
 def get_buffers(queue, dtype_in, n_dtype_in, dtype_out=None,
@@ -106,7 +106,8 @@ def get_buffers(queue, dtype_in, n_dtype_in, dtype_out=None,
                 queue, (n_dtype_in,), dtype_in, allocator=allocator, data=d_in_buf)
             clrandom.fill_rand(d_in_buf_arr, queue=queue)
         else:
-            raise ValueError(f"Cannot fill array with {dtype_in} on the device")
+            raise ValueError(
+                f"Cannot fill array with {dtype_in} on the device")
     else:
 
         from psutil import virtual_memory
@@ -123,7 +124,7 @@ def get_buffers(queue, dtype_in, n_dtype_in, dtype_out=None,
         elif np.issubdtype(dtype_in, np.float):
             # The host array is formed as a float64 before being copied and converted
             if virtual_memory().available < \
-                        n_dtype_in*(np.float64(0).itemsize + dtype_in().itemsize):
+                    n_dtype_in*(np.float64(0).itemsize + dtype_in().itemsize):
                 raise ValueError(
                     "Not enough host memory to fill the buffer from the host")
             h_in_buf = np.random.rand(n_dtype_in).astype(dtype_in)
@@ -138,15 +139,15 @@ def get_buffers(queue, dtype_in, n_dtype_in, dtype_out=None,
             size=n_bytes_in,
             hostbuf=h_in_buf)
 
-        #TODO: Copy small chunks at a time if the array size is large.
+        # TODO: Copy small chunks at a time if the array size is large.
         # Is this actually needed?
 
-        #d_in_buf = cl.Buffer(context,
+        # d_in_buf = cl.Buffer(context,
         #    cl.mem_flags.READ_ONLY |
         #    cl.mem_flags.HOST_WRITE_ONLY |
         #    cl.mem_flags.COPY_HOST_PTR,
         #    size=max_shape_bytes, hostbuf=h_in_buf)
-        #for some number of chunks
+        # for some number of chunks
         #   h_in_buf = ...
         #   evt = cl.enqueue_copy(queue, d_in_buf, h_in_buf) # With offsets
 
@@ -175,13 +176,15 @@ def loopy_bandwidth_test_with_queues_like(
     queues = get_queues_like(queue)
 
     return tuple([loopy_bandwidth_test(q, dtype_in=dtype_in,
-                    fill_on_device=fill_on_device, fast=fast) for q in queues])
+                                       fill_on_device=fill_on_device, fast=fast) for q in queues])
 
 # TODO: Calculate latency of a null kernel (a copy kernel stripped of instructions)
+
+
 def loopy_bandwidth_test(queue, n_in_max=None, dtype_in=None, n_out_max=None,
-                        dtype_out=None, fill_on_device=True,
-                        ntrials=100, fast=True, print_results=False,
-                        pollute_caches=True):
+                         dtype_out=None, fill_on_device=True,
+                         ntrials=100, fast=True, print_results=False,
+                         pollute_caches=True):
 
     if pollute_caches and n_in_max is not None and n_out_max is not None and dtype_out is not None:
         raise ValueError(
@@ -195,21 +198,26 @@ def loopy_bandwidth_test(queue, n_in_max=None, dtype_in=None, n_out_max=None,
     try:
         if "Advanced Micro Devices" in queue.device.vendor:
             # Allocating arrays above a certain size slows the MI-100 significantly
-            max_shape_bytes = min(queue.device.max_mem_alloc_size, queue.device.global_variable_preferred_total_size // 8)
+            max_shape_bytes = min(queue.device.max_mem_alloc_size,
+                                  queue.device.global_variable_preferred_total_size // 8)
         else:
-            max_shape_bytes = min(queue.device.max_mem_alloc_size, queue.device.global_variable_preferred_total_size // 2)
+            max_shape_bytes = min(queue.device.max_mem_alloc_size,
+                                  queue.device.global_variable_preferred_total_size // 2)
         if max_shape_bytes == 0:
             raise cl._cl.LogicError
     except cl._cl.LogicError:
         if "A100-SXM4" in queue.device.name:
-            max_shape_bytes = min(queue.device.max_mem_alloc_size, queue.device.global_mem_size // 5)
+            max_shape_bytes = min(
+                queue.device.max_mem_alloc_size, queue.device.global_mem_size // 5)
         else:
-            max_shape_bytes = min(queue.device.max_mem_alloc_size, queue.device.global_mem_size // 2)
+            max_shape_bytes = min(
+                queue.device.max_mem_alloc_size, queue.device.global_mem_size // 2)
 
-    #max_shape_bytes = (max_shape_bytes // dtype_in().itemsize)*dtype_in().itemsize
+    # max_shape_bytes = (max_shape_bytes // dtype_in().itemsize)*dtype_in().itemsize
 
     if n_in_max is None:
-        n_in_max = max_shape_bytes // max(dtype_in().itemsize, dtype_out().itemsize)
+        n_in_max = max_shape_bytes // max(dtype_in().itemsize,
+                                          dtype_out().itemsize)
     if n_out_max is None:
         n_out_max = n_in_max
 
@@ -222,7 +230,7 @@ def loopy_bandwidth_test(queue, n_in_max=None, dtype_in=None, n_out_max=None,
 
     pollute_size = n_in_max_bytes
     # Could probably get by with something smaller
-    #pollute_size = min(100*queue.device.global_mem_cache_size,
+    # pollute_size = min(100*queue.device.global_mem_cache_size,
     #                    n_in_max_bytes)
 
     ogti = n_out_max > n_in_max
@@ -287,8 +295,10 @@ def loopy_bandwidth_test(queue, n_in_max=None, dtype_in=None, n_out_max=None,
                         0, end_slab))
                 knl = lp.tag_inames(knl, [("j", "unr")])
 
-                inpt = cl.array.Array(queue, (nj, n_in), dtype_in, data=d_in_buf)
-                outpt = cl.array.Array(queue, (nj, n_out), dtype_out, data=d_out_buf)
+                inpt = cl.array.Array(
+                    queue, (nj, n_in), dtype_in, data=d_in_buf)
+                outpt = cl.array.Array(
+                    queue, (nj, n_out), dtype_out, data=d_out_buf)
 
                 dt_avg = 0
                 dt_max = 0
@@ -323,10 +333,10 @@ def loopy_bandwidth_test(queue, n_in_max=None, dtype_in=None, n_out_max=None,
 
                 # Calculate bandwidth in GBps
                 nbytes_transferred = dtype_in().itemsize*np.product(inpt.shape) + \
-                                        dtype_out().itemsize*np.product(outpt.shape)
+                    dtype_out().itemsize*np.product(outpt.shape)
                 result = BandwidthTestResult(str(queue.device), dt_avg,
-                            dt_min, dt_max, nbytes_transferred, "loopy",
-                            (nj, local_size))
+                                             dt_min, dt_max, nbytes_transferred, "loopy",
+                                             (nj, local_size))
 
                 # Keep the result with the lowest tmin
                 if nbytes_transferred not in results_dict:
@@ -351,8 +361,8 @@ def loopy_bandwidth_test(queue, n_in_max=None, dtype_in=None, n_out_max=None,
                 # Need to have read access on both input and output arrays
                 # for this to work
 
-                #from pyopencl.array import sum as clsum
-                #if n_in == n_out:
+                # from pyopencl.array import sum as clsum
+                # if n_in == n_out:
                 #    diff = (inpt - outpt)
                 #    if  clsum(inpt - outpt) != 0:
                 #        print("INCORRECT COPY")
@@ -368,8 +378,8 @@ def enqueue_copy_bandwidth_test_with_queues_like(
     queues = get_queues_like(queue)
 
     return tuple([enqueue_copy_bandwidth_test(q, dtype=dtype,
-                    fill_on_device=fill_on_device,
-                    max_used_bytes=max_used_bytes) for q in queues])
+                                              fill_on_device=fill_on_device,
+                                              max_used_bytes=max_used_bytes) for q in queues])
 
 
 def enqueue_copy_bandwidth_test(
@@ -384,11 +394,13 @@ def enqueue_copy_bandwidth_test(
         dtype = np.int32 if fill_on_device else np.int8
 
     try:
-        max_shape_bytes = min(queue.device.max_mem_alloc_size, queue.device.global_variable_preferred_total_size // 2)
+        max_shape_bytes = min(queue.device.max_mem_alloc_size,
+                              queue.device.global_variable_preferred_total_size // 2)
         if max_shape_bytes == 0:
             raise cl._cl.LogicError
     except cl._cl.LogicError:
-        max_shape_bytes = min(queue.device.max_mem_alloc_size, queue.device.global_mem_size // 2)
+        max_shape_bytes = min(queue.device.max_mem_alloc_size,
+                              queue.device.global_mem_size // 2)
 
     if max_used_bytes is not None:
         assert max_used_bytes // 2 <= queue.device.max_mem_alloc_size
@@ -407,9 +419,9 @@ def enqueue_copy_bandwidth_test(
     word_count_list = get_word_counts(max_shape_dtype)
     results_list = []
 
-    pollute_size = max_shape_bytes#queue.device.max_mem_alloc_size
+    pollute_size = max_shape_bytes  # queue.device.max_mem_alloc_size
     # Could probably get by with something smaller
-    #pollute_size = min(100*queue.device.global_mem_cache_size,
+    # pollute_size = min(100*queue.device.global_mem_cache_size,
     #                   max_shape_bytes)
 
     for word_count in word_count_list:
@@ -423,12 +435,16 @@ def enqueue_copy_bandwidth_test(
         # Warmup
         for i in range(5):
             if pollute_caches:
-                cl.enqueue_copy(queue, d_out_buf, d_in_buf, byte_count=pollute_size)
-            evt = cl.enqueue_copy(queue, d_out_buf, d_in_buf, byte_count=byte_count)
+                cl.enqueue_copy(queue, d_out_buf, d_in_buf,
+                                byte_count=pollute_size)
+            evt = cl.enqueue_copy(
+                queue, d_out_buf, d_in_buf, byte_count=byte_count)
         for i in range(ntrials):
             if pollute_caches:
-                cl.enqueue_copy(queue, d_out_buf, d_in_buf, byte_count=pollute_size)
-            evt = cl.enqueue_copy(queue, d_out_buf, d_in_buf, byte_count=byte_count)
+                cl.enqueue_copy(queue, d_out_buf, d_in_buf,
+                                byte_count=pollute_size)
+            evt = cl.enqueue_copy(
+                queue, d_out_buf, d_in_buf, byte_count=byte_count)
             events.append(evt)
 
         cl.wait_for_events(events)
@@ -533,8 +549,8 @@ def plot_split_alpha_beta(results_list):
                     result.max_bandwidth > results_list[ind+1].max_bandwidth:
                 delta = abs(result.max_bandwidth -
                             results_list[ind-1].max_bandwidth) + \
-                        abs(result.max_bandwidth -
-                            results_list[ind+1].max_bandwidth)
+                    abs(result.max_bandwidth -
+                        results_list[ind+1].max_bandwidth)
                 if delta > highest_delta:
                     highest_delta = delta
                     split_index_lower = ind + 1
@@ -546,8 +562,8 @@ def plot_split_alpha_beta(results_list):
                     result.max_bandwidth < results_list[ind+1].max_bandwidth:
                 delta = abs(result.max_bandwidth -
                             results_list[ind-1].max_bandwidth) + \
-                        abs(result.max_bandwidth -
-                            results_list[ind+1].max_bandwidth)
+                    abs(result.max_bandwidth -
+                        results_list[ind+1].max_bandwidth)
                 if delta > highest_delta:
                     highest_delta = delta
                     split_index_upper = ind
@@ -556,11 +572,13 @@ def plot_split_alpha_beta(results_list):
                  for result in results_list])
 
     latency, inv_bw = get_alpha_beta_model(results_list)
-    s1_latency, s1_inv_bw = get_alpha_beta_model(results_list[:split_index_lower])
+    s1_latency, s1_inv_bw = get_alpha_beta_model(
+        results_list[:split_index_lower])
     s2_inv_bw = get_beta_model(results_list[split_index_upper:], latency)
 
     print("LATENCY:", latency, "BANDWIDTH:", 1/inv_bw/1e9)
-    print("REGION 1 LATENCY:", s1_latency, "REGION 1 BANDWIDTH:", 1/s1_inv_bw/1e9)
+    print("REGION 1 LATENCY:", s1_latency,
+          "REGION 1 BANDWIDTH:", 1/s1_inv_bw/1e9)
     print("LATENCY:", latency, "REGION 2 BANDWIDTH:", 1/s2_inv_bw/1e9)
 
     best_fit_bw = M[:, 0]/(latency + M[:, 0]*inv_bw)/1e9
@@ -578,12 +596,14 @@ def plot_split_alpha_beta(results_list):
 
 # This is not actually a valid way to obtain the same queue because
 # the order is not guaranteed.
+
+
 def get_indices_from_queue(queue):
     dev = queue.device
     if "NVIDIA" in dev.vendor:
         # Is there any need for the slot id?
-        pcie_id = dev.pci_bus_id_nv 
-    elif "Advanced Micro Devices" in dev.vendor: 
+        pcie_id = dev.pci_bus_id_nv
+    elif "Advanced Micro Devices" in dev.vendor:
         pcie_id = dev.topology_amd.bus
     else:
         raise RuntimeError("Device does not have a PCI-Express bus ID")
@@ -605,8 +625,9 @@ def get_indices_from_queue(queue):
 
 
 def get_max_bandwidth_clpeak(queue=None, platform_number=0, device_number=0):
-    print("", flush=True) 
-    output = check_output(shlex.split(f"clpeak -p {platform_number} -d {device_number} --global-bandwidth"))
+    print("", flush=True)
+    output = check_output(shlex.split(
+        f"clpeak -p {platform_number} -d {device_number} --global-bandwidth"))
     output_split = output.decode().split()
     print(output_split)
     bandwidths = []
@@ -632,7 +653,8 @@ def get_max_flop_rate_clpeak(dtype, queue=None, platform_number=0, device_number
 
     # Clear output buffer so shlex won't get confused
     print("", flush=True)
-    output = check_output(shlex.split(f"clpeak -p {platform_number} -d {device_number} --compute-{float_str}"))
+    output = check_output(shlex.split(
+        f"clpeak -p {platform_number} -d {device_number} --compute-{float_str}"))
 
     output_split = output.decode().split()
     flop_rates = []
@@ -640,7 +662,7 @@ def get_max_flop_rate_clpeak(dtype, queue=None, platform_number=0, device_number
         # Work around for message about half precision support in dp test
         if (dtype == np.float64 and "double" in entry) or \
             (dtype == np.float32 and "float" in entry) or \
-            (dtype == np.float16 and "half" in entry):
+                (dtype == np.float16 and "half" in entry):
             if not output_split[ind + 2] == "support":
                 flop_rates.append(float(output_split[ind + 2]))
     if len(flop_rates) == 0:
@@ -654,6 +676,8 @@ def get_max_flop_rate_clpeak(dtype, queue=None, platform_number=0, device_number
 # So the reported latency
 # and the actual latency could differ by a wide margin. Least squares may or
 # may not help with this. This can throw off roofline calculations.
+
+
 def calc_latency_adjusted_bandwidth(latency, total_time, bytes_transferred):
     denominator = total_time - latency
     assert latency >= 0
@@ -661,21 +685,27 @@ def calc_latency_adjusted_bandwidth(latency, total_time, bytes_transferred):
     return bytes_transferred / denominator
 
 # Adds the effect of latency to the bandwidth calculation
+
+
 def calc_effective_bandwidth(latency, bandwidth, bytes_transferred):
     return bytes_transferred / ((bytes_transferred / bandwidth) + latency)
 
 # TODO: Use empty kernl to calculate latency. The latency of a copy
 # kernel is not necessarily the lowest possible latency.
+
+
 def get_min_device_latency(results_list):
     sorted_list = sorted(results_list, reverse=False,
                          key=lambda result: result.tmin)
     return sorted_list[0].tmin
-   
+
+
 def get_max_device_memory_bandwidth(results_list):
     sorted_list = sorted(results_list, reverse=True,
                          key=lambda result: result.max_bandwidth)
     return sorted_list[0].max_bandwidth
-    
+
+
 def get_latency_adjusted_max_device_memory_bandwidth(results_list):
     sorted_list = sorted(results_list, reverse=False,
                          key=lambda result: result.tmin)
@@ -686,7 +716,7 @@ def get_latency_adjusted_max_device_memory_bandwidth(results_list):
     tmin = sorted_list[0].tmin
     bytes_transferred = sorted_list[0].bytes_transferred
     return calc_latency_adjusted_bandwidth(latency, tmin, bytes_transferred)
-    
+
 
 if __name__ == "__main__":
 
@@ -694,39 +724,40 @@ if __name__ == "__main__":
     queue = cl.CommandQueue(
         context, properties=cl.command_queue_properties.PROFILING_ENABLE)
 
-
     loopy_results_list = loopy_bandwidth_test(queue, fast=True,
-        print_results=True, fill_on_device=True)
+                                              print_results=True, fill_on_device=True)
     enqueue_results_list = enqueue_copy_bandwidth_test(
         queue, dtype=None, fill_on_device=False, max_used_bytes=None,
         print_results=True)
 
-    #plot_split_alpha_beta(loopy_results_list)
-    #plot_split_alpha_beta(enqueue_results_list)
-    #exit()
+    # plot_split_alpha_beta(loopy_results_list)
+    # plot_split_alpha_beta(enqueue_results_list)
+    # exit()
     combined_list = loopy_results_list + enqueue_results_list
 
-    clpeak_bw = get_max_bandwidth_clpeak(queue=queue, platform_number=0, device_number=0)
-    clpeak_flop_rate = get_max_flop_rate_clpeak(np.float64, queue=queue, platform_number=0, device_number=0)
+    clpeak_bw = get_max_bandwidth_clpeak(
+        queue=queue, platform_number=0, device_number=0)
+    clpeak_flop_rate = get_max_flop_rate_clpeak(
+        np.float64, queue=queue, platform_number=0, device_number=0)
 
     flop_rate = get_theoretical_maximum_flop_rate(queue, np.float64)
     print("MAX THEORETICAL FLOP RATE (GFLOP/s)", flop_rate / 1e9)
     print("clpeak MAX FLOP RATE (GLOP/s)", clpeak_flop_rate / 1e9)
     print("clpeak MAX BW (GB/s)", clpeak_bw/1e9)
     print("Device latency (s)", get_min_device_latency(combined_list))
-    print("Loopy kernel MAX BW (GB/s)", get_max_device_memory_bandwidth(combined_list)/1e9)
-    print("Latency adjusted MAX BW (GB/s)", get_latency_adjusted_max_device_memory_bandwidth(combined_list)/1e9)
+    print("Loopy kernel MAX BW (GB/s)",
+          get_max_device_memory_bandwidth(combined_list)/1e9)
+    print("Latency adjusted MAX BW (GB/s)",
+          get_latency_adjusted_max_device_memory_bandwidth(combined_list)/1e9)
     exit()
-
-
 
     sorted_list = sorted(loopy_results_list, reverse=True,
                          key=lambda result: result.avg_bandwidth)
     print(sorted_list[0])
     # Loopy kernel is probably more indicative of real world performance
-    #plot_bandwidth(loopy_results_list)
-    #plot_split_alpha_beta(enqueue_results_list)
-    #plot_split_alpha_beta(loopy_results_list)
+    # plot_bandwidth(loopy_results_list)
+    # plot_split_alpha_beta(enqueue_results_list)
+    # plot_split_alpha_beta(loopy_results_list)
 
     """
     tmin_key = lambda result: result.tmin

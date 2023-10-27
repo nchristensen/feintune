@@ -71,6 +71,7 @@ class ConcurrentDOFInameTag(Tag):
     concurrently.
     """
 
+
 @tag_dataclass
 class ParameterValue(UniqueTag):
     """A tag that applies to :class:`loopy.ValueArg`. Instances of this tag

@@ -9,8 +9,10 @@ input_space = cs.ConfigurationSpace("autotuning_space")
 input_space.add_hyperparameter(csh.OrdinalHyperparameter("a", [0]))
 output_space = Space([Real(0.0, inf, name="avg_time")])
 
+
 def obj_func(p):
     return 1
+
 
 problem = TuningProblem(
     task_space=None,
@@ -21,7 +23,7 @@ problem = TuningProblem(
     model=None)
 
 searcher = AMBS(problem=problem, evaluator="ray")
-#exit()
+# exit()
 searcher.main()
 
 """

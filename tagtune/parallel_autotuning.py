@@ -2,7 +2,8 @@ from charm4py import charm, Chare, Array, Reducer, Future
 import pyopencl as cl
 import numpy as np
 import grudge.loopy_dg_kernels as dgk
-#from grudge.execution import diff_prg, elwise_linear
+# from grudge.execution import diff_prg, elwise_linear
+
 
 class AutotuneTask(Chare):
 
@@ -12,11 +13,12 @@ class AutotuneTask(Chare):
 
     def get_queue(self):
         platform = cl.get_platforms()
-        gpu_devices = platform[self.platform_id].get_devices(device_type=cl.device_type.GPU)
+        gpu_devices = platform[self.platform_id].get_devices(
+            device_type=cl.device_type.GPU)
         n_gpus = len(gpu_devices)
         ctx = cl.Context(devices=[gpu_devices[charm.myPe() % n_gpus]])
         profiling = cl.command_queue_properties.PROFILING_ENABLE
-        queue = cl.CommandQueue(ctx, properties=profiling)    
+        queue = cl.CommandQueue(ctx, properties=profiling)
         return queue
 
     def run(self):
@@ -29,27 +31,34 @@ class Test(Chare):
               'sending a msg to element 1')
         self.thisProxy[1].sayHi()
 
-    #@coro
+    # @coro
     def sayHi(self, future):
         rn = np.random.rand()
-        print('Hello from element', self.thisIndex, 'on PE', charm.myPe(), 'random', rn)
+        print('Hello from element', self.thisIndex,
+              'on PE', charm.myPe(), 'random', rn)
         self.reduce(future, rn, Reducer.max)
+
 
 def get_queue(pe_num, platform_num=0):
     platforms = cl.get_platforms()
-    gpu_devices = platforms[platform_num].get_devices(device_type=cl.device_type.GPU)
+    gpu_devices = platforms[platform_num].get_devices(
+        device_type=cl.device_type.GPU)
     ctx = cl.Context(devices=[gpu_devices[pe_num % len(gpu_devices)]])
-    queue = cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
+    queue = cl.CommandQueue(
+        ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
     return queue
-    #return gpu_devices[pe_num % len(gpu_devices)].int_ptr
+    # return gpu_devices[pe_num % len(gpu_devices)].int_ptr
+
 
 def do_work(args):
     params = args[0]
     knl = args[1]
     queue = get_queue(charm.myPe())
     print("PE: ", charm.myPe())
-    avg_time, transform_list = dgk.run_tests.apply_transformations_and_run_test(queue, knl, dgk.run_tests.generic_test, params)
+    avg_time, transform_list = dgk.run_tests.apply_transformations_and_run_test(
+        queue, knl, dgk.run_tests.generic_test, params)
     return avg_time, params
+
 
 def square(x):
     return x**2
@@ -73,7 +82,7 @@ def main(args):
     # The first PE is used for scheduling
     # Not certain how this will work with multiple nodes
 
-        
+
     from grudge.execution import diff_prg, elwise_linear_prg
     knl = diff_prg(3, 1000000, 10, np.float64)
     params = dgk.run_tests.gen_autotune_list(queue, knl)
@@ -83,18 +92,18 @@ def main(args):
     # May help to balance workload
     from random import shuffle
     shuffle(args)
-    
+
     #a = Array(AutotuneTask, dims=(len(args)), args=args[0])
     #a.get_queue()
-   
+
     result = charm.pool.map(do_work, args)
     sort_key = lambda entry: entry[0]
     result.sort(key=sort_key)
-    
+
 
     for r in result:
         print(r)
-    
+
     #knl = diff_prg(3, 100000, 56, np.float64)
     #autotune_list = gen_autotune_list(queue, knl) 
     #print(autotune_list)
@@ -103,11 +112,12 @@ def main(args):
 
     print(charm.numHosts(), charm.numPes())
     f = Future()
-    #a = Array(Test, a.numPes())
-    #a.sayHi(f)
-    #result = f.get()
-    #print(result)
+    # a = Array(Test, a.numPes())
+    # a.sayHi(f)
+    # result = f.get()
+    # print(result)
     print("All finished")
-    charm.exit()    
+    charm.exit()
+
 
 charm.start(main)

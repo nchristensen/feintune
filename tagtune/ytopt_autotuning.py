@@ -8,7 +8,7 @@ from autotune.space import *
 from skopt.space import Real
 from ytopt.search.ambs import AMBS
 from frozendict import frozendict
-#from ytopt.search.async_search import AsyncSearch
+# from ytopt.search.async_search import AsyncSearch
 
 import hjson
 import pyopencl as cl
@@ -22,6 +22,8 @@ from random import shuffle
 
 
 queue = None
+
+
 def set_queue(exec_id, platform_num):
 
     global queue
@@ -29,9 +31,10 @@ def set_queue(exec_id, platform_num):
         raise ValueError("queue is already set")
     platforms = cl.get_platforms()
 
-    gpu_devices = platforms[platform_num].get_devices(device_type=cl.device_type.GPU)
+    gpu_devices = platforms[platform_num].get_devices(
+        device_type=cl.device_type.GPU)
 
-    # Not sure if gpu_devices has a defined order, so sort it by bus id to prevent 
+    # Not sure if gpu_devices has a defined order, so sort it by bus id to prevent
     # oversubscription of a GPU
     if "NVIDIA" in gpu_devices[0].vendor:
         gpu_devices = sorted(gpu_devices, key=lambda d: d.pci_bus_id_nv)
@@ -41,25 +44,29 @@ def set_queue(exec_id, platform_num):
         print("Unrecognized vendor, not sorting GPU list")
 
     ctx = cl.Context(devices=[gpu_devices[exec_id % len(gpu_devices)]])
-    queue = cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
+    queue = cl.CommandQueue(
+        ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
 
 
 def get_test_id(tlist):
     return md5(str(tlist).encode()).hexdigest()
 
+
 exec_id = 0
+
+
 def test(args):
     global queue
     global exec_id
     print(args)
-    #timeout, ((cur_test, total_tests,), (test_id, platform_id, knl, tlist, test_fn, max_flop_rate, device_latency, device_memory_bandwidth,),eval_str) = args
-    #comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
+    # timeout, ((cur_test, total_tests,), (test_id, platform_id, knl, tlist, test_fn, max_flop_rate, device_latency, device_memory_bandwidth,),eval_str) = args
+    # comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
     # From MPI.PoolExecutor the communicator for the tasks is not COMM_WORLD (this probably doesn't matter though. using COMM_WORLD should prevent
     # re-use of any GPU?
-    
+
     eval_str = args["eval_str"]
     platform_id = args["platform_id"]
-    #print("EVAL STR:", eval_str)
+    # print("EVAL STR:", eval_str)
 
     if queue is None:
         # Maybe can just pass a function as an arg
@@ -83,28 +90,29 @@ def test(args):
             exec_id = 0
 
         set_queue(exec_id, platform_id)
-        
-        assert queue is not None
 
+        assert queue is not None
 
     print("EXECUTOR ID", exec_id)
 
     cur_test = args["cur_test"]
     total_tests = args["total_tests"]
 
-    #print(f"\nExecuting test {cur_test} of {total_tests}\n")
+    # print(f"\nExecuting test {cur_test} of {total_tests}\n")
     result = run_single_param_set_v2(queue, args["knl"], args["tlist"], args["test_fn"],
-            max_flop_rate=args["max_flop_rate"],
-            device_memory_bandwidth=args["device_memory_bandwidth"],
-            device_latency=args["device_latency"],
-            timeout=args["timeout"],
-            method="thread",#"subprocess",#None
-            run_single_batch=True,
-            error_return_time=args["timeout"])
+                                     max_flop_rate=args["max_flop_rate"],
+                                     device_memory_bandwidth=args["device_memory_bandwidth"],
+                                     device_latency=args["device_latency"],
+                                     timeout=args["timeout"],
+                                     method="thread",  # "subprocess",#None
+                                     run_single_batch=True,
+                                     error_return_time=args["timeout"])
 
     return args["test_id"], result
 
+
 numeric_type = Union[np.number, float, int]
+
 
 @dataclass
 class ObjectiveFunction(object):
@@ -134,34 +142,33 @@ class ObjectiveFunction(object):
         test_id = get_test_id(tlist)
 
         print("BEGINNING TEST")
-        #args = (self.timeout, ((None, None,), (test_id, self.platform_id, self.knl, tlist,
+        # args = (self.timeout, ((None, None,), (test_id, self.platform_id, self.knl, tlist,
         #        generic_test, self.max_flop_rate, self.device_latency, self.device_memory_bandwidth,),),self.eval_str,)
         args = frozendict({"timeout": self.timeout,
-                "cur_test": None,
-                "total_tests": None,
-                "test_id": test_id,
-                "platform_id": self.platform_id,
-                "knl": self.knl,
-                "tlist": tlist,
-                "test_fn": generic_test,
-                "max_flop_rate": self.max_flop_rate,
-                "device_latency": self.device_latency,
-                "device_memory_bandwidth": self.device_memory_bandwidth,
-                "eval_str": self.eval_str
-                })
+                           "cur_test": None,
+                           "total_tests": None,
+                           "test_id": test_id,
+                           "platform_id": self.platform_id,
+                           "knl": self.knl,
+                           "tlist": tlist,
+                           "test_fn": generic_test,
+                           "max_flop_rate": self.max_flop_rate,
+                           "device_latency": self.device_latency,
+                           "device_memory_bandwidth": self.device_memory_bandwidth,
+                           "eval_str": self.eval_str
+                           })
 
-        #print(self.knl)
+        # print(self.knl)
         print(tlist)
 
         test_id, result = test(args)
 
         print("ENDING TEST")
-        #results = run_single_param_set_v2(queue, knl, tlist, max_flop_rate=max_flop_rate,
+        # results = run_single_param_set_v2(queue, knl, tlist, max_flop_rate=max_flop_rate,
         #            device_memory_bandwidth=device_memory_bandwidth, device_latency=device_latency, timeout=timeout)
-        
-        # Would be helpful if could return all of the data instead of only avg_time 
-        return result["data"]["avg_time_predicted"]
 
+        # Would be helpful if could return all of the data instead of only avg_time
+        return result["data"]["avg_time_predicted"]
 
 
 # TODO: Change default max_evals
@@ -180,22 +187,21 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
     else:
         npid = normalized_program_id
 
-
     if save_path is None:
         save_path = "./"
 
     print(input_space)
     output_space = Space([Real(0.0, inf, name="avg_time_predicted")])
-    #eval_str = "mpi_comm_executor"
-    #eval_str = "mpi_pool_executor"
-    #eval_str = "charm4py_pool_executor"
-    #eval_str = "threadpool"
-    #eval_str = "processpool"
-    #eval_str = "ray"
+    # eval_str = "mpi_comm_executor"
+    # eval_str = "mpi_pool_executor"
+    # eval_str = "charm4py_pool_executor"
+    # eval_str = "threadpool"
+    # eval_str = "processpool"
+    # eval_str = "ray"
 
     obj_func = ObjectiveFunction(knl, eval_str=eval_str, platform_id=platform_id, max_flop_rate=max_flop_rate,
-                                    device_memory_bandwidth=device_memory_bandwidth, device_latency=device_latency,
-                                    timeout=timeout)
+                                 device_memory_bandwidth=device_memory_bandwidth, device_latency=device_latency,
+                                 timeout=timeout)
 
     # If want to time step (advance simulation) while tuning, need to use the actual kernel and data, so each node is
     # independent... but maybe the results can be unified after kernel execution? Each rank should have a different
@@ -214,17 +220,17 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         constraints=None,
         model=None)
 
-    #for entry in range(10):
+    # for entry in range(10):
     #    p = input_space.sample_configuration(1)
     #    print(p)
     #    print(obj_func(p))
-     
-    output_file_base = save_path + "/" +  npid 
-    #learner = "DUMMY"
-    #learner = "RF"
-    #learner = "ET"
+
+    output_file_base = save_path + "/" + npid
+    # learner = "DUMMY"
+    # learner = "RF"
+    # learner = "ET"
     learner = "GBRT"
-    #learner = "GP" # Doesn't work with ConfigSpace
+    # learner = "GP" # Doesn't work with ConfigSpace
     seed = 12345
 
     import csv
@@ -232,8 +238,8 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
     initial_observations = []
 
-    #from .generators import get_inames
-    #nelem = i
+    # from .generators import get_inames
+    # nelem = i
 
     # Maybe use pandas instead?
     pre_existing_evals = 0
@@ -242,12 +248,12 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         with open(csv_file_str) as csvfile:
             row_list = list(csv.reader(csvfile))
             column_names = row_list[0]
-            #assert column_names[-4] == "num_elements"
+            # assert column_names[-4] == "num_elements"
             for row in row_list[1:]:
                 p = dict(zip(column_names, [int(item) for item in row[:-2]]))
-                if float(row[-2]) < timeout: # Eliminate
+                if float(row[-2]) < timeout:  # Eliminate
                     initial_observations.append((p, float(row[-2]),))
-                #if int(row[-4]) == nelem:
+                # if int(row[-4]) == nelem:
                 #    pre_existing_evals += 1
 
         num_random = 0
@@ -259,7 +265,8 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
     # Note that the initial observations count toward max_evals.
     # --Is this actually true?
-    searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner, set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations)
+    searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner,
+                    set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations)
 
     if pre_existing_evals < max_evals:
         print("==========BEGINNING SEARCH=============")
@@ -281,14 +288,15 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
             # parameters. The kio and iio need to be changed.
             row_list = list(csv.reader(csvfile))
             column_names = row_list[0]
-            #rows = [row for row in list(row_list)[1:] if int(row[-4]) == nelem]
+            # rows = [row for row in list(row_list)[1:] if int(row[-4]) == nelem]
             rows = list(row_list)[1:]
             rows.sort(key=lambda row: row[-2])
 
             if (timeout is None) or (float(rows[0][-2]) < timeout):
-                #batch_size,iii,iio,ji,kii,kio,objective,elapsed_sec
-                p = dict(zip(column_names, [int(item) for item in rows[0][:-2]]))
-                
+                # batch_size,iii,iio,ji,kii,kio,objective,elapsed_sec
+                p = dict(zip(column_names, [int(item)
+                         for item in rows[0][:-2]]))
+
                 params = (p["batch_size"],
                           p["kio"]*p["kii"],
                           p["kii"],
@@ -296,8 +304,8 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                           p["iii"],
                           p["ji"],)
 
-                trans_list = get_trans_list(knl, params, prefetch=p["prefetch"])
-
+                trans_list = get_trans_list(
+                    knl, params, prefetch=p["prefetch"])
 
                 """
                 test_id = get_test_id(trans_list)
@@ -316,11 +324,11 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                         })
                 """
 
-                #test_id, tdict = test(args)
+                # test_id, tdict = test(args)
 
                 # Re-run to obtain performance data and null-kernel latency
                 # since ytopt doesn't appear to have a way to return ancillary data.
-                # Could have each rank/process/thread write to a file and then recombine the 
+                # Could have each rank/process/thread write to a file and then recombine the
                 # results. Note, this writes to pid.hjson, not npid.hjson
                 hjson_file_str = save_path + "/" + pid + ".hjson"
                 # Kernels that use too much memory still aren't prevented from running.
@@ -337,41 +345,43 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                     if trans_list == current_transformations:
                         update_hjson = False
                         print("Setting hjson update to false")
-                        #exit()
+                        # exit()
 
                 if update_hjson:
                     tdict = run_single_param_set_v2(in_queue, knl, trans_list, generic_test,
-                                max_flop_rate=max_flop_rate,
-                                device_memory_bandwidth=device_memory_bandwidth,
-                                device_latency=device_latency,
-                                timeout=timeout,
-                                method="thread",#"subprocess",
-                                run_single_batch=True,
-                                error_return_time=timeout)
+                                                    max_flop_rate=max_flop_rate,
+                                                    device_memory_bandwidth=device_memory_bandwidth,
+                                                    device_latency=device_latency,
+                                                    timeout=timeout,
+                                                    method="thread",  # "subprocess",
+                                                    run_single_batch=True,
+                                                    error_return_time=timeout)
                     if tdict["data"]["avg_time_predicted"] < timeout:
                         from tagtune.utils import dump_hjson
                         dump_hjson(hjson_file_str, tdict)
 
                         # If the single batch kernel didn't time out
                         # run the full kernel with those transformations.
-                        if True: # See what the performance is with the full kernel.
+                        if True:  # See what the performance is with the full kernel.
                             hjson_file_str = save_path + "/" + pid + "_full" + ".hjson"
-                            if True:#not exists(hjson_file_str) or pre_existing_evals < max_evals:
-                    
+                            # not exists(hjson_file_str) or pre_existing_evals < max_evals:
+                            if True:
+
                                 print("GENERATING AND EXECUTING FULL KERNEL")
                                 tdict = run_single_param_set_v2(in_queue, knl, trans_list, generic_test,
-                                            max_flop_rate=max_flop_rate,
-                                            device_memory_bandwidth=device_memory_bandwidth,
-                                            device_latency=device_latency,
-                                            timeout=None,
-                                            method="thread",#"subprocess",
-                                            run_single_batch=False,
-                                            error_return_time=timeout)
+                                                                max_flop_rate=max_flop_rate,
+                                                                device_memory_bandwidth=device_memory_bandwidth,
+                                                                device_latency=device_latency,
+                                                                timeout=None,
+                                                                method="thread",  # "subprocess",
+                                                                run_single_batch=False,
+                                                                error_return_time=timeout)
                                 print("DONE GENERATING AND EXECUTING FULL KERNEL")
                                 if tdict["data"]["avg_time_predicted"] < timeout:
                                     dump_hjson(hjson_file_str, tdict)
                                 else:
-                                    print("Run return error return time. Not dumping to hjson.")
+                                    print(
+                                        "Run return error return time. Not dumping to hjson.")
 
                     else:
                         print("Run return error return time. Not dumping to hjson.")
@@ -380,17 +390,18 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                 if not exists(hjson_file_str):
                     from meshmode.array_context import PrefusedFusionContractorArrayContext
                     actx = PrefusedFusionContractorArrayContext(in_queue)
-                    knl_with_default_transformations = actx.transform_loopy_program(knl)
+                    knl_with_default_transformations = actx.transform_loopy_program(
+                        knl)
 
                     print("GENERATING AND EXECUTING DEFAULT TRANSFORMED KERNEL")
                     tdict = run_single_param_set_v2(in_queue, knl_with_default_transformations, [], generic_test,
-                                max_flop_rate=max_flop_rate,
-                                device_memory_bandwidth=device_memory_bandwidth,
-                                device_latency=device_latency,
-                                timeout=None,
-                                method="thread",#"subprocess",
-                                run_single_batch=False,
-                                error_return_time=timeout)
+                                                    max_flop_rate=max_flop_rate,
+                                                    device_memory_bandwidth=device_memory_bandwidth,
+                                                    device_latency=device_latency,
+                                                    timeout=None,
+                                                    method="thread",  # "subprocess",
+                                                    run_single_batch=False,
+                                                    error_return_time=timeout)
                     print("DONE GENERATING AND EXECUTING DEFAULT TRANSFORMED KERNEL")
 
                     if tdict["data"]["avg_time_predicted"] < timeout:
@@ -400,9 +411,9 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                         print("Run return error return time. Not dumping to hjson.")
 
     if "mpi" in eval_str:
-        print("WAITING AT BARRIER") 
+        print("WAITING AT BARRIER")
         comm = MPI.COMM_WORLD
-        comm.Barrier()                
+        comm.Barrier()
     print("======RETURNING FROM SEARCH========")
-    #exit()
+    # exit()
     return True

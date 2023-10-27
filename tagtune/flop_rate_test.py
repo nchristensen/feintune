@@ -3,6 +3,7 @@ import loopy as lp
 import pyopencl as cl
 import pyopencl.array as cla
 
+
 def generate_flop_instructions(nflops):
     one_flop_instr = "beta = A[i] + alpha\n"
     two_flop_instr = "beta = beta*A[i] + alpha\n"
@@ -17,10 +18,11 @@ def generate_flop_instructions(nflops):
     print(instr)
     return instr
 
+
 def generate_test_knl(nflops, nelem, ntrials=100):
 
     one_flop_instr = "beta = A[i] + alpha {id_prefix=flop,dep=*}" if nflops % 2 == 1 else ""
-        
+
     nfmadd = nflops // 2
     knl = lp.make_kernel(
         "{[j,k,i]: 0<=k<nfmadd and 0<=j<ntrials and 0<=i<nelem}",
@@ -45,9 +47,9 @@ def generate_test_knl(nflops, nelem, ntrials=100):
 
 if __name__ == "__main__":
 
-   
     ctx = cl.create_some_context(interactive=True)
-    queue = cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
+    queue = cl.CommandQueue(
+        ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
     max_size_bytes = queue.device.max_mem_alloc_size
     dtype = np.float64
     max_size_dtype = max_size_bytes // dtype().itemsize
@@ -61,7 +63,7 @@ if __name__ == "__main__":
     knl = lp.add_inames_for_unused_hw_axes(knl)
 
     evt, result = knl(queue, A=A)
-    evt.wait()    
+    evt.wait()
 
     dt = (evt.profile.end - evt.profile.start) / 1e9
     from run_tests import analyze_FLOPS
@@ -71,4 +73,4 @@ if __name__ == "__main__":
     gflop_rate = tot_flops/dt/1e9
     print(gflop_rate)
 
-    #generate_flop_instructions(10)
+    # generate_flop_instructions(10)

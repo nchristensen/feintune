@@ -17,7 +17,8 @@ def qprofile(func):
                 return result
             finally:
                 s = StringIO()
-                ps = pstats.Stats(profile, stream=s).strip_dirs().sort_stats('cumulative')
+                ps = pstats.Stats(
+                    profile, stream=s).strip_dirs().sort_stats('cumulative')
                 ps.print_stats(30)
                 print(s.getvalue())
                 profile.dump_stats("qprofile_output.prof")
@@ -28,6 +29,8 @@ def qprofile(func):
 
 # Same thing as above, but using pyinstrument
 # Doesn't work
+
+
 def qinstrument(func):
 
     def profiled_func(*args, **kwargs):
@@ -39,29 +42,29 @@ def qinstrument(func):
                 profiler.start()
                 result = func(*args, **kwargs)
                 profiler.stop()
-                #profiler.print()
+                # profiler.print()
                 return result
             finally:
-                #pass
+                # pass
                 profiler.print()
-                #s = StringIO()
-                #ps = pstats.Stats(profile, stream=s).strip_dirs().sort_stats('cumulative')
-                #ps.print_stats(30)
-                #print(s.getvalue())
-                #profile.dump_stats("qprofile_output.prof")
+                # s = StringIO()
+                # ps = pstats.Stats(profile, stream=s).strip_dirs().sort_stats('cumulative')
+                # ps.print_stats(30)
+                # print(s.getvalue())
+                # profile.dump_stats("qprofile_output.prof")
         else:
             result = func(*args, **kwargs)
             return result
     return profiled_func
 
 
-## Example usage
+# Example usage
 
-#@qprofile
-#def process_one(cmd):
+# @qprofile
+# def process_one(cmd):
 #    import commands
 #    output = commands.getoutput(cmd)
 #    return output
 
 # Function is profiled if profile=True in kwargs
-#print(process_one('uname -a', profile=True))
+# print(process_one('uname -a', profile=True))
