@@ -562,6 +562,8 @@ def apply_feinsum_transformations(t_unit, queue):
 
 def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program_id=None, max_flop_rate=None, device_latency=None, device_memory_bandwidth=None, save_path=None):
 
+    print("AUTOTUNING STANDALONE SUBKERNEL")
+
     if save_path is None:
         save_path = "./hjson"
 
@@ -576,7 +578,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
 
     handled_pairs = set([(2, 1,), (3, 2,), (2, 2,), (2, 3)])
     timeout = 240
-    platform_id = 0  # Set to 1 to use Nvidia OpenCL on Monza. Need more robust way.
+    platform_id = 1  # Set to 1 to use Nvidia OpenCL on Monza. Need more robust way.
 
     if (len(est[0]), len(est[1]),) in handled_pairs and not indirection:
         if use_ytopt:
@@ -592,7 +594,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
                          max_flop_rate=max_flop_rate,
                          device_memory_bandwidth=device_memory_bandwidth,
                          device_latency=device_latency, timeout=timeout, save_path=save_path,
-                         max_evals=50, required_new_evals=50, eval_str=eval_str)
+                         max_evals=100, required_new_evals=100, eval_str=eval_str)
         else:
             print("ONLY TESTING THE FIRST 20 transformations")
             from random import shuffle
@@ -964,14 +966,16 @@ def get_device_roofline_data(queue):
     return device_latency, device_memory_bandwidth, clpeak_flop_rate
 
 
-def autotune_standalone_subkernels(sk_list, save_path=None, device_latency=None, device_memory_bandwidth=None, peak_flop_rate=None):
+def autotune_standalone_subkernels(queue, sk_list, save_path=None, device_latency=None, device_memory_bandwidth=None, peak_flop_rate=None):
 
-    platforms = cl.get_platforms()
-    cl_ctx = cl.Context(
-        dev_type=cl.device_type.GPU,
-        properties=[(cl.context_properties.PLATFORM, platforms[0])])
-    queue = cl.CommandQueue(cl_ctx,
-                            properties=cl.command_queue_properties.PROFILING_ENABLE)
+    print("AUTOTUNING STANDALONE SUBKERNELS")
+
+    #platforms = cl.get_platforms()
+    #cl_ctx = cl.Context(
+    #    dev_type=cl.device_type.GPU,
+    #    properties=[(cl.context_properties.PLATFORM, platforms[0])])
+    #queue = cl.CommandQueue(cl_ctx,
+    #                        properties=cl.command_queue_properties.PROFILING_ENABLE)
 
     if save_path is None:
         save_path = "./hjson"
@@ -1035,7 +1039,7 @@ def autotune_standalone_subkernels(sk_list, save_path=None, device_latency=None,
                           red_axes, indirection, einsum_count, pid, npid)
 
                     handled_pairs = set([(2, 1,), (3, 2,), (2, 2,), (2, 3)])
-                    if (non_red_axes, red_axes,) in handled_pairs and not indirection and einsum_count <= np.inf:
+                    if (non_red_axes, red_axes,) in handled_pairs and not indirection and einsum_count <= 10:
                         # Add indirection arrays as a parameter?
                         autotune_standalone_subkernel(sk, queue, program_id=pid, normalized_program_id=npid,
                                                       max_flop_rate=peak_flop_rate,
@@ -1228,7 +1232,7 @@ def main(args):
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
             from tagtune.run_tests import get_knl_flops
             sk_list = sorted(sk_list, key=lambda e: get_knl_flops(
-                e["sk"]), reverse=False)[0:]
+                e["sk"]), reverse=False)[146:]#[112:]
             # sk_list = [tunit_dict[1]["tunit"] for tunit_dict in tunit_dicts]
             # """
             # sk_list = [sk for _, sk, _ in sk_list]
@@ -1261,7 +1265,8 @@ def main(args):
 
             # test_default_transforms(sk_list, save_path=directory + "/default_transforms_hjson")
 
-            autotune_standalone_subkernels(sk_list, save_path=save_path, device_latency=device_latency,
+            autotune_standalone_subkernels(queue, sk_list, save_path=save_path, 
+                                           device_latency=device_latency,
                                            device_memory_bandwidth=device_memory_bandwidth, peak_flop_rate=clpeak_flop_rate)
 
             # compare_weighted_avg_frac_rooflines(directory, pid_dict)

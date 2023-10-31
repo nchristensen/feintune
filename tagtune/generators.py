@@ -400,14 +400,7 @@ def createConfigSpace(queue, knl):
 
     # Element axis
     a_s = cs.ConfigurationSpace(name="autotuning_space")
-    # prefetch_hyp = cs.OrdinalHyperparameter("prefetch", [0,1] if prefetch else [0])
-    # See if this can stop the nvidia out of resources error. If pretching is enabled,
-    # the local_memory_usage restrictions may implicitly limit the number of registers.
-    # In the order one tests, a transformation with prefetching was always chosen, so
-    # this may not affect the quality of the autotuning results.
-    prefetch_hyp = cs.OrdinalHyperparameter(
-        "prefetch", [0, 1] if prefetch else [0], default_value=1)
-    a_s.add_hyperparameter(prefetch_hyp)
+
     if True:  # n_elem*n_out > 1024:
         kii = cs.OrdinalHyperparameter("kii", k_inner_inner_options())
         iii = cs.OrdinalHyperparameter("iii", i_inner_inner_options(
@@ -496,6 +489,29 @@ def createConfigSpace(queue, knl):
     batch_sizes = cs.OrdinalHyperparameter(
         "batch_size", batch_size_options(knl))
     a_s.add_hyperparameter(batch_sizes)
+
+    # prefetch_hyp = cs.OrdinalHyperparameter("prefetch", [0,1] if prefetch else [0])
+    # See if this can stop the nvidia out of resources error. If pretching is enabled,
+    # the local_memory_usage restrictions may implicitly limit the number of registers.
+    # In the order one tests, a transformation with prefetching was always chosen, so
+    # this may not affect the quality of the autotuning results.
+    prefetch_hyp = cs.OrdinalHyperparameter(
+        "prefetch", [0, 1] if prefetch else [0], default_value=1)
+    a_s.add_hyperparameter(prefetch_hyp)
+
+    # More esoteric hyperparameters
+    group_idofs_hyp = cs.OrdinalHyperparameter(
+        "group_idofs", [0, 1], default_value=1)
+    a_s.add_hyperparameter(group_idofs_hyp)
+
+    iel_ilp_hyp = cs.OrdinalHyperparameter(
+        "iel_ilp", [0, 1], default_value=1)
+    a_s.add_hyperparameter(iel_ilp_hyp)
+
+    idof_ilp_hyp = cs.OrdinalHyperparameter(
+        "idof_ilp", [0, 1], default_value=1)
+    a_s.add_hyperparameter(idof_ilp_hyp)
+
 
     # Hyperparameter for the number of elements. This is set to be a constant, but
     # should allow the tests of kernels with different element counts to inform
@@ -628,7 +644,22 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
     # (technically, we only need to avoid to prefetching arrays that are indirectly addressed
     # but I think there is only one that qualifies at this point.)
     # Prefetching could be possible if we can bound the accesses.
-    prefetch = len(get_indirection_arrays(knl)) == 0
+    indirection = len(get_indirection_arrays(knl)) > 0
+    if indirection:
+        print("KERNEL CONTAINS INDIRECTION ARRAYS. Disabling prefetching.")
+
+    prefetch_vals = [0] if indirection else [0,1]
+    iel_ilp_vals = [0,1]
+    idof_ilp_vals = [0,1]
+    group_idof_vals = [0,1]
+
+    from itertools import product
+    trans_list_list = []
+    iterator = product(parameter_list, prefetch_vals, iel_ilp_vals, idof_ilp_vals, group_idof_vals)
+    for params, prefetch, iel_ilp, idof_ilp, group_idof in iterator:
+        trans_list_list.append(get_trans_list(knl, params, prefetch=prefetch, iel_ilp=iel_ilp, idof_ilp=idof_ilp, group_idof=group_idof))
+
+    """
     trans_list_list = []
     if prefetch == False:
         print("KERNEL CONTAINS INDIRECTION ARRAYS. Disabling prefetching.")
@@ -645,6 +676,7 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
     #    trans_list_list.append([tuple(get_trans_list(knl,params, prefetch=True)) for params in parameter_list])
 
     print("Num trans to try: ", len(trans_list_list))
+    """
 
     return trans_list_list
 
@@ -656,8 +688,8 @@ def get_args_and_arrays(knl):
     e, i, j, x, f, r = get_inames(knl)
 
     # Find read dof arrays. These are the ones that will be prefetched
-    read_deps = frozenset()
-    write_deps = frozenset()
+    read_deps = set()
+    write_deps = set()
     for instr in knl.default_entrypoint.instructions:
         if isinstance(instr, lp.Assignment):
             read_deps |= instr.read_dependency_names()
@@ -673,8 +705,9 @@ def get_args_and_arrays(knl):
     n_elem = None
     nx = nr = nf = None
     n_in = n_out = None
-    sizes = frozenset()
+    sizes = set()
     # n_dof_arrays = 0
+
     for arg in list(arg_dict.values()):
         if arg.name in write_deps and len(arg.shape) == 2:
             n_elem, n_out = arg.shape
@@ -786,7 +819,7 @@ def get_args_and_arrays(knl):
 
     # Rather pointless to intersect. We already check if they are in read_deps
     # read_jdof_arrays = read_deps & frozenset(jdof_arrays)
-    return frozendict(arg_dict), frozenset(jdof_arrays), frozenset(face_dof_arrays), n_in
+    return frozendict(arg_dict), frozenset(jdof_arrays), frozenset(face_dof_arrays)#, n_in
 
 
 @memoize
@@ -860,12 +893,17 @@ def get_inames(knl):
 # Should prefetch just be added to params?
 
 
-def get_trans_list(knl, params, prefetch=True):
+def get_trans_list(knl, params, prefetch=True, group_idof=True, iel_ilp=True, idof_ilp=True):
+
+    # May be able to use knl.get_constant_iname_length to simplify the code a bit.
 
     e, i, j, x, f, r = get_inames(knl)
-    arg_dict, read_jdof_arrays, face_dof_arrays, n_in = get_args_and_arrays(
+    arg_dict, read_jdof_arrays, face_dof_arrays = get_args_and_arrays(
         knl)
 
+    n_elem = knl.default_entrypoint.get_constant_iname_length(e)
+    n_out = knl.default_entrypoint.get_constant_iname_length(i)
+    n_in = knl.default_entrypoint.get_constant_iname_length(j)
     # Figure out the number of batches
 
     trans_list = []
@@ -888,41 +926,60 @@ def get_trans_list(knl, params, prefetch=True):
 
     # """
     g0 = "g.0"
-    g1 = "g.1"
+    g1 = "g.1" if group_idof else "unr"  #"g.1" 
     l0 = "l.0"
     l1 = "l.1"
+    ilp0 = "ilp" if iel_ilp else "unr"
+    ilp1 = "ilp" if idof_ilp else "unr"
     unr = "unr"
     prefetch_tag = "l.auto"
     ilp = "ilp"
     # """
 
     # TODO: Change this to a frozendict or immutable map for easier legibility
-    slabs = (0, 1) if nbatches == 1 else (0, 0)
     # For some reason this isn't correctly seeing a j=0 case.
     # It probably isn't even worth tuning those kernels...
     # If there is a zero length dimension then don't transform
     if not kio == 0 or iio == 0 or ji == 0 or iii == 0 or kii == 0:
-        if kio != kii:
+
+        if False:#kii >= n_elem:
+            # Single global work group - nm, can't schedule without a global axis
+            trans_list.append(("tag_inames", (((f"{e}", l0,),),),))
+            e_prefetch_str = f"{e}"
+        elif kio == kii:
+            # No potential for ilp
+            #trans_list.append(("split_iname", (f"{e}", kio,),
+            #                   (("outer_tag", g0,), ("inner_tag", l0,), ("slabs", (0, 0,),),),))
+            ko_slabs = (0,0) if n_elem % kio == 0 or nbatches > 1 else (0,1)
             trans_list.append(("split_iname", (f"{e}", kio,),
-                               (("outer_tag", g0,), ("slabs", slabs,),),))
-            trans_list.append(("split_iname", (f"{e}_inner", kii,),
-                               (("outer_tag", ilp,), ("inner_tag", l0,), ("slabs", slabs,),),))
-            # prefetch_str = f"{j},{e}_inner_outer,{e}_inner_inner"
+                               (("outer_tag", g0,), ("inner_tag", l0,), ("slabs", ko_slabs,),),))
+            e_prefetch_str = f"{e}_inner"
         else:
+            ko_slabs = (0,0) if n_elem % kio == 0 or nbatches > 1 else (0,1)
+            kio_slabs = (0,0) if n_elem % kii == 0 or nbatches > 1 else (0,1)
             trans_list.append(("split_iname", (f"{e}", kio,),
-                               (("outer_tag", g0,), ("inner_tag", l0,), ("slabs", (0, 0,),),),))
+                               (("outer_tag", g0,), ("slabs", ko_slabs,),),))
+            trans_list.append(("split_iname", (f"{e}_inner", kii,),
+                               (("outer_tag", ilp0,), ("inner_tag", l0,), ("slabs", kio_slabs,),),))
+            e_prefetch_str = f"{e}_inner_outer,{e}_inner_inner"
+            # prefetch_str = f"{j},{e}_inner_outer,{e}_inner_inner"
             # prefetch_str = f"{j},{e}_inner"
-        if iio != iii:
+
+        if iii >= n_out:
+            # Single global work group
+            trans_list.append(("tag_inames", (((f"{i}", l1,),),),))
+        elif iio == iii:
+            io_slabs = (0,0) if n_out % iio == 0 or nbatches > 1 else (0,1)
             trans_list.append(("split_iname", (f"{i}", iio,),
-                               (("outer_tag", g1,), ("slabs", (0, 0,),),),))
-            # In theory this should be (0,0)
+                           (("outer_tag", g1,), ("inner_tag", l1,), ("slabs", io_slabs,),),)) 
+        else:
+            io_slabs = (0,0) if n_out % iio == 0 or nbatches > 1 else (0,1)
+            iio_slabs = (0,0) if n_out % iii == 0 or nbatches > 1 else (0,1)
+            trans_list.append(("split_iname", (f"{i}", iio,),
+                               (("outer_tag", g1,), ("slabs", io_slabs,),),))
             # The ilp tag can be problematic with multiple independent blocks https://github.com/inducer/loopy/issues/418
             trans_list.append(("split_iname", (f"{i}_inner", iii,),
-                               (("outer_tag", ilp,), ("inner_tag", l1,), ("slabs", (0, 0,),),),))
-        else:
-            trans_list.append(("split_iname", (f"{i}", iio,),
-                               (("outer_tag", g1,), ("inner_tag", l1,), ("slabs", (0, 0,),),),))
-
+                               (("outer_tag", ilp1,), ("inner_tag", l1,), ("slabs", iio_slabs,),),))
         # Should the i loop have (0,1) slabs for both?
 
         # print("Splitting reduction iname disabled. Re-enable when finished debugging")
@@ -952,10 +1009,11 @@ def get_trans_list(knl, params, prefetch=True):
             # No point in prefetching if there is a single array. There is no data re-use.
             # Prefetching breaks in this case
 
-            if n_in == 1:
-                j_prefetch_str = ""
-            else:
-                j_prefetch_str = f"{j},"
+            j_prefetch_str = "" if n_in == 1 else f"{j},"
+            #if n_in == 1:
+            #    j_prefetch_str = ""
+            #else:
+            #    j_prefetch_str = f"{j},"
                 # j_prefetch_str = f"{j}_outer,{j}_inner,"
 
             # print(len(read_jdof_arrays))
@@ -970,11 +1028,14 @@ def get_trans_list(knl, params, prefetch=True):
                 strides = [dim_tag.stride for dim_tag in arg_dict[arg].dim_tags if isinstance(
                     dim_tag, lp.kernel.array.FixedStrideArrayDimTag)]
                 order_str = "f,f" if strides[0] < strides[1] else "c,c"
-                if kio != kii:
-                    prefetch_str = f"{j_prefetch_str}{e}_inner_outer,{e}_inner_inner"
+
+                prefetch_str = j_prefetch_str + e_prefetch_str
+
+                #if kio != kii:
+                    #prefetch_str = f"{j_prefetch_str}{e}_inner_outer,{e}_inner_inner"
                     # prefetch_str = f"{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
-                else:
-                    prefetch_str = f"{j_prefetch_str}{e}_inner"
+                #else:
+                    #prefetch_str = f"{j_prefetch_str}{e}_inner"
                     # prefetch_str = f"{j},{e}_inner_outer"
                     # prefetch_str = f"{j}_outer,{j}_inner,{e}_inner"
 
@@ -987,13 +1048,15 @@ def get_trans_list(knl, params, prefetch=True):
             for arg in face_dof_arrays:
                 # Stick with the default ordering for now. For fortran ordering
                 # slap an order tag on it.
-                if kio != kii:
-                    prefetch_str = f"{f},{j_prefetch_str}{e}_inner_outer,{e}_inner_inner"
+                #if kio != kii:
+                #    prefetch_str = f"{f},{j_prefetch_str}{e}_inner_outer,{e}_inner_inner"
                     # prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner_outer,{e}_inner_inner"
-                else:
-                    prefetch_str = f"{f},{j_prefetch_str}{e}_inner"
+                #else:
+                #    prefetch_str = f"{f},{j_prefetch_str}{e}_inner"
                     # prefetch_str = f"{f},{j},{e}_inner_outer"
                     # prefetch_str = f"{f},{j}_outer,{j}_inner,{e}_inner"
+
+                prefetch_str = f"{f}," + j_prefetch_str + e_prefetch_str
 
                 trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
                                    (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))

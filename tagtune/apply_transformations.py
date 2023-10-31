@@ -1622,6 +1622,58 @@ def merge_prefetch_inames(knl, prefetch_inames):
 
     return knl
 
+# Has the potential to make a kernel unschedulable if this
+# tangles the dependencies of einsums
+def optimize_batch_ordering(subkernels, batch_size):
+    from scipy.sparse import eye, dok_matrix, block_diag, coo_matrix
+    from scipy.optimize import quadratic_assignment
+
+    if batch_size == 0:
+        batch_size = len(subkernels)
+    batch_size = min(batch_size, len(subkernels))
+    nbatches = np.int32(np.ceil(len(subkernels) / batch_size))
+    total_size = nbatches*batch_size
+
+    # Append Nones so length of subkernels is a multiple of nbatches*batch_size
+
+    subkernel_global_args = []
+    for subkernel in subkernels:
+        args_dict = {arg.name: arg for arg in subkernel.default_entrypoint.args if isinstance(arg, lp.ArrayArg)}
+        subkernel_global_args.append(args_dict)
+        
+
+    W = dok_matrix((total_size,total_size),dtype=np.int32)
+
+    for i in range(len(subkernels)-1):
+        for j in range(i+1, len(subkernels)):
+            shared_args = set(subkernel_global_args[i].keys()) & set(subkernel_global_args[j].keys())
+            # Sum up the total bytes of shared arguments
+            shared_bytes = np.sum([np.product(subkernel_global_args[i][arg_name].shape)*subkernel_global_args[i][arg_name].dtype.dtype.itemsize for arg_name in shared_args])
+            W[i,j] = shared_bytes
+            W[j,i] = shared_bytes
+
+    diag_block = coo_matrix(np.ones((batch_size,batch_size), dtype=np.int32) - eye(batch_size, dtype=np.int32))
+    D = block_diag([diag_block]*nbatches)
+    res = quadratic_assignment(W.A, D.A, options={"maximize": True})
+
+    
+
+    print(nbatches, batch_size)
+    print(W.A)
+    print(D.A)
+    print(res)
+    assert np.allclose(np.array(res.col_ind)[:total_size - batch_size], np.arange(len(res.col_ind))[:total_size - batch_size])
+    #from time import sleep
+    #time.sleep(5)
+
+    if False:
+        # Refine solution further
+        guess = np.array([np.arange(len(W)), res.col_ind]).T
+        res = quadratic_assignment(W.A, D.A, method="2opt", options={"partial_guess": guess, "maximize": True})
+        
+    #subkernels = subkernels + [None]*(total_size - len(subkernels))
+    #exit()
+    
 
 def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
     import islpy as isl
@@ -1630,6 +1682,10 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
         batch_size = len(subkernels)
     batch_size = min(batch_size, len(subkernels))
     nbatches = np.int32(np.ceil(len(subkernels) / batch_size))
+
+    # Kaushik did a good job with this apparently. 
+    #if batch_size >= 2 and batch_size <= len(subkernels):
+    #    optimize_batch_ordering(subkernels, batch_size)
 
     insns = []
     insn_dict = {}
@@ -2152,7 +2208,7 @@ def apply_transformation_list(tunit, transformations):
     print("BEGINNING TRANSFORMATION")
     start = time.time()
 
-    print(transformations)
+    #print(transformations)
     add_prefetches = [t for t in transformations if t[0] == "add_prefetch"]
 
     batch_size = 0

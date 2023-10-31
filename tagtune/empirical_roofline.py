@@ -625,6 +625,10 @@ def get_indices_from_queue(queue):
 
 
 def get_max_bandwidth_clpeak(queue=None, platform_number=0, device_number=0):
+
+    if queue is not None:
+        platform_number, device_number = get_indices_from_queue(queue)
+
     print("", flush=True)
     output = check_output(shlex.split(
         f"clpeak -p {platform_number} -d {device_number} --global-bandwidth"))
@@ -639,6 +643,7 @@ def get_max_bandwidth_clpeak(queue=None, platform_number=0, device_number=0):
 
 
 def get_max_flop_rate_clpeak(dtype, queue=None, platform_number=0, device_number=0):
+
     if queue is not None:
         platform_number, device_number = get_indices_from_queue(queue)
 
@@ -657,6 +662,7 @@ def get_max_flop_rate_clpeak(dtype, queue=None, platform_number=0, device_number
         f"clpeak -p {platform_number} -d {device_number} --compute-{float_str}"))
 
     output_split = output.decode().split()
+    print(output_split)
     flop_rates = []
     for ind, entry in enumerate(output_split):
         # Work around for message about half precision support in dp test

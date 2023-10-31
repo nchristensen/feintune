@@ -6,7 +6,7 @@ from tagtune.run_tests import generic_test, run_single_param_set_v2
 from autotune import TuningProblem
 from autotune.space import *
 from skopt.space import Real
-from ytopt.search.ambs import AMBS
+from ytopt.search.ambs import AMBS, LibEnsembleTuningProblem, LibEnsembleAMBS
 from frozendict import frozendict
 # from ytopt.search.async_search import AsyncSearch
 
@@ -20,28 +20,36 @@ from tagtune.utils import convert, load_hjson, dump_hjson
 from hashlib import md5
 from random import shuffle
 
+numeric_type = Union[np.number, float, int]
 
 queue = None
-
+exec_id = 0
 
 def set_queue(exec_id, platform_num):
+    #import pyopencl as cl
 
     global queue
     if queue is not None:
         raise ValueError("queue is already set")
     platforms = cl.get_platforms()
-
+    print(platforms)
+    print(platform_num)
+    print(exec_id)
+    
     gpu_devices = platforms[platform_num].get_devices(
         device_type=cl.device_type.GPU)
 
     # Not sure if gpu_devices has a defined order, so sort it by bus id to prevent
-    # oversubscription of a GPU
+    # oversubscription of a GPU.
+    # Need to check if this works.
+    """
     if "NVIDIA" in gpu_devices[0].vendor:
         gpu_devices = sorted(gpu_devices, key=lambda d: d.pci_bus_id_nv)
     elif "Advanced Micro Devices" in d.vendor:
         gpu_devices = sorted(gpu_devices, key=lambda d: d.topology_amd.bus)
     else:
         print("Unrecognized vendor, not sorting GPU list")
+    """
 
     ctx = cl.Context(devices=[gpu_devices[exec_id % len(gpu_devices)]])
     queue = cl.CommandQueue(
@@ -50,9 +58,6 @@ def set_queue(exec_id, platform_num):
 
 def get_test_id(tlist):
     return md5(str(tlist).encode()).hexdigest()
-
-
-exec_id = 0
 
 
 def test(args):
@@ -105,13 +110,10 @@ def test(args):
                                      device_latency=args["device_latency"],
                                      timeout=args["timeout"],
                                      method="thread",  # "subprocess",#None
-                                     run_single_batch=True,
+                                     run_single_batch=False,
                                      error_return_time=args["timeout"])
 
     return args["test_id"], result
-
-
-numeric_type = Union[np.number, float, int]
 
 
 @dataclass
@@ -138,7 +140,10 @@ class ObjectiveFunction(object):
                   p["iio"]*p["iii"],
                   p["iii"],
                   p["ji"],)
-        tlist = get_trans_list(self.knl, params, prefetch=p["prefetch"])
+
+        tlist = get_trans_list(self.knl, params, prefetch=p["prefetch"], group_idof=p["group_idofs"],
+                                iel_ilp=p["iel_ilp"], idof_ilp="idof_ilp")
+
         test_id = get_test_id(tlist)
 
         print("BEGINNING TEST")
@@ -164,8 +169,8 @@ class ObjectiveFunction(object):
         test_id, result = test(args)
 
         print("ENDING TEST")
-        # results = run_single_param_set_v2(queue, knl, tlist, max_flop_rate=max_flop_rate,
-        #            device_memory_bandwidth=device_memory_bandwidth, device_latency=device_latency, timeout=timeout)
+        #if result["data"]["avg_time_predicted"] > self.timeout:
+        #    exit()
 
         # Would be helpful if could return all of the data instead of only avg_time
         return result["data"]["avg_time_predicted"]
@@ -212,7 +217,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
     # Could have the arg sizes be a parameter and then fix the sizes for the kernel that must be run
     # (slightly different config space for each rank)
 
-    at_problem = TuningProblem(
+    at_problem = LibEnsembleTuningProblem(
         task_space=None,
         input_space=input_space,
         output_space=output_space,
@@ -251,7 +256,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
             # assert column_names[-4] == "num_elements"
             for row in row_list[1:]:
                 p = dict(zip(column_names, [int(item) for item in row[:-2]]))
-                if float(row[-2]) < timeout:  # Eliminate
+                if float(row[-2]) <= timeout:  # Eliminate
                     initial_observations.append((p, float(row[-2]),))
                 # if int(row[-4]) == nelem:
                 #    pre_existing_evals += 1
@@ -261,12 +266,19 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         print("No saved data found.")
         num_random = 2
 
+    pre_existing_evals = len(initial_observations)
     max_evals = min(max_evals, pre_existing_evals + required_new_evals)
 
     # Note that the initial observations count toward max_evals.
     # --Is this actually true?
+    #searcher = LibEnsembleAMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner,
+    #                set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations),
+    #                libE_specs={"comms": "local", "nworkers": 2})
+
     searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner,
                     set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations)
+
+
 
     if pre_existing_evals < max_evals:
         print("==========BEGINNING SEARCH=============")
@@ -296,6 +308,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                 # batch_size,iii,iio,ji,kii,kio,objective,elapsed_sec
                 p = dict(zip(column_names, [int(item)
                          for item in rows[0][:-2]]))
+                #p = dict(zip(column_names, rows[0]))
 
                 params = (p["batch_size"],
                           p["kio"]*p["kii"],
@@ -304,8 +317,8 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                           p["iii"],
                           p["ji"],)
 
-                trans_list = get_trans_list(
-                    knl, params, prefetch=p["prefetch"])
+                trans_list = get_trans_list(knl, params, prefetch=p["prefetch"], group_idof=p["group_idofs"],
+                                iel_ilp=p["iel_ilp"], idof_ilp="idof_ilp")
 
                 """
                 test_id = get_test_id(trans_list)
@@ -353,7 +366,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                                                     device_memory_bandwidth=device_memory_bandwidth,
                                                     device_latency=device_latency,
                                                     timeout=timeout,
-                                                    method="thread",  # "subprocess",
+                                                    method=None,#"thread",  # "subprocess",
                                                     run_single_batch=True,
                                                     error_return_time=timeout)
                     if tdict["data"]["avg_time_predicted"] < timeout:
@@ -373,7 +386,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                                                                 device_memory_bandwidth=device_memory_bandwidth,
                                                                 device_latency=device_latency,
                                                                 timeout=None,
-                                                                method="thread",  # "subprocess",
+                                                                method=None,#"thread",  # "subprocess",
                                                                 run_single_batch=False,
                                                                 error_return_time=timeout)
                                 print("DONE GENERATING AND EXECUTING FULL KERNEL")
@@ -399,7 +412,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                                                     device_memory_bandwidth=device_memory_bandwidth,
                                                     device_latency=device_latency,
                                                     timeout=None,
-                                                    method="thread",  # "subprocess",
+                                                    method=None,#"thread",  # "subprocess",
                                                     run_single_batch=False,
                                                     error_return_time=timeout)
                     print("DONE GENERATING AND EXECUTING DEFAULT TRANSFORMED KERNEL")
