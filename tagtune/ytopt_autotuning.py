@@ -1,8 +1,8 @@
 import mpi4py.MPI as MPI
 from dataclasses import dataclass
 from typing import Union, Optional
-from tagtune.generators import get_trans_list
-from tagtune.run_tests import generic_test, run_single_param_set_v2
+from feintune.generators import get_trans_list
+from feintune.run_tests import generic_test, run_single_param_set_v2
 from autotune import TuningProblem
 from autotune.space import *
 from skopt.space import Real
@@ -16,7 +16,7 @@ import numpy as np
 import os
 import loopy as lp
 from os.path import exists
-from tagtune.utils import convert, load_hjson, dump_hjson
+from feintune.utils import convert, load_hjson, dump_hjson
 from hashlib import md5
 from random import shuffle
 
@@ -181,7 +181,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
     global exec_id
 
-    from tagtune.utils import unique_program_id
+    from feintune.utils import unique_program_id
     if program_id is None:
         pid = unique_program_id(knl, attempt_normalization=False)
     else:
@@ -348,7 +348,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                 # In particular, if the timout time is None or infinity
                 update_hjson = True
                 if exists(hjson_file_str):
-                    from tagtune.utils import load_hjson
+                    from feintune.utils import load_hjson
                     current_hjson = load_hjson(hjson_file_str)
                     current_transformations = current_hjson["transformations"]
                     print("CURRENT TRANSFORMATIONS")
@@ -370,7 +370,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                                                     run_single_batch=True,
                                                     error_return_time=timeout)
                     if tdict["data"]["avg_time_predicted"] < timeout:
-                        from tagtune.utils import dump_hjson
+                        from feintune.utils import dump_hjson
                         dump_hjson(hjson_file_str, tdict)
 
                         # If the single batch kernel didn't time out
@@ -418,7 +418,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                     print("DONE GENERATING AND EXECUTING DEFAULT TRANSFORMED KERNEL")
 
                     if tdict["data"]["avg_time_predicted"] < timeout:
-                        from tagtune.utils import dump_hjson
+                        from feintune.utils import dump_hjson
                         dump_hjson(hjson_file_str, tdict)
                     else:
                         print("Run return error return time. Not dumping to hjson.")

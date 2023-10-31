@@ -1,6 +1,6 @@
-from tagtune.grudge_tags import (IsDOFArray, IsSepVecDOFArray, IsOpArray,
+from feintune.grudge_tags import (IsDOFArray, IsSepVecDOFArray, IsOpArray,
                                  IsSepVecOpArray, IsFaceDOFArray, IsFaceMassOpArray, IsVecDOFArray, IsVecOpArray, IsFourAxisDOFArray)
-from tagtune.apply_transformations import (gen_diff_knl, gen_diff_knl_fortran2,
+from feintune.apply_transformations import (gen_diff_knl, gen_diff_knl_fortran2,
                                            apply_transformation_list, gen_elwise_linear_knl, gen_face_mass_knl, gen_face_mass_knl_merged)
 import loopy.options
 import sys
@@ -328,7 +328,7 @@ def measure_execution_latency(queue, tunit, arg_dict, nruns, warmup_runs):
 
     otunit = lp.set_argument_order(tunit, arg_names)
     code = lp.generate_code_v2(otunit).device_code()
-    from tagtune.matching_brackets import matching_brackets_dict
+    from feintune.matching_brackets import matching_brackets_dict
     fn_brackets = sorted(matching_brackets_dict(
         code, opening_bracket="{", closing_bracket="}").items(), key=lambda l: l[1], reverse=True)[0]
 
@@ -958,9 +958,9 @@ def run_subprocess_with_timeout(queue, knl, test_fn, timeout=None, error_return_
 
     # unpickle_and_run_test(filename)
 
-    import tagtune
+    import feintune
     import os
-    dirname = os.path.dirname(tagtune.__file__)
+    dirname = os.path.dirname(feintune.__file__)
     f = os.path.join(dirname, "run_tests.py")
 
     start = time.time()

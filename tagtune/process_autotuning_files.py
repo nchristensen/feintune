@@ -1,4 +1,4 @@
-from tagtune.utils import load_hjson
+from feintune.utils import load_hjson
 from scipy.stats import gmean as average
 import os
 import pandas as pd

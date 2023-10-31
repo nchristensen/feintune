@@ -1,7 +1,7 @@
 # , einsum4to2_kernel_tlist_generator_v2
 from .apply_transformations import get_einsums, get_einsum_counts, get_einsum_types
-from tagtune.generators import einsum3to2_kernel_tlist_generator_v2
-from tagtune.run_tests import run_single_param_set_v2, generic_test
+from feintune.generators import einsum3to2_kernel_tlist_generator_v2
+from feintune.run_tests import run_single_param_set_v2, generic_test
 import numpy as np
 import pickle
 import loopy as lp
@@ -10,10 +10,10 @@ from meshmode.array_context import EinsumTag
 import pyopencl as cl
 import os
 from os.path import exists
-from tagtune.utils import unique_program_id, convert, load_hjson, dump_hjson, get_domain_list, get_indirection_arrays
+from feintune.utils import unique_program_id, convert, load_hjson, dump_hjson, get_domain_list, get_indirection_arrays
 import hjson
-from tagtune.generators import createConfigSpace
-from tagtune.ytopt_autotuning import ytopt_tuning
+from feintune.generators import createConfigSpace
+from feintune.ytopt_autotuning import ytopt_tuning
 from time import time
 import logging
 
@@ -24,9 +24,9 @@ if use_charm:
     from charm4py import entry_method, chare, Chare, Array, Reducer, Future, charm
     from charm4py.pool import PoolScheduler, Pool
     from charm4py.charm import Charm, CharmRemote
-    from tagtune.parallel_autotuning_charm4py_v2 import parallel_autotune
+    from feintune.parallel_autotuning_charm4py_v2 import parallel_autotune
 else:
-    from tagtune.parallel_autotuning_mpi4py_v2 import parallel_autotune
+    from feintune.parallel_autotuning_mpi4py_v2 import parallel_autotune
     import mpi4py.MPI as MPI
     comm = MPI.COMM_WORLD
 
@@ -953,7 +953,7 @@ def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
 
 
 def get_device_roofline_data(queue):
-    import tagtune.empirical_roofline as er
+    import feintune.empirical_roofline as er
     results_list = er.loopy_bandwidth_test(
         queue, fast=True, print_results=True, fill_on_device=True)
     device_latency = er.get_min_device_latency(results_list)
@@ -1230,7 +1230,7 @@ def main(args):
             print("Done collecting tunits")
             # ID changes based on whether python was run with -O
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
-            from tagtune.run_tests import get_knl_flops
+            from feintune.run_tests import get_knl_flops
             sk_list = sorted(sk_list, key=lambda e: get_knl_flops(
                 e["sk"]), reverse=False)[146:]#[112:]
             # sk_list = [tunit_dict[1]["tunit"] for tunit_dict in tunit_dicts]

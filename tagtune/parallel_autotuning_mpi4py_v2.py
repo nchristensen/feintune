@@ -12,8 +12,8 @@ import os
 # import grudge.grudge_array_context as gac
 import loopy as lp
 from os.path import exists
-from tagtune.run_tests import run_single_param_set_v2, generic_test
-from tagtune.utils import convert, dump_hjson, load_hjson
+from feintune.run_tests import run_single_param_set_v2, generic_test
+from feintune.utils import convert, dump_hjson, load_hjson
 # from grudge.execution import diff_prg, elwise_linear
 import mpi4py.MPI as MPI
 from mpi4py.futures import MPIPoolExecutor, MPICommExecutor
@@ -190,7 +190,7 @@ def parallel_autotune(knl, platform_id, trans_list_list, program_id=None, max_fl
 
     # knl = gac.set_memory_layout(knl)
     if program_id is None:
-        from tagtune.utils import unique_program_id
+        from feintune.utils import unique_program_id
         pid = unique_program_id(knl)
     else:
         pid = program_id

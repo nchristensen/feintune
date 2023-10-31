@@ -1,5 +1,5 @@
 from pytools.tag import Tag, UniqueTag
-from tagtune.transform_metadata import IsDOFArray, IsOpArray, ParameterValue, EinsumArgsTags
+from feintune.transform_metadata import IsDOFArray, IsOpArray, ParameterValue, EinsumArgsTags
 # from meshmode.transform_metadata import IsDOFArray, IsOpArray, ParameterValue, EinsumArgsTags
 
 

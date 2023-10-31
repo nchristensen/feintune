@@ -1,19 +1,19 @@
 from loopy.translation_unit import for_each_kernel
-from tagtune.qprofile import qprofile, qinstrument
+from feintune.qprofile import qprofile, qinstrument
 import loopy.options
 import numpy as np
 from pytools import memoize_in, memoize
 from meshmode.array_context import EinsumTag
 # decouple_domain can likely be removed.
-from tagtune.decouple_domain import decouple_domain
-from tagtune.utils import get_domain_list, get_iname_limits
+from feintune.decouple_domain import decouple_domain
+from feintune.utils import get_domain_list, get_iname_limits
 from frozendict import frozendict
 # import pyopencl as cl
 # import pyopencl.array
 # import pyopencl.clrandom
 
 import loopy as lp
-from tagtune.grudge_tags import IsDOFArray, ParameterValue
+from feintune.grudge_tags import IsDOFArray, ParameterValue
 # from loopy.version import LOOPY_USE_LANGUAGE_VERSION_2018_2
 # from loopy.kernel.data import AddressSpace
 
@@ -1542,7 +1542,7 @@ def merge_prefetch_inames(knl, prefetch_inames):
     #print(key)
     if key in prefetch_iname_dict:
         existing_fetch_inames = d[key]
-        #from tagtune.utils import get_domain_list
+        #from feintune.utils import get_domain_list
         #dl = dict(get_domain_list(subkernel))
         #print("KEYS", dl.keys())
         #for entry in dl.keys():
@@ -1776,7 +1776,7 @@ def recompose_batched_einsum_kernel(orig_tunit, subkernels, batch_size=0):
             # For some reason it won't otherwise consistently delete the unused inames.
             if any([iname.endswith(f"_b{batch}") for iname in sk.inames.keys()]):
                 unused = [iname for iname in sk.inames.keys() if not iname.endswith(f"_b{batch}")]
-                from tagtune.decouple_domain import decouple_domain
+                from feintune.decouple_domain import decouple_domain
                 if len(unused) > 0:
                     sk = decouple_domain(sk, unused, frozenset())
                 sk = lp.remove_unused_inames(sk, inames=unused)
@@ -2129,7 +2129,7 @@ def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
                 if True:
                     if key in prefetch_iname_dict:
                         existing_fetch_inames = prefetch_iname_dict[key]
-                        #from tagtune.utils import get_domain_list
+                        #from feintune.utils import get_domain_list
                         #dl = dict(get_domain_list(subkernel))
                         #print("KEYS", dl.keys())
                         #for entry in dl.keys():

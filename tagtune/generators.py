@@ -2,12 +2,12 @@ import numpy as np
 import loopy as lp
 from frozendict import frozendict
 from meshmode.transform_metadata import FirstAxisIsElementsTag
-from tagtune.grudge_tags import (IsDOFArray, IsSepVecDOFArray,
+from feintune.grudge_tags import (IsDOFArray, IsSepVecDOFArray,
                                  IsOpArray, IsSepVecOpArray, IsFaceDOFArray, IsFaceMassOpArray,
                                  IsVecDOFArray, IsVecOpArray, IsFourAxisDOFArray)
 from pytools import memoize
 from .apply_transformations import get_einsums
-from tagtune.utils import get_indirection_arrays
+from feintune.utils import get_indirection_arrays
 
 
 def k_inner_inner_options(start_val=None):
@@ -719,7 +719,7 @@ def get_args_and_arrays(knl):
             break
 
     # """
-    from tagtune.matching_brackets import matching_brackets_dict
+    from feintune.matching_brackets import matching_brackets_dict
     arg_names = set(arg_dict.keys())
     for i_num, instr in enumerate(knl.default_entrypoint.instructions):
         # print("INSTRUCTION", i_num)

@@ -3,7 +3,7 @@
 import numpy as np
 from pandas import read_csv
 import matplotlib.pyplot as plt
-from tagtune.utils import load_hjson
+from feintune.utils import load_hjson
 
 kernel_id = "7344480911b9231871c60bf856e21f6a3d3a2a30f1d106646db2dab7e5deb2ef"
 
