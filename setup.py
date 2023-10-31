@@ -4,13 +4,13 @@
 
 from distutils.core import setup
 
-setup(name='Tagtune',
+setup(name='Feintune',
       version='2023.0.0',
-      description='Autotuner for tagged Loopy kernels',
+      description='Autotuner for batched einsum Loopy kernels',
       # author='',
       # author_email='',
       # url='',
-      packages=['tagtune'],
+      packages=['feintune'],
       install_requires=[
           'ConfigSpace',
           'dh_scikit_optimize',
