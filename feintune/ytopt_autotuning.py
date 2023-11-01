@@ -123,7 +123,7 @@ def test(args):
 
     return args["test_id"], result
 
-
+# For libensemble to be robust, this needs to be called by an executor I think.
 @dataclass
 class ObjectiveFunction(object):
 
