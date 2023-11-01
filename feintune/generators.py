@@ -496,21 +496,27 @@ def createConfigSpace(queue, knl):
     # In the order one tests, a transformation with prefetching was always chosen, so
     # this may not affect the quality of the autotuning results.
     prefetch_hyp = cs.OrdinalHyperparameter(
-        "prefetch", [0, 1] if prefetch else [0], default_value=1)
+        "prefetch", [0, 1] if prefetch else [0], default_value=0)
     a_s.add_hyperparameter(prefetch_hyp)
 
     # More esoteric hyperparameters
     group_idofs_hyp = cs.OrdinalHyperparameter(
-        "group_idofs", [0, 1], default_value=1)
+        "group_idofs", [0, 1], default_value=0)
     a_s.add_hyperparameter(group_idofs_hyp)
 
     iel_ilp_hyp = cs.OrdinalHyperparameter(
-        "iel_ilp", [0, 1], default_value=1)
+        "iel_ilp", [0, 1], default_value=0)
     a_s.add_hyperparameter(iel_ilp_hyp)
 
     idof_ilp_hyp = cs.OrdinalHyperparameter(
-        "idof_ilp", [0, 1], default_value=1)
+        "idof_ilp", [0, 1], default_value=0)
     a_s.add_hyperparameter(idof_ilp_hyp)
+
+    swap_local_hyp = cs.OrdinalHyperparameter(
+        "swap_local", [0, 1], default_value=0)
+    a_s.add_hyperparameter(idof_ilp_hyp)
+
+
 
 
     # Hyperparameter for the number of elements. This is set to be a constant, but
@@ -652,12 +658,13 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
     iel_ilp_vals = [0,1]
     idof_ilp_vals = [0,1]
     group_idof_vals = [0,1]
+    swap_local_vals = [0,1]
 
     from itertools import product
     trans_list_list = []
-    iterator = product(parameter_list, prefetch_vals, iel_ilp_vals, idof_ilp_vals, group_idof_vals)
-    for params, prefetch, iel_ilp, idof_ilp, group_idof in iterator:
-        trans_list_list.append(get_trans_list(knl, params, prefetch=prefetch, iel_ilp=iel_ilp, idof_ilp=idof_ilp, group_idof=group_idof))
+    iterator = product(parameter_list, prefetch_vals, iel_ilp_vals, idof_ilp_vals, group_idof_vals, swap_local_vals)
+    for params, prefetch, iel_ilp, idof_ilp, group_idof, swap_local in iterator:
+        trans_list_list.append(get_trans_list(knl, params, prefetch=prefetch, iel_ilp=iel_ilp, idof_ilp=idof_ilp, group_idof=group_idof, swap_local=swap_local))
 
     """
     trans_list_list = []
@@ -893,7 +900,7 @@ def get_inames(knl):
 # Should prefetch just be added to params?
 
 
-def get_trans_list(knl, params, prefetch=True, group_idof=True, iel_ilp=True, idof_ilp=True):
+def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp=False, idof_ilp=False, swap_local=False):
 
     # May be able to use knl.get_constant_iname_length to simplify the code a bit.
 
@@ -927,8 +934,8 @@ def get_trans_list(knl, params, prefetch=True, group_idof=True, iel_ilp=True, id
     # """
     g0 = "g.0"
     g1 = "g.1" if group_idof else "unr"  #"g.1" 
-    l0 = "l.0"
-    l1 = "l.1"
+    l0 = "l.0" if not swap_local else "l.1"
+    l1 = "l.1" if not swap_local else "l.0"
     ilp0 = "ilp" if iel_ilp else "unr"
     ilp1 = "ilp" if idof_ilp else "unr"
     unr = "unr"

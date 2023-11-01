@@ -150,7 +150,7 @@ class ObjectiveFunction(object):
                   p["ji"],)
 
         tlist = get_trans_list(self.knl, params, prefetch=p["prefetch"], group_idof=p["group_idofs"],
-                                iel_ilp=p["iel_ilp"], idof_ilp="idof_ilp")
+                                iel_ilp=p["iel_ilp"], idof_ilp=p["idof_ilp"], swap_local=p["swap_local"])
 
         test_id = get_test_id(tlist)
 

@@ -585,6 +585,8 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
             # Won't work with charm. But the charm4py executor is broken anyway.
             if comm.Get_size() <= 1:
                 eval_str = "threadpool"
+            elif comm.Get_size() >= 3:
+                eval_str = "libensemble"
             else:
                 eval_str = "mpi_comm_executor"
                 # eval_str = "mpi_pool_executor"
