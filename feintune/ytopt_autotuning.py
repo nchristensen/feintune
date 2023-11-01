@@ -333,7 +333,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                           p["ji"],)
 
                 trans_list = get_trans_list(knl, params, prefetch=p["prefetch"], group_idof=p["group_idofs"],
-                                iel_ilp=p["iel_ilp"], idof_ilp="idof_ilp")
+                                iel_ilp=p["iel_ilp"], idof_ilp=p["idof_ilp"], swap_local=p["swap_local"])
 
                 """
                 test_id = get_test_id(trans_list)
@@ -362,6 +362,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                 # Kernels that use too much memory still aren't prevented from running.
                 # In particular, if the timout time is None or infinity
                 update_hjson = True
+                """ # Broken currently.
                 if exists(hjson_file_str):
                     from feintune.utils import load_hjson
                     current_hjson = load_hjson(hjson_file_str)
@@ -374,6 +375,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                         update_hjson = False
                         print("Setting hjson update to false")
                         # exit()
+                """
 
                 if update_hjson:
                     tdict = run_single_param_set_v2(in_queue, knl, trans_list, generic_test,
