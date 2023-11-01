@@ -1,4 +1,5 @@
 import mpi4py.MPI as MPI
+comm = MPI.COMM_WORLD
 from dataclasses import dataclass
 from typing import Union, Optional
 from feintune.generators import get_trans_list
@@ -7,11 +8,13 @@ from autotune import TuningProblem
 from autotune.space import *
 from skopt.space import Real
 from ytopt.search.ambs import AMBS, LibEnsembleTuningProblem, LibEnsembleAMBS
+from ytopt.search import util
+logger = util.conf_logger(__name__)
+
 from frozendict import frozendict
 # from ytopt.search.async_search import AsyncSearch
 
 import hjson
-import pyopencl as cl
 import numpy as np
 import os
 import loopy as lp
@@ -20,13 +23,14 @@ from feintune.utils import convert, load_hjson, dump_hjson
 from hashlib import md5
 from random import shuffle
 
+
 numeric_type = Union[np.number, float, int]
 
 queue = None
 exec_id = 0
 
 def set_queue(exec_id, platform_num):
-    #import pyopencl as cl
+    import pyopencl as cl
 
     global queue
     if queue is not None:
@@ -61,50 +65,52 @@ def get_test_id(tlist):
 
 
 def test(args):
-    global queue
-    global exec_id
-    print(args)
-    # timeout, ((cur_test, total_tests,), (test_id, platform_id, knl, tlist, test_fn, max_flop_rate, device_latency, device_memory_bandwidth,),eval_str) = args
-    # comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
-    # From MPI.PoolExecutor the communicator for the tasks is not COMM_WORLD (this probably doesn't matter though. using COMM_WORLD should prevent
-    # re-use of any GPU?
 
-    eval_str = args["eval_str"]
-    platform_id = args["platform_id"]
-    # print("EVAL STR:", eval_str)
+    if True:
+        global queue
+        global exec_id
+        print(args)
+        # timeout, ((cur_test, total_tests,), (test_id, platform_id, knl, tlist, test_fn, max_flop_rate, device_latency, device_memory_bandwidth,),eval_str) = args
+        # comm = MPI.COMM_WORLD # Assume we're using COMM_WORLD. May need to change this in the future
+        # From MPI.PoolExecutor the communicator for the tasks is not COMM_WORLD (this probably doesn't matter though. using COMM_WORLD should prevent
+        # re-use of any GPU?
 
-    if queue is None:
-        # Maybe can just pass a function as an arg
-        print("Queue is none. Initializing queue")
-        # This is semi-broken because we aren't assured the device list is always
-        # ordered the same, needs to order the devices by some pci_id first
-        # Also, are pids contiguous?
-        if eval_str == "mpi_comm_executor" or eval_str == "mpi_pool_executor":
-            comm = MPI.COMM_WORLD
-            exec_id = comm.Get_rank()
-        elif eval_str == "charm4py_pool_executor":
-            from charm4py import charm
-            exec_id = charm.myPe()
-        elif eval_str == "processpool":
-            from os import getpid
-            exec_id = getpid()
-        elif eval_str == "threadpool":
-            from threading import get_native_id
-            exec_id = get_native_id()
-        else:
-            exec_id = 0
+        eval_str = args["eval_str"]
+        platform_id = args["platform_id"]
+        # print("EVAL STR:", eval_str)
 
-        set_queue(exec_id, platform_id)
+        if queue is None:
+            # Maybe can just pass a function as an arg
+            print("Queue is none. Initializing queue")
+            # This is semi-broken because we aren't assured the device list is always
+            # ordered the same, needs to order the devices by some pci_id first
+            # Also, are pids contiguous?
+            if eval_str in {"mpi_comm_executor", "mpi_pool_executor", "libensemble"}:
+                #comm = MPI.COMM_WORLD
+                exec_id = comm.Get_rank()
+            elif eval_str == "charm4py_pool_executor":
+                from charm4py import charm
+                exec_id = charm.myPe()
+            elif eval_str == "processpool":
+                from os import getpid
+                exec_id = getpid()
+            elif eval_str == "threadpool":
+                from threading import get_native_id
+                exec_id = get_native_id()
+            else:
+                exec_id = 0
 
-        assert queue is not None
+            set_queue(exec_id, platform_id)
 
-    print("EXECUTOR ID", exec_id)
+            assert queue is not None
 
-    cur_test = args["cur_test"]
-    total_tests = args["total_tests"]
+        print("EXECUTOR ID", exec_id)
 
-    # print(f"\nExecuting test {cur_test} of {total_tests}\n")
-    result = run_single_param_set_v2(queue, args["knl"], args["tlist"], args["test_fn"],
+        cur_test = args["cur_test"]
+        total_tests = args["total_tests"]
+
+        # print(f"\nExecuting test {cur_test} of {total_tests}\n")
+        result = run_single_param_set_v2(queue, args["knl"], args["tlist"], args["test_fn"],
                                      max_flop_rate=args["max_flop_rate"],
                                      device_memory_bandwidth=args["device_memory_bandwidth"],
                                      device_latency=args["device_latency"],
@@ -112,6 +118,8 @@ def test(args):
                                      method="thread",  # "subprocess",#None
                                      run_single_batch=False,
                                      error_return_time=args["timeout"])
+    else:
+        result = {"data": {"avg_time_predicted": 0.0}}
 
     return args["test_id"], result
 
@@ -166,15 +174,18 @@ class ObjectiveFunction(object):
         # print(self.knl)
         print(tlist)
 
-        test_id, result = test(args)
+        if True:
 
-        print("ENDING TEST")
-        #if result["data"]["avg_time_predicted"] > self.timeout:
-        #    exit()
+            test_id, result = test(args)
 
-        # Would be helpful if could return all of the data instead of only avg_time
-        return result["data"]["avg_time_predicted"]
+            print("ENDING TEST")
+            #if result["data"]["avg_time_predicted"] > self.timeout:
+            #    exit()
 
+            # Would be helpful if could return all of the data instead of only avg_time
+            return result["data"]["avg_time_predicted"]
+        else:
+            return 0
 
 # TODO: Change default max_evals
 def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, normalized_program_id=None, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, save_path=None, max_evals=10, required_new_evals=0, eval_str="threadpool"):
@@ -200,7 +211,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
     # eval_str = "mpi_comm_executor"
     # eval_str = "mpi_pool_executor"
     # eval_str = "charm4py_pool_executor"
-    # eval_str = "threadpool"
+    #eval_str = "threadpool"
     # eval_str = "processpool"
     # eval_str = "ray"
 
@@ -247,7 +258,6 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
     # nelem = i
 
     # Maybe use pandas instead?
-    pre_existing_evals = 0
     if exists(csv_file_str):
         print(f"Loading saved data from {csv_file_str}")
         with open(csv_file_str) as csvfile:
@@ -271,13 +281,18 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
     # Note that the initial observations count toward max_evals.
     # --Is this actually true?
-    #searcher = LibEnsembleAMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner,
-    #                set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations),
-    #                libE_specs={"comms": "local", "nworkers": 2})
-
-    searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner,
+    if eval_str != "libensemble":
+        searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner,
                     set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations)
+    else:
+        assert comm.Get_size() >= 3
+        searcher = LibEnsembleAMBS(problem=at_problem, output_file_base=output_file_base, learner=learner,
+                    set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations) 
+                    #libE_specs={"nworkers": 2})#, "comms": "local"}) # won't work with opencl
 
+    #print("WAITING AT THIS BARRIER")
+    #comm.Barrier()
+    #exit()
 
 
     if pre_existing_evals < max_evals:
@@ -425,7 +440,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
     if "mpi" in eval_str:
         print("WAITING AT BARRIER")
-        comm = MPI.COMM_WORLD
+        #comm = MPI.COMM_WORLD
         comm.Barrier()
     print("======RETURNING FROM SEARCH========")
     # exit()
