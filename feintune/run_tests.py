@@ -598,7 +598,7 @@ def get_knl_flops(tunit):
 
     tunit = tunit.with_kernel(tunit.default_entrypoint.copy(silenced_warnings=(tunit.default_entrypoint.silenced_warnings
                                                                                + ["insn_count_subgroups_upper_bound",
-                                                                                  "summing_if_branches_ops"])))
+                                                                                  "summing_if_branches_ops", "count_overestimate"])))
 
     # There is a more complex version of this in meshmode.arraycontext
     try:
@@ -1114,7 +1114,7 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=None, method="
 
 
 # , method="thread"):
-def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, method=None, run_single_batch=False, error_return_time=max_double):
+def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, method=None, run_single_batch=False, error_return_time=None):
 
     # Timeout won't prevent applying transformations from hanging
 
@@ -1125,6 +1125,11 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     # if knl_base.default_entrypoint.name == "unfiltered_rhs_5_26":
     #    print(knl_base)
     #    exit()
+
+    if error_return_time is None and timeout is not None:
+        error_return_time = timeout + 1
+    else:
+        error_return_time = max_double
 
     from .apply_transformations import get_einsums
     neinsums = len(get_einsums(knl_base))
@@ -1258,6 +1263,10 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             except FunctionTimedOut as e:
                 print("Execution timed out")
                 # Don't run and return return an infinite run time
+                avg_time, wall_clock_time = error_return_time, error_return_time
+            except cl._cl.RuntimeError as e:
+                print(e)
+                print("Run failed due to a CL runtime error. Returning error return time")
                 avg_time, wall_clock_time = error_return_time, error_return_time
         else:  # processpool and pebble concurrent processes will break with MPI, use subprocess instead
             avg_time, measured_latency, wall_clock_time = run_concurrent_test_with_timeout(
