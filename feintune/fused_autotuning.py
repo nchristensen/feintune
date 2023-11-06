@@ -28,6 +28,7 @@ if use_charm:
 else:
     from feintune.parallel_autotuning_mpi4py_v2 import parallel_autotune
     import mpi4py.MPI as MPI
+    MPI.Init()
     comm = MPI.COMM_WORLD
 
 
@@ -826,7 +827,7 @@ def get_pickled_tunits(directory_or_files):
                 #print("Beginning MPI IO")
                 fsize = os.path.getsize(f)
                 buf = bytearray(fsize)
-                f = MPI.File.Open(MPI.COMM_WORLD, f)
+                f = MPI.File.Open(comm, f)
                 f.Read_all(buf)
                 fdict = pickle.loads(buf)
                 f.Close()
@@ -1175,7 +1176,7 @@ def main(args):
     # queue = cl.CommandQueue(cl_ctx,
     #    properties=cl.command_queue_properties.PROFILING_ENABLE)
     platforms = cl.get_platforms()
-    devices = platforms[0].get_devices(device_type=cl.device_type.GPU)
+    devices = platforms[1].get_devices(device_type=cl.device_type.GPU)
     if comm is not None:
         cl_ctx = cl.Context(
             devices=[devices[comm.Get_rank() % len(devices)]])

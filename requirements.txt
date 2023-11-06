@@ -40,5 +40,7 @@ dh_scikit_optimize @ git+https://github.com/ytopt-team/scikit-optimize
 autotune @ git+https://github.com/ytopt-team/autotune@version1
 ytopt.egg @ git+https://github.com/nchristensen/ytopt@executor-evaluators
 ConfigSpace @ git+https://github.com/nchristensen/ConfigSpace@ForbiddenCallableRelation
+# Add libensemble
 
-# Also needs clpeak from conda. Not sure how to add tha/t
+
+# Also needs clpeak from conda. Not sure how to add that

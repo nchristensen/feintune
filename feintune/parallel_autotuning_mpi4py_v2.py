@@ -5,6 +5,11 @@
 # from charm4py.sections import SectionManager
 # import inspect
 # import sys
+import mpi4py
+mpi4py.rc.initialize = False
+import mpi4py.MPI as MPI
+from mpi4py.futures import MPIPoolExecutor, MPICommExecutor
+
 import hjson
 import pyopencl as cl
 import numpy as np
@@ -15,8 +20,6 @@ from os.path import exists
 from feintune.run_tests import run_single_param_set_v2, generic_test
 from feintune.utils import convert, dump_hjson, load_hjson
 # from grudge.execution import diff_prg, elwise_linear
-import mpi4py.MPI as MPI
-from mpi4py.futures import MPIPoolExecutor, MPICommExecutor
 from hashlib import md5
 from random import shuffle
 # from mpipool import MPIPool
@@ -358,6 +361,7 @@ def main(args):
 
 def main():
     from mirgecom.array_context import MirgecomAutotuningArrayContext as Maac
+    mpi4py.rc.initialize = True
     comm = MPI.COMM_WORLD
 
     tracemalloc.start()

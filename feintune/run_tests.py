@@ -953,6 +953,13 @@ def run_subprocess_with_timeout(queue, knl, test_fn, timeout=max_double, error_r
     from pickle import dump, dumps
     from subprocess import run, TimeoutExpired, CalledProcessError, Popen, PIPE, STDOUT
     import feintune
+    #import logging
+
+    #from ytopt.search import util
+
+    #logger = util.conf_logger('feintune.run_tests')
+
+
 
     # pickled_knl = base64.b85encode(dumps(knl)).decode('ASCII')
     # pickled_test_fn = base64.b85encode(dumps(test_fn)).decode('ASCII')
@@ -972,12 +979,14 @@ def run_subprocess_with_timeout(queue, knl, test_fn, timeout=max_double, error_r
     dirname = os.path.dirname(feintune.__file__)
     f = os.path.join(dirname, "run_tests.py")
 
+    stdout_file = open("./stdout_file.txt", 'wt')
 
-
-    proc = Popen(["python", f, shm.name], stdout=PIPE,
-                 stderr=STDOUT, text=True)
+    proc = Popen(["python", f, shm.name], stdout=stdout_file,#PIPE,
+                 stderr=STDOUT, text=True, env=os.environ)
     try:
         output, err = proc.communicate(timeout=timeout)
+        #logger.info("SUBPROCESS OUTPUT", output)
+        #logger.info("SUBPROCESS ERR", err)
         if proc.returncode != 0:
             raise CalledProcessError(proc.returncode, proc.args, output=output)
         split_output = output.split("|")
@@ -1011,7 +1020,7 @@ def run_subprocess_with_timeout(queue, knl, test_fn, timeout=max_double, error_r
         proc.kill()
         retval = error_return_time, None, 0
         # shm.unlink()
-        #exit()
+        exit()
 
     shm.close()
     shm.unlink()

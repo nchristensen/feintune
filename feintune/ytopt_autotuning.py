@@ -1,3 +1,8 @@
+import mpi4py
+
+# Prevent mpi4py from automatically initializing.
+mpi4py.rc.initialize = False
+
 from dataclasses import dataclass
 from typing import Union, Optional
 from feintune.generators import get_trans_list
@@ -124,7 +129,7 @@ def test(args):
         #sys.stderr.write(str(queue))
         #sys.stderr.write(str(queue.device))
 
-        #result =  {"data": {"avg_time_predicted": 0.0}}
+        #result =  {"data": {"avg_time_predicted": 1.0}}
         # print(f"\nExecuting test {cur_test} of {total_tests}\n")
         #"""
         result = run_single_param_set_v2(queue, args["knl"], args["tlist"], args["test_fn"],
@@ -239,7 +244,18 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
     # eval_str = "processpool"
     # eval_str = "ray"
 
-    method = "thread"#None if eval_str == "libensemble" else "thread"
+    # Note that using Popen (forking) with MPI often results in strange errors and unpredictable crashes. 
+    # Only use subprocess with non-MPI executions
+    if True:
+        wrapper_script = None
+        method = "subprocess"
+    else:
+        import feintune
+        dirname = os.path.dirname(feintune.__file__)
+        wrapper_script = str(os.path.join(dirname, "ytopt_autotuning.py"))
+        method = None
+
+    #method = None#"thread"#None if eval_str == "libensemble" else "thread"
 
     obj_func = ObjectiveFunction(knl, eval_str=eval_str, platform_id=platform_id, max_flop_rate=max_flop_rate,
                                  device_memory_bandwidth=device_memory_bandwidth, device_latency=device_latency,
@@ -253,11 +269,6 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
     # Could have the arg sizes be a parameter and then fix the sizes for the kernel that must be run
     # (slightly different config space for each rank)
-
-    wrapper_script = None
-    import feintune
-    dirname = os.path.dirname(feintune.__file__)
-    #wrapper_script = str(os.path.join(dirname, "ytopt_autotuning.py"))
 
     """
     at_problem = TuningProblem(
