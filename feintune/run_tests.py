@@ -979,10 +979,10 @@ def run_subprocess_with_timeout(queue, knl, test_fn, timeout=max_double, error_r
     dirname = os.path.dirname(feintune.__file__)
     f = os.path.join(dirname, "run_tests.py")
 
-    stdout_file = open("./stdout_file.txt", 'wt')
+    stderr_file = open("./stderr_file.txt", 'wt')
 
-    proc = Popen(["python", f, shm.name], stdout=stdout_file,#PIPE,
-                 stderr=STDOUT, text=True, env=os.environ)
+    proc = Popen(["python", f, shm.name], stdout=PIPE,
+                 stderr=stderr_file, text=True)#, env=os.environ)
     try:
         output, err = proc.communicate(timeout=timeout)
         #logger.info("SUBPROCESS OUTPUT", output)
