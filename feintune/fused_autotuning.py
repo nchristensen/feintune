@@ -578,7 +578,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
 
     handled_pairs = set([(2, 1,), (3, 2,), (2, 2,), (2, 3)])
     timeout = 240
-    platform_id = 1  # Set to 1 to use Nvidia OpenCL on Monza. Need more robust way.
+    platform_id = queue.device.platform.name  # Set to 1 to use Nvidia OpenCL on Monza. Need more robust way.
 
     if (len(est[0]), len(est[1]),) in handled_pairs and not indirection:
         if use_ytopt:

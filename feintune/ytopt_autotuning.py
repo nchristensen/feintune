@@ -1,5 +1,3 @@
-import mpi4py.MPI as MPI
-comm = MPI.COMM_WORLD
 from dataclasses import dataclass
 from typing import Union, Optional
 from feintune.generators import get_trans_list
@@ -29,19 +27,27 @@ numeric_type = Union[np.number, float, int]
 queue = None
 exec_id = 0
 
-def set_queue(exec_id, platform_num):
+def set_queue(exec_id, platform_name):
     import pyopencl as cl
 
     global queue
     if queue is not None:
         raise ValueError("queue is already set")
-    platforms = cl.get_platforms()
-    print(platforms)
-    print(platform_num)
-    print(exec_id)
+
+    if platform_name is None:
+        platforms = cl.get_platforms()
+    else:
+        platforms = [platform for platform in cl.get_platforms() if platform.name == platform_name]
+    #print(platforms)
+    #print(platform_num)
+    #print(exec_id)
     
-    gpu_devices = platforms[platform_num].get_devices(
-        device_type=cl.device_type.GPU)
+    gpu_devices = []
+    for platform in platforms:
+        gpu_devices = platform.get_devices(
+            device_type=cl.device_type.GPU)
+        if len(gpu_devices) > 0:
+            break
 
     # Not sure if gpu_devices has a defined order, so sort it by bus id to prevent
     # oversubscription of a GPU.
@@ -85,20 +91,25 @@ def test(args):
             # This is semi-broken because we aren't assured the device list is always
             # ordered the same, needs to order the devices by some pci_id first
             # Also, are pids contiguous?
-            if eval_str in {"mpi_comm_executor", "mpi_pool_executor", "libensemble"}:
-                #comm = MPI.COMM_WORLD
-                exec_id = comm.Get_rank()
-            elif eval_str == "charm4py_pool_executor":
-                from charm4py import charm
-                exec_id = charm.myPe()
-            elif eval_str == "processpool":
-                from os import getpid
-                exec_id = getpid()
-            elif eval_str == "threadpool":
-                from threading import get_native_id
-                exec_id = get_native_id()
+            if args["exec_id"] is None:
+                if eval_str in {"mpi_comm_executor", "mpi_pool_executor", "libensemble"}:
+                    #comm = MPI.COMM_WORLD
+                    import mpi4py.MPI as MPI
+                    comm = MPI.COMM_WORLD
+                    exec_id = comm.Get_rank()
+                elif eval_str == "charm4py_pool_executor":
+                    from charm4py import charm
+                    exec_id = charm.myPe()
+                elif eval_str == "processpool":
+                    from os import getpid
+                    exec_id = getpid()
+                elif eval_str == "threadpool":
+                    from threading import get_native_id
+                    exec_id = get_native_id()
+                else:
+                    exec_id = 0
             else:
-                exec_id = 0
+                exec_id = args["exec_id"]
 
             set_queue(exec_id, platform_id)
 
@@ -109,15 +120,22 @@ def test(args):
         cur_test = args["cur_test"]
         total_tests = args["total_tests"]
 
+        #import sys
+        #sys.stderr.write(str(queue))
+        #sys.stderr.write(str(queue.device))
+
+        #result =  {"data": {"avg_time_predicted": 0.0}}
         # print(f"\nExecuting test {cur_test} of {total_tests}\n")
+        #"""
         result = run_single_param_set_v2(queue, args["knl"], args["tlist"], args["test_fn"],
                                      max_flop_rate=args["max_flop_rate"],
                                      device_memory_bandwidth=args["device_memory_bandwidth"],
                                      device_latency=args["device_latency"],
                                      timeout=args["timeout"],
-                                     method="thread",  # "subprocess",#None
+                                     method=args["method"],#"subprocess",#"thread",  # "subprocess",#None
                                      run_single_batch=False,
                                      error_return_time=args["timeout"])
+        #"""
     else:
         result = {"data": {"avg_time_predicted": 0.0}}
 
@@ -129,11 +147,13 @@ class ObjectiveFunction(object):
 
     knl: object
     eval_str: Optional[str] = None
-    platform_id: int = 0
+    platform_id: Optional[str] = None
     max_flop_rate: numeric_type = np.inf
     device_memory_bandwidth: numeric_type = np.inf
     device_latency: numeric_type = 0
     timeout: Optional[numeric_type] = None
+    exec_id: Optional[int] = None
+    method: Optional[str] = None
 
     @property
     def __name__(self):
@@ -168,7 +188,9 @@ class ObjectiveFunction(object):
                            "max_flop_rate": self.max_flop_rate,
                            "device_latency": self.device_latency,
                            "device_memory_bandwidth": self.device_memory_bandwidth,
-                           "eval_str": self.eval_str
+                           "eval_str": self.eval_str,
+                           "method": self.method,
+                           "exec_id": self.exec_id,
                            })
 
         # print(self.knl)
@@ -185,12 +207,14 @@ class ObjectiveFunction(object):
             # Would be helpful if could return all of the data instead of only avg_time
             return result["data"]["avg_time_predicted"]
         else:
-            return 0
+            return 1
 
 # TODO: Change default max_evals
 def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, normalized_program_id=None, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, save_path=None, max_evals=10, required_new_evals=0, eval_str="threadpool"):
 
     global exec_id
+    import mpi4py.MPI as MPI
+    comm = MPI.COMM_WORLD
 
     from feintune.utils import unique_program_id
     if program_id is None:
@@ -215,9 +239,11 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
     # eval_str = "processpool"
     # eval_str = "ray"
 
+    method = "thread"#None if eval_str == "libensemble" else "thread"
+
     obj_func = ObjectiveFunction(knl, eval_str=eval_str, platform_id=platform_id, max_flop_rate=max_flop_rate,
                                  device_memory_bandwidth=device_memory_bandwidth, device_latency=device_latency,
-                                 timeout=timeout)
+                                 timeout=timeout, method=method)
 
     # If want to time step (advance simulation) while tuning, need to use the actual kernel and data, so each node is
     # independent... but maybe the results can be unified after kernel execution? Each rank should have a different
@@ -228,13 +254,32 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
     # Could have the arg sizes be a parameter and then fix the sizes for the kernel that must be run
     # (slightly different config space for each rank)
 
-    at_problem = LibEnsembleTuningProblem(
+    wrapper_script = None
+    import feintune
+    dirname = os.path.dirname(feintune.__file__)
+    #wrapper_script = str(os.path.join(dirname, "ytopt_autotuning.py"))
+
+    """
+    at_problem = TuningProblem(
         task_space=None,
         input_space=input_space,
         output_space=output_space,
         objective=obj_func,
         constraints=None,
         model=None)
+    """
+
+    #"""
+    at_problem = LibEnsembleTuningProblem(
+        task_space=None,
+        input_space=input_space,
+        output_space=output_space,
+        objective=obj_func,
+        constraints=None,
+        model=None,
+        wrapper_script=wrapper_script)
+
+    #"""
 
     # for entry in range(10):
     #    p = input_space.sample_configuration(1)
@@ -266,8 +311,8 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
             # assert column_names[-4] == "num_elements"
             for row in row_list[1:]:
                 p = dict(zip(column_names, [int(item) for item in row[:-2]]))
-                if float(row[-2]) <= timeout:  # Eliminate
-                    initial_observations.append((p, float(row[-2]),))
+                #if float(row[-2]) <= timeout:  # Eliminate
+                initial_observations.append((p, float(row[-2]),))
                 # if int(row[-4]) == nelem:
                 #    pre_existing_evals += 1
 
@@ -280,7 +325,6 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
     max_evals = min(max_evals, pre_existing_evals + required_new_evals)
 
     # Note that the initial observations count toward max_evals.
-    # --Is this actually true?
     if eval_str != "libensemble":
         searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner,
                     set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations)
@@ -447,3 +491,54 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
     print("======RETURNING FROM SEARCH========")
     # exit()
     return True
+
+
+def run_objective_fn_sh_mem(sh_mem_name):
+
+    from multiprocessing import shared_memory
+    from multiprocessing.resource_tracker import unregister
+    import sys
+    from pickle import loads, dumps
+
+    # Maybe should transfer a busid too?
+    sh_mem = shared_memory.SharedMemory(sh_mem_name)
+
+    obj_fn, params, worker_id = loads(sh_mem.buf)
+    obj_fn.exec_id = worker_id
+    obj_fn.timeout = None
+    sh_mem.buf[:] = bytes(len(sh_mem.buf))
+    #result = 1.0
+    
+    result = obj_fn(params)
+
+    # in_file = open(filename, "rb")
+    # knl, test_fn, bus_id = load(in_file)
+    # in_file.close()
+
+    # knl = loads(base64.b85decode(pickled_knl.encode('ASCII')))
+    # test_fn = loads(base64.b85decode(pickled_test_fn.encode('ASCII')))
+    #queue = get_queue_from_bus_id(int(bus_id))
+    #result = run_single_param_set_v2(queue, knl_base, trans_list, test_fn, **kwargs)
+
+    # Save the result back to the shared memory.
+    pickled_data = dumps(result)
+    assert len(pickled_data) <= sh_mem.size
+    sh_mem.buf[:len(pickled_data)] = pickled_data[:]
+    sh_mem.close()
+
+    #sh_mem.unlink()
+
+    # Workaround for https://github.com/python/cpython/issues/82300
+    # Hopefully will be fixed in 3.13
+    #if shared_memory._USE_POSIX and sys.version_info <= (3, 12):
+    #    unregister(sh_mem._name, "shared_memory")
+    
+    #print("|Average execution time|", avg_time,
+    #      "|Average execution latency|", measured_latency)
+    
+    return result#avg_time, measured_latency
+
+if __name__ == "__main__":
+    import sys
+
+    run_objective_fn_sh_mem(*sys.argv[1:])

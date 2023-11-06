@@ -72,8 +72,9 @@ def i_inner_outer_options(n_out, i_inner_inner, start_val=None):
 def j_inner_options(n_in, start_val=None):
 
     start = 1
-    factors = (np.arange(start, n_in + 1)
-               [(n_in % np.arange(start, n_in + 1)) == 0]).tolist()
+    #factors = (np.arange(start, n_in + 1)
+    #           [(n_in % np.arange(start, n_in + 1)) == 0]).tolist()
+    factors = np.arange(start, n_in+1).tolist()
     # factors = list(np.arange(1, n_in + 1)[(n_in % np.arange(1, n_in + 1)) == 0])
     # Should this be limited by the number of registers
     start_ind = 0 if start_val is None else factors.index(start_val)
@@ -513,8 +514,8 @@ def createConfigSpace(queue, knl):
     a_s.add_hyperparameter(idof_ilp_hyp)
 
     swap_local_hyp = cs.OrdinalHyperparameter(
-        "swap_local", [0, 1], default_value=0)
-    a_s.add_hyperparameter(idof_ilp_hyp)
+        "swap_local", [0], default_value=0)
+    a_s.add_hyperparameter(swap_local_hyp)
 
 
 
@@ -658,7 +659,7 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
     iel_ilp_vals = [0,1]
     idof_ilp_vals = [0,1]
     group_idof_vals = [0,1]
-    swap_local_vals = [0,1]
+    swap_local_vals = [0]
 
     from itertools import product
     trans_list_list = []
@@ -914,6 +915,7 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp=False, 
     # Figure out the number of batches
 
     trans_list = []
+    apply_last_list = []
     batch_size, kio, kii, iio, iii, ji = params
     neinsums = len(get_einsums(knl))
     nbatches = int(np.ceil(neinsums / batch_size))
@@ -934,7 +936,7 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp=False, 
     # """
     g0 = "g.0"
     g1 = "g.1" if group_idof else "unr"  #"g.1" 
-    l0 = "l.0" if not swap_local else "l.1"
+    l0 = "l.0" if not swap_local else "l.1" # Would have to swap order iel and idof transforms are applied to do this.
     l1 = "l.1" if not swap_local else "l.0"
     ilp0 = "ilp" if iel_ilp else "unr"
     ilp1 = "ilp" if idof_ilp else "unr"
@@ -959,7 +961,13 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp=False, 
             #                   (("outer_tag", g0,), ("inner_tag", l0,), ("slabs", (0, 0,),),),))
             ko_slabs = (0,0) if n_elem % kio == 0 or nbatches > 1 else (0,1)
             trans_list.append(("split_iname", (f"{e}", kio,),
-                               (("outer_tag", g0,), ("inner_tag", l0,), ("slabs", ko_slabs,),),))
+                               (("outer_tag", g0,), ("inner_tag", None,), ("slabs", ko_slabs,),),))
+
+            if l0 =="l.1":
+                apply_last_list.append(("tag_inames", (((f"{e}_inner", l0,),),),))
+            else:
+                trans_list.append(("tag_inames", (((f"{e}_inner", l0,),),),))
+
             e_prefetch_str = f"{e}_inner"
         else:
             ko_slabs = (0,0) if n_elem % kio == 0 or nbatches > 1 else (0,1)
@@ -967,10 +975,14 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp=False, 
             trans_list.append(("split_iname", (f"{e}", kio,),
                                (("outer_tag", g0,), ("slabs", ko_slabs,),),))
             trans_list.append(("split_iname", (f"{e}_inner", kii,),
-                               (("outer_tag", ilp0,), ("inner_tag", l0,), ("slabs", kio_slabs,),),))
+                               (("outer_tag", ilp0,), ("inner_tag", None,), ("slabs", kio_slabs,),),))
+
+            if l0 == "l.1":
+                apply_last_list.append(("tag_inames", (((f"{e}_inner_inner", l0,),),),))
+            else:
+                trans_list.append(("tag_inames", (((f"{e}_inner_inner", l0,),),),))
+
             e_prefetch_str = f"{e}_inner_outer,{e}_inner_inner"
-            # prefetch_str = f"{j},{e}_inner_outer,{e}_inner_inner"
-            # prefetch_str = f"{j},{e}_inner"
 
         if iii >= n_out:
             # Single global work group
@@ -978,7 +990,8 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp=False, 
         elif iio == iii:
             io_slabs = (0,0) if n_out % iio == 0 or nbatches > 1 else (0,1)
             trans_list.append(("split_iname", (f"{i}", iio,),
-                           (("outer_tag", g1,), ("inner_tag", l1,), ("slabs", io_slabs,),),)) 
+                           (("outer_tag", g1,), ("inner_tag", l1,), ("slabs", io_slabs,),),))
+            #trans_list.append(("tag_inames", (((f"{i}_inner", l1,),),),))
         else:
             io_slabs = (0,0) if n_out % iio == 0 or nbatches > 1 else (0,1)
             iio_slabs = (0,0) if n_out % iii == 0 or nbatches > 1 else (0,1)
@@ -987,10 +1000,27 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp=False, 
             # The ilp tag can be problematic with multiple independent blocks https://github.com/inducer/loopy/issues/418
             trans_list.append(("split_iname", (f"{i}_inner", iii,),
                                (("outer_tag", ilp1,), ("inner_tag", l1,), ("slabs", iio_slabs,),),))
+            #trans_list.append(("tag_inames", (((f"{i}_inner_inner", l1,),),),))
+        
+        trans_list = trans_list + apply_last_list
         # Should the i loop have (0,1) slabs for both?
 
-        # print("Splitting reduction iname disabled. Re-enable when finished debugging")
-        # trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag",unr,),),))
+        #j_prefetch_str = "" if n_in == 1 else f"{j},"
+        # Can make the kernel unschedulable.
+        #"""
+        if n_in == 1:
+            j_prefetch_str = ""
+        elif ji == 1:
+            trans_list.append(("tag_inames", (((f"{j}", None,),),),))
+            j_prefetch_str = f"{j},"
+        elif ji == n_in:
+            trans_list.append(("tag_inames", (((f"{j}", unr,),),),))
+            j_prefetch_str = f"{j},"
+        else:
+            jo_slabs = (0,0)# if n_in % ji == 0 or nbatches > 1 else (0,1)
+            trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag",unr,),("slabs", jo_slabs,),),))
+            j_prefetch_str = f"{j}_outer,{j}_inner,"
+        #"""
 
         # Reduction inames. Not a lot to do
         if r is not None:
@@ -1006,22 +1036,10 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp=False, 
             else:
                 trans_list.append(("tag_inames", (((f"{x}", unr,),),),))
 
-        # """
-        # if len(read_jdof_arrays) == 0 and len(face_dof_arrays) == 0:
-            # print(knl)
-            # print("NO arrays to prefetch")
-            # exit()
 
         if prefetch:  # Turn off prefetching until can assign a batch number
             # No point in prefetching if there is a single array. There is no data re-use.
             # Prefetching breaks in this case
-
-            j_prefetch_str = "" if n_in == 1 else f"{j},"
-            #if n_in == 1:
-            #    j_prefetch_str = ""
-            #else:
-            #    j_prefetch_str = f"{j},"
-                # j_prefetch_str = f"{j}_outer,{j}_inner,"
 
             # print(len(read_jdof_arrays))
             # print(len(face_dof_arrays))

@@ -83,12 +83,14 @@ def display_top(snapshot, key_type='lineno', limit=10):
 queue = None
 
 
-def set_queue(pe_num, platform_num):
+def set_queue(pe_num, platform_name):
     global queue
     if queue is not None:
         raise ValueError("queue already set")
-    platforms = cl.get_platforms()
-    gpu_devices = platforms[platform_num].get_devices(
+
+    platforms = [platform for platform in cl.get_platforms() if platform.name == platform_name]
+    
+    gpu_devices = platforms[0].get_devices(
         device_type=cl.device_type.GPU)
     ctx = cl.Context(devices=[gpu_devices[pe_num % len(gpu_devices)]])
 

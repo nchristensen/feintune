@@ -906,8 +906,14 @@ def get_reasonable_memory_pool(queue: cl.CommandQueue,
 
 
 # Useful elsewhere. Maybe move to utils or as a utility function in pyopencl
-def get_queue_from_bus_id(bus_id):
-    for platform in cl.get_platforms():
+def get_queue_from_bus_id(bus_id, platform_name=None):
+
+    if platform_name is None:
+        platforms = cl.get_platforms()
+    else: 
+        platforms = [platform for platform in cl.get_platforms() if platform.name == platform_name]
+
+    for platform in platforms:
         for d in platform.get_devices():
             if "NVIDIA" in d.vendor:
                 d_bus_id = d.pci_bus_id_nv
@@ -926,6 +932,7 @@ def get_queue_from_bus_id(bus_id):
 
 
 # Useful elsewhere. Maybe move to utils or as a utility function in pyopencl
+# Should this also return the platform id?
 def get_bus_id_from_queue(queue):
     d = queue.device
     if "NVIDIA" in d.vendor:
@@ -937,37 +944,38 @@ def get_bus_id_from_queue(queue):
     return d_bus_id
 
 
-def run_subprocess_with_timeout(queue, knl, test_fn, timeout=None, error_return_time=max_double):
+def run_subprocess_with_timeout(queue, knl, test_fn, timeout=max_double, error_return_time=max_double):
+
+    start = time.time()
+
     import os
     import uuid
     from pickle import dump, dumps
     from subprocess import run, TimeoutExpired, CalledProcessError, Popen, PIPE, STDOUT
+    import feintune
 
     # pickled_knl = base64.b85encode(dumps(knl)).decode('ASCII')
     # pickled_test_fn = base64.b85encode(dumps(test_fn)).decode('ASCII')
     bus_id = get_bus_id_from_queue(queue)
+    platform_name = queue.device.platform.name
 
     # filename = str(uuid.uuid4()) + ".tmp"
     # out_file = open(filename, "wb")
     # dump(tuple([knl, test_fn, bus_id]), out_file)
     # out_file.close()
 
-    pickled_data = dumps([knl, test_fn, bus_id])
+    pickled_data = dumps([knl, test_fn, bus_id, platform_name])
     shm = shared_memory.SharedMemory(create=True, size=len(pickled_data))
     shm.buf[:] = pickled_data[:]
 
-    # unpickle_and_run_test(filename)
-
-    import feintune
-    import os
+    #"""
     dirname = os.path.dirname(feintune.__file__)
     f = os.path.join(dirname, "run_tests.py")
 
-    start = time.time()
+
+
     proc = Popen(["python", f, shm.name], stdout=PIPE,
                  stderr=STDOUT, text=True)
-    shm.close()
-    # proc = Popen(["python", "run_tests.py", filename], stdout=PIPE, stderr=STDOUT, text=True)
     try:
         output, err = proc.communicate(timeout=timeout)
         if proc.returncode != 0:
@@ -980,7 +988,7 @@ def run_subprocess_with_timeout(queue, knl, test_fn, timeout=None, error_return_
         proc.kill()
         # with proc:
         #    proc.kill()
-        retval = error_return_time, None, 0
+        retval = timeout, None, 0
 
     # out, err = proc.communicate()
 
@@ -992,7 +1000,7 @@ def run_subprocess_with_timeout(queue, knl, test_fn, timeout=None, error_return_
     #    end = time.time()
     #    output = completed.stdout
     #    split_output = output.split("|")
-    #    return float(split_output[-3]), float(split_output[-1]), end - start
+    #    retval = float(split_output[-3]), float(split_output[-1]), end - start
     # except TimeoutExpired as e:
     #    print("Subprocess timed out")
     #    return max_double, max_double, 0
@@ -1003,23 +1011,37 @@ def run_subprocess_with_timeout(queue, knl, test_fn, timeout=None, error_return_
         proc.kill()
         retval = error_return_time, None, 0
         # shm.unlink()
-        exit()
+        #exit()
+
+    shm.close()
+    shm.unlink()
+    #"""
+
+    #avg_time, measured_latency = unpickle_and_run_test(shm.name)
+    #end = time.time()
+    #retval = avg_time, measured_latency, end - start
+
 
     # os.remove(filename)
 
-    # shm.unlink()
     return retval
 
 
 def unpickle_and_run_test(sh_mem_name):
     from pickle import loads
+    import sys
+    from multiprocessing.resource_tracker import unregister
 
     sh_mem = shared_memory.SharedMemory(sh_mem_name)
-    knl, test_fn, bus_id = loads(sh_mem.buf)
+    knl, test_fn, bus_id, platform_name = loads(sh_mem.buf)
     sh_mem.close()
 
-    # Warnings related to https://github.com/python/cpython/issues/82300
-    sh_mem.unlink()
+    #sh_mem.unlink() # Doing this in the main process instead
+
+    # Workaround for https://github.com/python/cpython/issues/82300
+    # Hopefully will be fixed in 3.13
+    if shared_memory._USE_POSIX and sys.version_info <= (3, 12):
+        unregister(sh_mem._name, "shared_memory")
 
     # in_file = open(filename, "rb")
     # knl, test_fn, bus_id = load(in_file)
@@ -1027,12 +1049,14 @@ def unpickle_and_run_test(sh_mem_name):
 
     # knl = loads(base64.b85decode(pickled_knl.encode('ASCII')))
     # test_fn = loads(base64.b85decode(pickled_test_fn.encode('ASCII')))
-    queue = get_queue_from_bus_id(int(bus_id))
+    queue = get_queue_from_bus_id(int(bus_id), platform_name=platform_name)
     dev_arrays, avg_time, measured_latency = test_fn(queue, knl)
 
+    # Alternatively, could write this back to the shared memory.
     print("|Average execution time|", avg_time,
           "|Average execution latency|", measured_latency)
 
+    return avg_time, measured_latency
 
 """
 def unpickle_and_run_test(filename):
@@ -1114,29 +1138,25 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=None, method="
 
 
 # , method="thread"):
-def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, method=None, run_single_batch=False, error_return_time=None):
-
-    # Timeout won't prevent applying transformations from hanging
+def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=None, device_memory_bandwidth=None, device_latency=None, timeout=None, method=None, run_single_batch=False, error_return_time=None):
 
     # Should check how well single batch predicted times correllate with actual times
 
-    # print(trans_list)
-
-    # if knl_base.default_entrypoint.name == "unfiltered_rhs_5_26":
-    #    print(knl_base)
-    #    exit()
+    #if device_latency is None:
+    #    device_latency = 0
+    #if max_flop_rate is None:
+    #    max_flop_rate = np.inf
+    #if device_memory_bandwidth is None:
+    #    device_memory_bandwidth = np.inf
 
     if error_return_time is None and timeout is not None:
         error_return_time = timeout + 1
     else:
         error_return_time = max_double
 
-    from .apply_transformations import get_einsums
+    from feintune.apply_transformations import get_einsums
     neinsums = len(get_einsums(knl_base))
     batch_size = neinsums  # No batching is equivalent to one batch
-
-    # print("PRINTING 1")
-    # print(knl_base)
 
     print("BEGINNING KERNEL TRANSFORMATION")
 
@@ -1173,7 +1193,6 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
         knl = knl_base
         sb_knl = None
         local_sizes = []
-    # exit()
 
     # local_sizes = set()
         # elif trans[0] = "add_prefetch":
@@ -1204,7 +1223,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     temp_dict = {key: val for key, val in knl.default_entrypoint.temporary_variables.items(
     ) if val.address_space == lp.AddressSpace.LOCAL or val.address_space == lp.auto}
     # print(knl)
-    print(temp_dict)
+    #print(temp_dict)
     base_storage_dict = {}
 
     # This doesn't account for global barriers.
@@ -1221,13 +1240,12 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
                 elif storage_size > base_storage_dict[tarray.base_storage]:
                     base_storage_dict[tarray.base_storage] = storage_size
 
-    print("BASE STORAGE DICT")
-    print(base_storage_dict)
+    #print("BASE STORAGE DICT")
+    #print(base_storage_dict)
     local_memory_used = np.sum(list(base_storage_dict.values()))
     local_memory_avail = queue.device.local_mem_size
     print(
         f"KERNEL USING {local_memory_used} out of {local_memory_avail} bytes of local memory")
-    # exit()
 
     # Could also look at the amount of cache space used and forbid running those that spill
 
@@ -1314,6 +1332,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
 
     try:
         if timeout is None:
+            # Need to use knl rather than knl_base because knl may be a subkernel.
             flop_rate_dict = analyze_flop_rate(
                 knl, avg_time, max_flop_rate=max_flop_rate, latency=None)
         else:
