@@ -1,9 +1,3 @@
-import mpi4py
-
-# Prevent mpi4py from automatically initializing.
-mpi4py.rc.initialize = False
-
-import mpi4py.MPI as MPI
 
 from dataclasses import dataclass
 from typing import Union, Optional
@@ -100,8 +94,15 @@ def test(args):
             # Also, are pids contiguous?
             if args["exec_id"] is None:
                 if eval_str in {"mpi_comm_executor", "mpi_pool_executor", "libensemble"}:
-                    comm = MPI.COMM_WORLD
-                    exec_id = comm.Get_rank()
+                        import mpi4py
+                        # Prevent mpi4py from automatically initializing.
+                        mpi4py.rc.initialize = False
+                        import mpi4py.MPI as MPI
+                        if not MPI.Is_initialized():
+                            MPI.Init()
+
+                        comm = MPI.COMM_WORLD
+                        exec_id = comm.Get_rank()
                 elif eval_str == "charm4py_pool_executor":
                     from charm4py import charm
                     exec_id = charm.myPe()
@@ -139,7 +140,7 @@ def test(args):
                                      timeout=args["timeout"],
                                      method=args["method"],#"subprocess",#"thread",  # "subprocess",#None
                                      run_single_batch=False,
-                                     error_return_time=args["timeout"])
+                                     error_return_time=args["timeout"] + 1)
         #"""
     else:
         result = {"data": {"avg_time_predicted": 0.0}}
@@ -217,8 +218,16 @@ class ObjectiveFunction(object):
 # TODO: Change default max_evals
 def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, normalized_program_id=None, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, save_path=None, max_evals=10, required_new_evals=0, eval_str="threadpool"):
 
-    global exec_id
+    import mpi4py
+    # Prevent mpi4py from automatically initializing.
+    mpi4py.rc.initialize = False
+    import mpi4py.MPI as MPI
+    if not MPI.Is_initialized():
+        MPI.Init()
+
     comm = MPI.COMM_WORLD
+
+    global exec_id
 
     from feintune.utils import unique_program_id
     if program_id is None:
@@ -245,7 +254,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
     # Note that using Popen (forking) with MPI often results in strange errors and unpredictable crashes. 
     # Only use subprocess with non-MPI executions
-    if True:
+    if False:
         wrapper_script = None
         method = "thread"#"subprocess"
     else:
@@ -450,7 +459,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                                                     timeout=timeout,
                                                     method=None,#"thread",  # "subprocess",
                                                     run_single_batch=True,
-                                                    error_return_time=timeout)
+                                                    error_return_time=timeout + 1)
                     if tdict["data"]["avg_time_predicted"] < timeout:
                         from feintune.utils import dump_hjson
                         dump_hjson(hjson_file_str, tdict)
@@ -470,7 +479,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                                                                 timeout=None,
                                                                 method=None,#"thread",  # "subprocess",
                                                                 run_single_batch=False,
-                                                                error_return_time=timeout)
+                                                                error_return_time=timeout + 1)
                                 print("DONE GENERATING AND EXECUTING FULL KERNEL")
                                 if tdict["data"]["avg_time_predicted"] < timeout:
                                     dump_hjson(hjson_file_str, tdict)
@@ -496,7 +505,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                                                     timeout=None,
                                                     method=None,#"thread",  # "subprocess",
                                                     run_single_batch=False,
-                                                    error_return_time=timeout)
+                                                    error_return_time=timeout + 1)
                     print("DONE GENERATING AND EXECUTING DEFAULT TRANSFORMED KERNEL")
 
                     if tdict["data"]["avg_time_predicted"] < timeout:

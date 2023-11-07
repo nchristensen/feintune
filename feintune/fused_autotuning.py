@@ -28,7 +28,8 @@ if use_charm:
 else:
     from feintune.parallel_autotuning_mpi4py_v2 import parallel_autotune
     import mpi4py.MPI as MPI
-    MPI.Init()
+    if not MPI.Is_initialized():
+        MPI.Init()
     comm = MPI.COMM_WORLD
 
 
