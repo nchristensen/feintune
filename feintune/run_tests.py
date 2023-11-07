@@ -2,6 +2,7 @@ from feintune.grudge_tags import (IsDOFArray, IsSepVecDOFArray, IsOpArray,
                                  IsSepVecOpArray, IsFaceDOFArray, IsFaceMassOpArray, IsVecDOFArray, IsVecOpArray, IsFourAxisDOFArray)
 from feintune.apply_transformations import (gen_diff_knl, gen_diff_knl_fortran2,
                                            apply_transformation_list, gen_elwise_linear_knl, gen_face_mass_knl, gen_face_mass_knl_merged)
+from feintune.utils import convert
 import loopy.options
 import sys
 import time
@@ -1927,10 +1928,10 @@ def random_search(queue, knl, test_fn, time_limit=float("inf"), max_gflops=None,
     return result_saved_list
 
 
-def convert(o):
-    if isinstance(o, np.generic):
-        return o.item()
-    raise TypeError
+#def convert(o):
+#    if isinstance(o, np.generic):
+#        return o.item()
+#    raise TypeError
 
 
 def autotune_and_save(queue, search_fn, tlist_generator, pspace_generator,  hjson_file_str, time_limit=np.inf):
