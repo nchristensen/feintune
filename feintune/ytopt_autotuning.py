@@ -3,6 +3,8 @@ import mpi4py
 # Prevent mpi4py from automatically initializing.
 mpi4py.rc.initialize = False
 
+import mpi4py.MPI as MPI
+
 from dataclasses import dataclass
 from typing import Union, Optional
 from feintune.generators import get_trans_list
@@ -98,14 +100,12 @@ def test(args):
             # Also, are pids contiguous?
             if args["exec_id"] is None:
                 if eval_str in {"mpi_comm_executor", "mpi_pool_executor", "libensemble"}:
-                    #comm = MPI.COMM_WORLD
-                    import mpi4py.MPI as MPI
                     comm = MPI.COMM_WORLD
                     exec_id = comm.Get_rank()
                 elif eval_str == "charm4py_pool_executor":
                     from charm4py import charm
                     exec_id = charm.myPe()
-                elif eval_str == "processpool":
+                elif eval_str == "processpool" or eval_str == "subprocess":
                     from os import getpid
                     exec_id = getpid()
                 elif eval_str == "threadpool":
@@ -218,7 +218,6 @@ class ObjectiveFunction(object):
 def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, normalized_program_id=None, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, save_path=None, max_evals=10, required_new_evals=0, eval_str="threadpool"):
 
     global exec_id
-    import mpi4py.MPI as MPI
     comm = MPI.COMM_WORLD
 
     from feintune.utils import unique_program_id
@@ -248,7 +247,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
     # Only use subprocess with non-MPI executions
     if True:
         wrapper_script = None
-        method = "subprocess"
+        method = "thread"#"subprocess"
     else:
         import feintune
         dirname = os.path.dirname(feintune.__file__)
@@ -541,8 +540,8 @@ def run_objective_fn_sh_mem(sh_mem_name):
 
     # Workaround for https://github.com/python/cpython/issues/82300
     # Hopefully will be fixed in 3.13
-    #if shared_memory._USE_POSIX and sys.version_info <= (3, 12):
-    #    unregister(sh_mem._name, "shared_memory")
+    if shared_memory._USE_POSIX and sys.version_info <= (3, 12):
+        unregister(sh_mem._name, "shared_memory")
     
     #print("|Average execution time|", avg_time,
     #      "|Average execution latency|", measured_latency)

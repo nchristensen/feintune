@@ -586,6 +586,8 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
             # Won't work with charm. But the charm4py executor is broken anyway.
             if comm.Get_size() <= 1:
                 eval_str = "threadpool"
+                #eval_str = "processpool" # Seems to be busted. "Exception: cannot pickle 'pyopencl._cl._ErrorRecord' object"
+                #eval_str = "subprocess" # Also errors out.
             elif comm.Get_size() >= 3:
                 eval_str = "libensemble"
             else:
@@ -1176,7 +1178,7 @@ def main(args):
     # queue = cl.CommandQueue(cl_ctx,
     #    properties=cl.command_queue_properties.PROFILING_ENABLE)
     platforms = cl.get_platforms()
-    devices = platforms[1].get_devices(device_type=cl.device_type.GPU)
+    devices = platforms[0].get_devices(device_type=cl.device_type.GPU)
     if comm is not None:
         cl_ctx = cl.Context(
             devices=[devices[comm.Get_rank() % len(devices)]])

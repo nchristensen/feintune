@@ -528,8 +528,13 @@ def generic_test(queue, kern, backend="OPENCL", nruns=5, warmup_runs=2):
         start = time.time()
 
         # print("Setting measured execution latency to zero")
+        #try:
         measured_latency = measure_execution_latency(
-            queue, kern, arg_dict, nruns, warmup_runs)
+                queue, kern, arg_dict, nruns, warmup_runs)
+        #except Exception as e:
+        #    print("Unable to measure null kernel latency due to error.")
+        #    print(e)
+        #    measured_latency = None
         avg_time = measure_execution_time(
             queue, kern, arg_dict, nruns, warmup_runs)
 
@@ -1315,6 +1320,12 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     for trans in trans_list:
         if trans[0] == "batch_einsums":
             batch_size = trans[1][0]
+    
+    if device_latency is not None and measured_latency is not None:
+        measured_latency = min(device_latency, measured_latency)
+
+    if measured_latency is None:
+        measured_latency = 0
 
     data = {"avg_time": avg_time,
             "avg_time_predicted": measured_latency + (avg_time - measured_latency)*(neinsums/batch_size) if (run_single_batch and avg_time != error_return_time) else avg_time,
