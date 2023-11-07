@@ -258,6 +258,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         # export IBV_FORK_SAFE=1
         # export RDMAV_HUGEPAGES_SAFE=1
         # may or may not help to address this problem.
+        # See https://docs.nersc.gov/development/languages/python/using-python-perlmutter/#known-issues
 
         import feintune
         dirname = os.path.dirname(feintune.__file__)
