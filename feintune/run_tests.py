@@ -1164,10 +1164,8 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     #if device_memory_bandwidth is None:
     #    device_memory_bandwidth = np.inf
 
-    if error_return_time is None and timeout is not None:
-        error_return_time = timeout + 1
-    else:
-        error_return_time = max_double
+    if error_return_time is None:
+        error_return_time = timeout + 1 if timeout is not None else max_double
 
     from feintune.apply_transformations import get_einsums
     neinsums = len(get_einsums(knl_base))
