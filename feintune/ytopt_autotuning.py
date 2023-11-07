@@ -249,6 +249,17 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         wrapper_script = None
         method = "thread"#"subprocess"
     else:
+        # This is not guaranteed to work as forking within an MPI process has undefined behavior
+        # Spectrum MPI (Open MPI based) on Lassen seems to work but MPICH does not tolerate it well.
+        # For SS11
+        # export CXI_FORK_SAFE=1
+        # export CXI_FORK_SAFE_HP=1
+        # and for SS10
+        # export IBV_FORK_SAFE=1
+        # export RDMAV_HUGEPAGES_SAFE=1
+        # may or may not help to address this problem.
+        # See https://docs.nersc.gov/development/languages/python/using-python-perlmutter/#known-issues
+
         import feintune
         dirname = os.path.dirname(feintune.__file__)
         wrapper_script = str(os.path.join(dirname, "ytopt_autotuning.py"))

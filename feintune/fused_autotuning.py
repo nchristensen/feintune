@@ -588,7 +588,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
                 eval_str = "threadpool"
                 #eval_str = "processpool" # Seems to be busted. "Exception: cannot pickle 'pyopencl._cl._ErrorRecord' object"
                 #eval_str = "subprocess" # Also errors out.
-            elif comm.Get_size() >= 3:
+            elif comm.Get_size() >= 3: # Breaks on Lassen.
                 eval_str = "libensemble"
             else:
                 eval_str = "mpi_comm_executor"
