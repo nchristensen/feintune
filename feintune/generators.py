@@ -1,6 +1,6 @@
 import numpy as np
 import loopy as lp
-from frozendict import frozendict
+from immutabledict import immutabledict
 from meshmode.transform_metadata import FirstAxisIsElementsTag
 from feintune.grudge_tags import (IsDOFArray, IsSepVecDOFArray,
                                  IsOpArray, IsSepVecOpArray, IsFaceDOFArray, IsFaceMassOpArray,
@@ -827,7 +827,7 @@ def get_args_and_arrays(knl):
 
     # Rather pointless to intersect. We already check if they are in read_deps
     # read_jdof_arrays = read_deps & frozenset(jdof_arrays)
-    return frozendict(arg_dict), frozenset(jdof_arrays), frozenset(face_dof_arrays)#, n_in
+    return immutabledict(arg_dict), frozenset(jdof_arrays), frozenset(face_dof_arrays)#, n_in
 
 
 @memoize
@@ -945,7 +945,7 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp=False, 
     ilp = "ilp"
     # """
 
-    # TODO: Change this to a frozendict or immutable map for easier legibility
+    # TODO: Change this to a immutabledict or immutable map for easier legibility
     # For some reason this isn't correctly seeing a j=0 case.
     # It probably isn't even worth tuning those kernels...
     # If there is a zero length dimension then don't transform

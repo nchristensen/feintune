@@ -16,7 +16,7 @@ from ytopt.search.ambs import AMBS, LibEnsembleTuningProblem, LibEnsembleAMBS
 from ytopt.search import util
 logger = util.conf_logger(__name__)
 
-from frozendict import frozendict
+from immutabledict import immutabledict
 # from ytopt.search.async_search import AsyncSearch
 
 import hjson
@@ -182,7 +182,7 @@ class ObjectiveFunction(object):
         print("BEGINNING TEST")
         # args = (self.timeout, ((None, None,), (test_id, self.platform_id, self.knl, tlist,
         #        generic_test, self.max_flop_rate, self.device_latency, self.device_memory_bandwidth,),),self.eval_str,)
-        args = frozendict({"timeout": self.timeout,
+        args = immutabledict({"timeout": self.timeout,
                            "cur_test": None,
                            "total_tests": None,
                            "test_id": test_id,
@@ -391,7 +391,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
                 """
                 test_id = get_test_id(trans_list)
-                args = frozendict({"timeout": timeout,
+                args = immutabledict({"timeout": timeout,
                         "cur_test": None,
                         "total_tests": None,
                         "test_id": test_id,

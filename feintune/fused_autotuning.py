@@ -1178,7 +1178,12 @@ def main(args):
     # queue = cl.CommandQueue(cl_ctx,
     #    properties=cl.command_queue_properties.PROFILING_ENABLE)
     platforms = cl.get_platforms()
-    devices = platforms[0].get_devices(device_type=cl.device_type.GPU)
+    pnum_saved = 0
+    for pnum, platform in enumerate(platforms):
+        if platform.vendor == "NVIDIA Corporation":
+            pnum_saved = pnum
+
+    devices = platforms[pnum_saved].get_devices(device_type=cl.device_type.GPU)
     if comm is not None:
         cl_ctx = cl.Context(
             devices=[devices[comm.Get_rank() % len(devices)]])

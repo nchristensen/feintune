@@ -18,12 +18,12 @@ def load_hjson(filename):
 
 def convert(o):
     from numpy import generic, inf, finfo, float32
-    from frozendict import frozendict
+    from immutabledict import immutabledict
     if o == inf:
         return finfo(float32).max
     elif isinstance(o, generic):
         return o.item()
-    elif isinstance(o, frozendict):
+    elif isinstance(o, immutabledict):
         return dict(o)
     raise TypeError
 
