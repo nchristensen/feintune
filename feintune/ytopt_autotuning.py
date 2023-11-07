@@ -515,7 +515,7 @@ def run_objective_fn_sh_mem(sh_mem_name):
 
     obj_fn, params, worker_id = loads(sh_mem.buf)
     obj_fn.exec_id = worker_id
-    obj_fn.timeout = None
+    #obj_fn.timeout = None
     sh_mem.buf[:] = bytes(len(sh_mem.buf))
     #result = 1.0
     
