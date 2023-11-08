@@ -529,7 +529,6 @@ def generic_test(queue, kern, backend="OPENCL", nruns=5, warmup_runs=2):
         start = time.time()
 
         # print("Setting measured execution latency to zero")
-        #try:
         measured_latency = measure_execution_latency(
                 queue, kern, arg_dict, nruns, warmup_runs)
         #except Exception as e:
@@ -538,6 +537,7 @@ def generic_test(queue, kern, backend="OPENCL", nruns=5, warmup_runs=2):
         #    measured_latency = None
         avg_time = measure_execution_time(
             queue, kern, arg_dict, nruns, warmup_runs)
+        
 
         end = time.time()
         print("FINISHING EXECUTION", end - start, "seconds")
@@ -1299,6 +1299,10 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
                 print(e)
                 print("Run failed due to a CL runtime error. Returning error return time")
                 avg_time, wall_clock_time = error_return_time, error_return_time
+            #except lp.diagnostic.LoopyError as e:
+            #    print(e)
+            #    avg_time, wall_clock_time = error_return_time, error_return_time
+
         else:  # processpool and pebble concurrent processes will break with MPI, use subprocess instead
             avg_time, measured_latency, wall_clock_time = run_concurrent_test_with_timeout(
                 queue, knl, test_fn, timeout=timeout, method=method)
