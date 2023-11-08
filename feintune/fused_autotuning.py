@@ -599,7 +599,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
                          max_flop_rate=max_flop_rate,
                          device_memory_bandwidth=device_memory_bandwidth,
                          device_latency=device_latency, timeout=timeout, save_path=save_path,
-                         max_evals=100, required_new_evals=100, eval_str=eval_str)
+                         max_evals=200, required_new_evals=200, eval_str=eval_str)
         else:
             print("ONLY TESTING THE FIRST 20 transformations")
             from random import shuffle
