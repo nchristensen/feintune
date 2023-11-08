@@ -254,7 +254,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
     # Note that using Popen (forking) with MPI often results in strange errors and unpredictable crashes. 
     # Only use subprocess with non-MPI executions
-    if False:
+    if True:
         wrapper_script = None
         method = "thread"#"subprocess"
     else:
@@ -267,6 +267,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         # export IBV_FORK_SAFE=1
         # export RDMAV_HUGEPAGES_SAFE=1
         # may or may not help to address this problem.
+        # (On Crusher, it eliminates the segfaults but there are still MPICH errors
         # See https://docs.nersc.gov/development/languages/python/using-python-perlmutter/#known-issues
 
         import feintune
