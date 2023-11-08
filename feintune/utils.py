@@ -8,6 +8,21 @@ from pytools import memoize
 from frozendict import frozendict
 
 
+def mpi_read_all(filename):
+    import mpi4py.MPI as MPI
+    import os
+    import io
+    #print("Beginning MPI IO")
+    fsize = os.path.getsize(filename)
+    buf = bytearray(fsize)
+    f = MPI.File.Open(comm, filename)
+    f.Read_all(buf)
+    f.Close()
+    file = io.TextIOWrapper(buf)
+    return file
+    #print("Ending MPI IO")
+
+
 def load_hjson(filename):
     hjson_file = open(filename, "rt")
     hjson_text = hjson_file.read()

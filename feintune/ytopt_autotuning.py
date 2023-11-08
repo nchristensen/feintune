@@ -335,17 +335,19 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
     # Maybe use pandas instead?
     if exists(csv_file_str):
+        from feintune.utils import mpi_read_all
         print(f"Loading saved data from {csv_file_str}")
-        with open(csv_file_str) as csvfile:
-            row_list = list(csv.reader(csvfile))
-            column_names = row_list[0]
-            # assert column_names[-4] == "num_elements"
-            for row in row_list[1:]:
-                p = dict(zip(column_names, [int(item) for item in row[:-2]]))
-                #if float(row[-2]) <= timeout:  # Eliminate
-                initial_observations.append((p, float(row[-2]),))
-                # if int(row[-4]) == nelem:
-                #    pre_existing_evals += 1
+        #with open(csv_file_str) as csvfile:
+        csvfile = mpi_read_all(csv_file_str)
+        row_list = list(csv.reader(csvfile))
+        column_names = row_list[0]
+        # assert column_names[-4] == "num_elements"
+        for row in row_list[1:]:
+            p = dict(zip(column_names, [int(item) for item in row[:-2]]))
+            #if float(row[-2]) <= timeout:  # Eliminate
+            initial_observations.append((p, float(row[-2]),))
+            # if int(row[-4]) == nelem:
+            #    pre_existing_evals += 1
 
         num_random = 0
     else:
@@ -379,6 +381,11 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         print(pre_existing_evals, max_evals)
 
     best_result = None
+
+    #if "mpi" in eval_str:
+        #print("WAITING AT BARRIER")
+        #comm = MPI.COMM_WORLD
+    comm.Barrier()
 
     # Not sure if this works for ray
     if (exec_id == 0 and "mpi" in eval_str) or "mpi" not in eval_str:
@@ -515,10 +522,10 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                     else:
                         print("Run return error return time. Not dumping to hjson.")
 
-    if "mpi" in eval_str:
-        print("WAITING AT BARRIER")
+    #if "mpi" in eval_str:
+    #    print("WAITING AT BARRIER")
         #comm = MPI.COMM_WORLD
-        comm.Barrier()
+    comm.Barrier()
     print("======RETURNING FROM SEARCH========")
     # exit()
     return True

@@ -832,8 +832,8 @@ def get_pickled_tunits(directory_or_files):
                 buf = bytearray(fsize)
                 f = MPI.File.Open(comm, f)
                 f.Read_all(buf)
-                fdict = pickle.loads(buf)
                 f.Close()
+                fdict = pickle.loads(buf)
                 #print("Ending MPI IO")
 
             if isinstance(fdict["tunit"], lp.TranslationUnit):
