@@ -17,7 +17,7 @@ import pyopencl.clrandom
 import loopy as lp
 from loopy.version import LOOPY_USE_LANGUAGE_VERSION_2018_2
 from pyopencl.tools import ImmediateAllocator, MemoryPool
-from frozendict import frozendict
+from immutabledict import immutabledict
 # TODO Remove usage of Pebble, which is broken anyway.
 from pebble import concurrent, ProcessExpired
 from pebble.concurrent.process import _process_wrapper
@@ -595,7 +595,7 @@ def analyze_knl_bandwidth(knl, avg_time, device_latency=None):
     Gbps = bw*1e-9
 
     print(f"Time: {avg_time}, Bytes: {nbytes}, Bandwidth: {Gbps} GB/s")
-    return frozendict({"observed_bandwidth": bw,
+    return immutabledict({"observed_bandwidth": bw,
                        "nbytes_global": nbytes,
                        "device_latency": device_latency})
 
@@ -672,7 +672,7 @@ def analyze_flop_rate(knl, avg_time, max_flop_rate=None, latency=None):
     # print()
 
     # gflop_rate, frac_peak_gflops
-    return frozendict({"observed_flop_rate": flop_rate, "flops": map_flops})
+    return immutabledict({"observed_flop_rate": flop_rate, "flops": map_flops})
 
 
 def get_knl_device_memory_roofline(knl, max_flop_rate, device_latency, device_memory_bandwidth):
@@ -1164,10 +1164,8 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
     #if device_memory_bandwidth is None:
     #    device_memory_bandwidth = np.inf
 
-    if error_return_time is None and timeout is not None:
-        error_return_time = timeout + 1
-    else:
-        error_return_time = max_double
+    if error_return_time is None:
+        error_return_time = timeout + 1 if timeout is not None else max_double
 
     from feintune.apply_transformations import get_einsums
     neinsums = len(get_einsums(knl_base))
@@ -1396,7 +1394,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
 
     print("ANALYZED FLOP RATE")
 
-    retval = frozendict({"transformations": trans_list, "data": data})
+    retval = immutabledict({"transformations": trans_list, "data": data})
     print(retval)
     return retval
 

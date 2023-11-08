@@ -28,7 +28,8 @@ if use_charm:
 else:
     from feintune.parallel_autotuning_mpi4py_v2 import parallel_autotune
     import mpi4py.MPI as MPI
-    MPI.Init()
+    if not MPI.Is_initialized():
+        MPI.Init()
     comm = MPI.COMM_WORLD
 
 
@@ -588,7 +589,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
                 eval_str = "threadpool"
                 #eval_str = "processpool" # Seems to be busted. "Exception: cannot pickle 'pyopencl._cl._ErrorRecord' object"
                 #eval_str = "subprocess" # Also errors out.
-            elif comm.Get_size() >= 3:
+            elif comm.Get_size() >= 3: # Breaks on Lassen.
                 eval_str = "libensemble"
             else:
                 eval_str = "mpi_comm_executor"
@@ -1178,7 +1179,12 @@ def main(args):
     # queue = cl.CommandQueue(cl_ctx,
     #    properties=cl.command_queue_properties.PROFILING_ENABLE)
     platforms = cl.get_platforms()
-    devices = platforms[0].get_devices(device_type=cl.device_type.GPU)
+    pnum_saved = 0
+    for pnum, platform in enumerate(platforms):
+        if platform.vendor == "NVIDIA Corporation":
+            pnum_saved = pnum
+
+    devices = platforms[pnum_saved].get_devices(device_type=cl.device_type.GPU)
     if comm is not None:
         cl_ctx = cl.Context(
             devices=[devices[comm.Get_rank() % len(devices)]])

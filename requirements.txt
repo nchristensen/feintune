@@ -1,8 +1,7 @@
 # Also needs clpeak from conda for roofline. May be worthwhile to install islpy barvinok
 
 # generated with pipreqs
-feinsum==2022.1
-frozendict==2.3.8
+immutabledict
 func_timeout==4.3.5
 hjson==3.1.0
 islpy==2023.1.2
