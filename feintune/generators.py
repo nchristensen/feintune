@@ -456,11 +456,10 @@ def createConfigSpace(queue, knl):
         a_s.add_hyperparameter(iio)
 
         def i_block_limit(iii, iio):
-            return (iio*iii > n_out) and (iio > 1)
+            return iio*iii > n_out
 
         avoid_pointless_i_blocks = cs.ForbiddenCallableRelation(a_s["iii"], a_s["iio"],
                                                                 i_block_limit)
-
         def is_not_factor_of_n_out(iii, iio):
             return n_out % (iio*iii) != 0
 
@@ -471,7 +470,7 @@ def createConfigSpace(queue, knl):
         a_s.add_forbidden_clause(limit_work_groups)
         a_s.add_forbidden_clause(limit_local_memory_use)
         a_s.add_forbidden_clause(avoid_pointless_i_blocks)
-        # a_s.add_forbidden_clause(enforce_factor_of_n_out)
+        #a_s.add_forbidden_clause(enforce_factor_of_n_out)
 
     else:
 
@@ -506,13 +505,14 @@ def createConfigSpace(queue, knl):
     a_s.add_hyperparameter(group_idofs_hyp)
 
     #ilp_options = ["unr", "ilp.unr", "ilp.seq", "for"]
-    ilp_options = [0,1,2,3] # libEnsemble doesn't support strings
+    #ilp_options = [0,1,2,3] # libEnsemble doesn't support strings
+    #"ilp.seq" and "for" breaks code generation sometimes
     iel_ilp_hyp = cs.OrdinalHyperparameter(
-        "iel_ilp", ilp_options, default_value=1)
+        "iel_ilp", [0,1], default_value=None)
     a_s.add_hyperparameter(iel_ilp_hyp)
 
     idof_ilp_hyp = cs.OrdinalHyperparameter(
-        "idof_ilp", ilp_options, default_value=1)
+        "idof_ilp", [0,1], default_value=None)
     a_s.add_hyperparameter(idof_ilp_hyp)
 
     swap_local_hyp = cs.OrdinalHyperparameter(
@@ -658,9 +658,8 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
     prefetch_vals = [0] if indirection else [0,1]
 
     #ilp_options = ["unr", "ilp.unr", "ilp.seq", "for"]
-    ilp_options = [0,1,2,3]
-    iel_ilp_vals = ilp_options
-    idof_ilp_vals = ilp_options
+    iel_ilp_vals = [0,1] # ilp.seq and "for" break code generation sometimes. 
+    idof_ilp_vals = [0,1]
     group_idof_vals = [0,1]
     swap_local_vals = [0,1]
 
@@ -927,7 +926,11 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp="ilp.un
         nbatches = 1
 
     ilp_options = ["unr", "ilp.unr", "ilp.seq", "for"]
-    swap_local = False
+
+    #iel_ilp = 1
+    #idof_ilp = 1
+    #swap_local = True # Maybe only turn off if prefetching is disabled.
+    
     # Helpful if need to temporarily change this for debugging
 
     g0 = "for"
@@ -964,11 +967,11 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp="ilp.un
             e_prefetch_str = f"{e}"
             g1 = "g.0"
             l1 = "l.0"
-        elif kii == 1:
-            trans_list.append(("split_iname", (f"{e}", kio,),
-                               (("outer_tag", g0,), ("inner_tag", ilp0,), ("slabs", ko_slabs,),),))
-            l1 = "l.0"
-            e_prefetch_str = f"{e}_inner"
+        #elif kii == 1:
+        #    trans_list.append(("split_iname", (f"{e}", kio,),
+        #                       (("outer_tag", g0,), ("inner_tag", ilp0,), ("slabs", ko_slabs,),),))
+        #    l1 = "l.0"
+        #    e_prefetch_str = f"{e}_inner"
         elif kio == kii:
             # No potential for ilp
             if not swap_local:
@@ -982,9 +985,10 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp="ilp.un
 
             e_prefetch_str = f"{e}_inner"
         else:
+            trans_list.append(("split_iname", (f"{e}", kio,),
+                           (("outer_tag", g0,), ("slabs", ko_slabs,),),))
+
             if not swap_local: 
-                trans_list.append(("split_iname", (f"{e}", kio,),
-                               (("outer_tag", g0,), ("slabs", ko_slabs,),),))
                 trans_list.append(("split_iname", (f"{e}_inner", kii,),
                                (("outer_tag", ilp0,), ("inner_tag", l0,), ("slabs", kio_slabs,),),))
 
@@ -1004,21 +1008,19 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp="ilp.un
         elif iii >= n_out:
             # Single global work group
             trans_list.append(("tag_inames", (((f"{i}", l1,),),),))
-        elif iii == 1:
-            trans_list.append(("split_iname", (f"{i}", iio,),
-                           (("outer_tag", g1,), ("inner_tag", ilp1,), ("slabs", io_slabs,),),))
+        #elif iii == 1:
+        #    trans_list.append(("split_iname", (f"{i}", iio,),
+        #                   (("outer_tag", g1,), ("inner_tag", ilp1,), ("slabs", io_slabs,),),))
         elif iio == iii:
             trans_list.append(("split_iname", (f"{i}", iio,),
                            (("outer_tag", g1,), ("inner_tag", l1,), ("slabs", io_slabs,),),))
             #trans_list.append(("tag_inames", (((f"{i}_inner", l1,),),),))
-        """
         else:
             trans_list.append(("split_iname", (f"{i}", iio,),
                                (("outer_tag", g1,), ("slabs", io_slabs,),),))
             # The ilp tag can be problematic with multiple independent blocks https://github.com/inducer/loopy/issues/418
             trans_list.append(("split_iname", (f"{i}_inner", iii,),
                                (("outer_tag", ilp1,), ("inner_tag", l1,), ("slabs", iio_slabs,),),))
-            #trans_list.append(("tag_inames", (((f"{i}_inner_inner", l1,),),),))
         #"""
 
         trans_list = trans_list + apply_last_list
@@ -1027,7 +1029,7 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp="ilp.un
         # Could also use compiler hints instead. See https://documen.tician.de/loopy/ref_kernel.html#iname-tags
         j_prefetch_str = "" if n_in == 1 else f"{j},"
         # Can make the kernel unschedulable.
-        #"""
+        """
         if n_in == 1:
             j_prefetch_str = ""
         elif ji == 1:
@@ -1041,7 +1043,7 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp="ilp.un
             jo_slabs = (0,0)# if n_in % ji == 0 or nbatches > 1 else (0,1)
             trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag",unr,),("slabs", jo_slabs,),),))
             j_prefetch_str = f"{j}_outer,{j}_inner,"
-        #"""
+        """
 
         # Reduction inames. Not a lot to do
         if r is not None:
