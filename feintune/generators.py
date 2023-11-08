@@ -507,18 +507,28 @@ def createConfigSpace(queue, knl):
     #ilp_options = ["unr", "ilp.unr", "ilp.seq", "for"]
     #ilp_options = [0,1,2,3] # libEnsemble doesn't support strings
     #"ilp.seq" and "for" breaks code generation sometimes
+    
+    # "for" and "ilp.seq" tend to cause code generation errors
     iel_ilp_hyp = cs.OrdinalHyperparameter(
-        "iel_ilp", [0,1], default_value=None)
+        "iel_ilp", ilp_options, default_value=None)
     a_s.add_hyperparameter(iel_ilp_hyp)
 
     idof_ilp_hyp = cs.OrdinalHyperparameter(
-        "idof_ilp", [0,1], default_value=None)
+        "idof_ilp", ilp_options, default_value=None)
     a_s.add_hyperparameter(idof_ilp_hyp)
-
+    
+    # True can cause unfound static maximum error 
     swap_local_hyp = cs.OrdinalHyperparameter(
         "swap_local", [0,1], default_value=0)
     a_s.add_hyperparameter(swap_local_hyp)
 
+    # These can prevent loopy from raising an error. Currently just
+    # handling the error and returning the error return time
+    # a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["swap_local"], 1))
+    # a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["iel_ilp"], 2))
+    # a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["iel_ilp"], 3))
+    # a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["idof_ilp"], 2))
+    # a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["idof_ilp"], 3))
 
     # Hyperparameter for the number of elements. This is set to be a constant, but
     # should allow the tests of kernels with different element counts to inform
@@ -658,8 +668,9 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
     prefetch_vals = [0] if indirection else [0,1]
 
     #ilp_options = ["unr", "ilp.unr", "ilp.seq", "for"]
-    iel_ilp_vals = [0,1] # ilp.seq and "for" break code generation sometimes. 
-    idof_ilp_vals = [0,1]
+    # Currently handling codegen breakage exception and returnin error_return_time
+    iel_ilp_vals = ilp_options # swap_local, ilp.seq and "for" break code generation sometimes. 
+    idof_ilp_vals = ilp_options
     group_idof_vals = [0,1]
     swap_local_vals = [0,1]
 
@@ -929,7 +940,7 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp="ilp.un
 
     #iel_ilp = 1
     #idof_ilp = 1
-    #swap_local = True # Maybe only turn off if prefetching is disabled.
+    #swap_local = False # Maybe only turn off if prefetching is disabled.
     
     # Helpful if need to temporarily change this for debugging
 
@@ -1026,10 +1037,11 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp="ilp.un
         trans_list = trans_list + apply_last_list
         # Should the i loop have (0,1) slabs for both?
 
-        # Could also use compiler hints instead. See https://documen.tician.de/loopy/ref_kernel.html#iname-tags
         j_prefetch_str = "" if n_in == 1 else f"{j},"
-        # Can make the kernel unschedulable.
-        """
+
+        # Could also use compiler hints instead. See https://documen.tician.de/loopy/ref_kernel.html#iname-tags
+        # How good are the compilers about handling the hints?
+        #"""
         if n_in == 1:
             j_prefetch_str = ""
         elif ji == 1:
@@ -1043,9 +1055,9 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp="ilp.un
             jo_slabs = (0,0)# if n_in % ji == 0 or nbatches > 1 else (0,1)
             trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag",unr,),("slabs", jo_slabs,),),))
             j_prefetch_str = f"{j}_outer,{j}_inner,"
-        """
+        #"""
 
-        # Reduction inames. Not a lot to do
+        # Reduction inames. Not a lot to do except "for" or "unr".
         if r is not None:
             trans_list.append(("tag_inames", (((f"{r}", unr,),),),))
         if f is not None:
