@@ -1303,6 +1303,10 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
                 print("Loopy raised an error. Returning error return time.")
                 print(e)
                 avg_time, wall_clock_time = error_return_time, error_return_time
+            except IndexError as e:
+                print("IndexError raised during code gneration. Returning error return time.")
+                print(e)
+                avg_time, wall_clock_time = error_return_time, error_return_time
 
         else:  # processpool and pebble concurrent processes will break with MPI, use subprocess instead
             avg_time, measured_latency, wall_clock_time = run_concurrent_test_with_timeout(
