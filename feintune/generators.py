@@ -524,7 +524,7 @@ def createConfigSpace(queue, knl):
 
     # These can prevent loopy from raising an error. Currently just
     # handling the error and returning the error return time
-    # a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["swap_local"], 1))
+    a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["swap_local"], 1))
     #a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["iel_ilp"], 2))
     #a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["iel_ilp"], 3))
     #a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["idof_ilp"], 2))
@@ -673,7 +673,7 @@ def einsum3to2_kernel_tlist_generator_v2(queue, knl, **kwargs):
     iel_ilp_vals = ilp_options # swap_local, ilp.seq and "for" break code generation sometimes. 
     idof_ilp_vals = ilp_options
     group_idof_vals = [0,1]
-    swap_local_vals = [0,1]
+    swap_local_vals = [0] #[0,1]
 
     from itertools import product
     trans_list_list = []
