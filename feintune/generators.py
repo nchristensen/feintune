@@ -505,7 +505,7 @@ def createConfigSpace(queue, knl):
     a_s.add_hyperparameter(group_idofs_hyp)
 
     #ilp_options = ["unr", "ilp.unr", "ilp.seq", "for"]
-    #ilp_options = [0,1,2,3] # libEnsemble doesn't support strings
+    ilp_options = [0,1,2,3] # libEnsemble doesn't support strings
     #"ilp.seq" and "for" breaks code generation sometimes
     
     # "for" and "ilp.seq" tend to cause code generation errors
