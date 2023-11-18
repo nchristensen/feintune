@@ -359,7 +359,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
     max_evals = min(max_evals, pre_existing_evals + required_new_evals)
 
     # Note that the initial observations count toward max_evals.
-    if eval_str != "libensemble":
+    if eval_str != "mpi_libensemble":
         searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner,
                     set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations)
     else:
@@ -381,15 +381,13 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         print("=======SKIPPING SEARCH: EXISTING EVALS >= MAX_EVALS")
         print(pre_existing_evals, max_evals)
 
-    best_result = None
-
     #if "mpi" in eval_str:
         #print("WAITING AT BARRIER")
         #comm = MPI.COMM_WORLD
     comm.Barrier()
 
     # Not sure if this works for ray
-    if (exec_id == 0 and "mpi" in eval_str) or "mpi" not in eval_str:
+    if (exec_id == 0 and ("mpi" in eval_str) or "mpi" not in eval_str:
 
         # Write best result to hjson file
         with open(csv_file_str) as csvfile:
