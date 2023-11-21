@@ -93,7 +93,7 @@ def test(args):
             # ordered the same, needs to order the devices by some pci_id first
             # Also, are pids contiguous?
             if args["exec_id"] is None:
-                if eval_str in {"mpi_comm_executor", "mpi_pool_executor", "libensemble"}:
+                if eval_str in {"mpi_comm_executor", "mpi_pool_executor", "mpi_libensemble"}:
                         import mpi4py
                         # Prevent mpi4py from automatically initializing.
                         mpi4py.rc.initialize = False
@@ -363,10 +363,17 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner,
                     set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations)
     else:
+        # use_workflow_dir is set in ytopt
+        libE_specs = {"disable_log_files": True,
+                      "save_H_and_persis_on_abort": False,
+                      #"nworkers": 2
+                      #"comms": "local"
+                     }
+
         assert comm.Get_size() >= 3
         searcher = LibEnsembleAMBS(problem=at_problem, output_file_base=output_file_base, learner=learner,
-                    set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations) 
-                    #libE_specs={"nworkers": 2})#, "comms": "local"}) # won't work with opencl
+                    set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations,
+                    libE_specs=libE_specs)
 
     #print("WAITING AT THIS BARRIER")
     #comm.Barrier()
@@ -387,7 +394,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
     comm.Barrier()
 
     # Not sure if this works for ray
-    if (exec_id == 0 and ("mpi" in eval_str) or "mpi" not in eval_str:
+    if (comm.Get_rank() == 0 and "mpi" in eval_str) or "mpi" not in eval_str:
 
         # Write best result to hjson file
         with open(csv_file_str) as csvfile:
@@ -442,7 +449,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                 hjson_file_str = save_path + "/" + pid + ".hjson"
                 # Kernels that use too much memory still aren't prevented from running.
                 # In particular, if the timout time is None or infinity
-                update_hjson = True
+                update_hjson = True#prexisting_evals < max_evals#True
                 """ # Broken currently.
                 if exists(hjson_file_str):
                     from feintune.utils import load_hjson
