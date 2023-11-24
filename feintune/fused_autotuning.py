@@ -585,6 +585,8 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
     if (len(est[0]), len(est[1]),) in handled_pairs and not indirection:
         if use_ytopt:
             # Won't work with charm. But the charm4py executor is broken anyway.
+            eval_str = "local_libensemble"
+            """
             if comm.Get_size() <= 1:
                 eval_str = "local_libensemble"
                 #eval_str = "threadpool"
@@ -596,6 +598,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
             else:
                 eval_str = "mpi_comm_executor"
                 # eval_str = "mpi_pool_executor"
+            """
             input_space = createConfigSpace(queue, sk)
             print("TESTING YTOPT")
             ytopt_tuning(queue, sk, platform_id, input_space, program_id=program_id, normalized_program_id=normalized_program_id,
@@ -822,7 +825,8 @@ def get_pickled_tunits(directory_or_files):
         _, filename = os.path.split(f)
         filename = str(filename)
 
-        if os.path.isfile(f) and (filename.endswith("_0.pickle") or filename.endswith(".pkl")):
+        # Just looking at rank zero kernels for now.
+        if os.path.isfile(f) and (filename.endswith("_0.pickle") or filename.endswith("_0.pkl")):
 
             if False:  # POSIX file reading
                 f = open(f, "rb")

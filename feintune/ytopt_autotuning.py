@@ -370,12 +370,18 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
     max_evals = min(max_evals, pre_existing_evals + required_new_evals)
 
     # Note that the initial observations count toward max_evals.
+    libE_specs = {"disable_log_files": True,
+                  "save_H_and_persis_on_abort": False,
+                  #"nworkers": 2
+                  #"comms": "local"
+                 }
+
     if eval_str == "mpi_libensemble":
         assert comm.Get_size() >= 3
         searcher = LibEnsembleAMBS(problem=at_problem, output_file_base=output_file_base, learner=learner,
                     set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations,
                     error_flag_val=error_return_time,
-                    libE_specs={})
+                    libE_specs=libE_specs)
     elif eval_str == "local_libensemble":
         from libensemble.resources.resources import GlobalResources
         from libensemble.resources.node_resources import get_sub_node_resources
@@ -400,7 +406,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         searcher = LibEnsembleAMBS(problem=at_problem, output_file_base=output_file_base, learner=learner,
                     set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations,
                     error_flag_val=error_return_time,
-                    libE_specs={"nworkers": nworkers, "comms": "local", "num_resource_sets": n_sim_workers})
+                    libE_specs=libE_specs | {"nworkers": nworkers, "comms": "local", "num_resource_sets": n_sim_workers})
     else:
         searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner, error_flag_val=error_return_time,
                     set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations)
@@ -417,15 +423,13 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         print("=======SKIPPING SEARCH: EXISTING EVALS >= MAX_EVALS")
         print(pre_existing_evals, max_evals)
 
-    best_result = None
-
     #if "mpi" in eval_str:
         #print("WAITING AT BARRIER")
         #comm = MPI.COMM_WORLD
     comm.Barrier()
 
     # Not sure if this works for ray
-    if (exec_id == 0 and "mpi" in eval_str) or "mpi" not in eval_str:
+    if (comm.Get_rank() == 0 and "mpi" in eval_str) or "mpi" not in eval_str:
 
         # Write best result to hjson file
         with open(csv_file_str) as csvfile:
@@ -480,7 +484,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                 hjson_file_str = save_path + "/" + pid + ".hjson"
                 # Kernels that use too much memory still aren't prevented from running.
                 # In particular, if the timout time is None or infinity
-                update_hjson = True
+                update_hjson = True#prexisting_evals < max_evals#True
                 """ # Broken currently.
                 if exists(hjson_file_str):
                     from feintune.utils import load_hjson
