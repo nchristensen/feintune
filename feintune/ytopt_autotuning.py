@@ -383,13 +383,19 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                     error_flag_val=error_return_time,
                     libE_specs=libE_specs)
     elif eval_str == "local_libensemble":
-        from libensemble.resources.resources import GlobalResources
+
+        from libensemble.resources.env_resources import EnvResources
+        #from libensemble.resources.resources import GlobalResources
+        #nodelist = GlobalResources.get_global_nodelist()
+
         from libensemble.resources.node_resources import get_sub_node_resources
-        nodelist = GlobalResources.get_global_nodelist()
+        envR = EnvResources()
+        nodelist = envR.get_nodelist()
+        #print(envR.get_nodelist())
 
         print(nodelist)
 
-        nnodes = len(nodelist)
+        nnodes = max(1, len(nodelist))
 
         sn_resources = get_sub_node_resources() # Assume all nodes are identical
         if len(sn_resources) == 3:
