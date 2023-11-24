@@ -377,7 +377,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         num_random = 0
     else:
         print("No saved data found.")
-        num_random = 2
+        num_random = None
 
     pre_existing_evals = len(initial_observations)
     max_evals = min(max_evals, pre_existing_evals + required_new_evals)
@@ -391,6 +391,8 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
     if eval_str == "mpi_libensemble":
         assert comm.Get_size() >= 3
+        if num_random is None:
+            num_random = min(2, 2*(comm.Get_size() - 2))
         searcher = LibEnsembleAMBS(problem=at_problem, output_file_base=output_file_base, learner=learner,
                     set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations,
                     error_flag_val=error_return_time, environment_failure_flag=environment_failure_flag,
@@ -415,18 +417,23 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
             gpus_per_node = sn_resources[-1]
         else:
             # Although on rocinante it should return 1 rather than 0
-            gpus_per_node = 0
+            gpus_per_node = 1
 
         assert gpus_per_node > 0
 
         n_sim_workers = gpus_per_node*nnodes
-        nworkers = n_sim_workers + 1 # 1 Manager (not a worker), 1 worker for persistent generator, more workers for the gpus
+        if num_random is None:
+            num_random = 2*n_sim_workers
+        #nworkers = n_sim_workers + 1 # 1 Manager (not a worker), 1 worker for persistent generator, more workers for the gpus
+        nworkers = n_sim_workers # See if this works better on polaris
         print(f"Running with {nworkers} workers.")
         searcher = LibEnsembleAMBS(problem=at_problem, output_file_base=output_file_base, learner=learner,
                     set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations,
                     error_flag_val=error_return_time, environment_failure_flag=environment_failure_flag,
                     libE_specs=libE_specs | {"nworkers": nworkers, "comms": "local", "num_resource_sets": n_sim_workers})
     else:
+        if num_random is None:
+            num_random = 2
         searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner, error_flag_val=error_return_time,
                     environment_failure_flag=environment_failure_flag,
                     set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations)
