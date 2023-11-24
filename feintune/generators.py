@@ -84,7 +84,11 @@ def j_inner_options(n_in, start_val=None):
 
 def batch_size_options(knl):
     neinsums = len(get_einsums(knl))
+    #assert neinsums > 0
     batch_size_list = np.arange(1, neinsums + 1)
+    # Handle kernels with no einsums.
+    #if len_batch_size_list == 0:
+    #    batch_size_list = [1]
     # Restricted version
     """
     batch_size_list = [(batch_size, int(np.ceil(neinsums/batch_size))) for batch_size in range(1, neinsums + 1)]
@@ -933,10 +937,12 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp="ilp.un
     batch_size, kio, kii, iio, iii, ji = params
     neinsums = len(get_einsums(knl))
     assert neinsums > 0
-    nbatches = int(np.ceil(neinsums / batch_size))
+    #assert batch_size > 0
     if batch_size == 0:
         batch_size = neinsums
         nbatches = 1
+    else:
+        nbatches = int(np.ceil(neinsums / batch_size))
 
     ilp_options = ["unr", "ilp.unr", "ilp.seq", "for"]
 
