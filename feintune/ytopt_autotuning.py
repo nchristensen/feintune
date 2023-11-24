@@ -263,10 +263,13 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
     # Note that using Popen (forking) with MPI often results in strange errors and unpredictable crashes. 
     # Only use subprocess with non-MPI executions
-    if False:
-        wrapper_script = None
-        method = "thread"#"subprocess"
-    else:
+    import feintune
+    dirname = os.path.dirname(feintune.__file__)
+    if eval_str == "local_libensemble":
+        #wrapper_script = str(os.path.join(dirname, "run_objective_fn_sh_mem.py"))
+        wrapper_script = str(os.path.join(dirname, "run_objective_fn_disk.py"))
+        method = None
+    elif eval_str == "mpi_libensemble_subprocess":
         # This is not guaranteed to work as forking within an MPI process has undefined behavior
         # Spectrum MPI (Open MPI based) on Lassen seems to work but MPICH does not tolerate it well.
         # For SS11
@@ -279,11 +282,11 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         # (On Crusher, it eliminates the segfaults but there are still MPICH errors
         # See https://docs.nersc.gov/development/languages/python/using-python-perlmutter/#known-issues
 
-        import feintune
-        dirname = os.path.dirname(feintune.__file__)
-        #wrapper_script = str(os.path.join(dirname, "run_objective_fn_sh_mem.py"))
-        wrapper_script = str(os.path.join(dirname, "run_objective_fn_disk.py"))
+        wrapper_script = str(os.path.join(dirname, "run_objective_fn_sh_mem.py"))
         method = None
+    else:
+        wrapper_script = None
+        method = "thread"#"subprocess"
 
     #method = None#"thread"#None if eval_str == "libensemble" else "thread"
     
