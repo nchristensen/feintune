@@ -424,8 +424,8 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         n_sim_workers = gpus_per_node*nnodes
         if num_random is None:
             num_random = 2*n_sim_workers
-        #nworkers = n_sim_workers + 1 # 1 Manager (not a worker), 1 worker for persistent generator, more workers for the gpus
-        nworkers = n_sim_workers # See if this works better on polaris
+        nworkers = n_sim_workers + 1 # 1 Manager (not a worker), 1 worker for persistent generator, more workers for the gpus
+        #nworkers = n_sim_workers # See if this works better on polaris
         print(f"Running with {nworkers} workers.")
         searcher = LibEnsembleAMBS(problem=at_problem, output_file_base=output_file_base, learner=learner,
                     set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations,
