@@ -586,6 +586,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
         if use_ytopt:
             # Won't work with charm. But the charm4py executor is broken anyway.
             eval_str = "local_libensemble"
+            #eval-str = "mpi_libensemble_subprocess"
             """
             if comm.Get_size() <= 1:
                 eval_str = "local_libensemble"
