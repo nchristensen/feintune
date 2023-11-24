@@ -1003,7 +1003,7 @@ def run_subprocess_with_timeout(queue, knl, test_fn, timeout=max_double, error_r
         proc.kill()
         # with proc:
         #    proc.kill()
-        retval = timeout, None, 0
+        retval = error_return_time, None, 0
 
     # out, err = proc.communicate()
 
@@ -1291,6 +1291,11 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
                     timeout, test_fn, args=(queue, knl,))
                 end = time.time()
                 wall_clock_time = end - start
+            except Exception as e:
+                print(e)
+                print("Run failed and threw and exception. Returning error return time.")
+                avg_time, wall_clock_time = error_return_time, error_return_time
+            # Can probably delete the rest of these.
             except FunctionTimedOut as e:
                 print("Execution timed out")
                 # Don't run and return return an infinite run time
@@ -1304,7 +1309,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
                 print(e)
                 avg_time, wall_clock_time = error_return_time, error_return_time
             except IndexError as e:
-                print("IndexError raised during code gneration. Returning error return time.")
+                print("IndexError raised during code generation. Returning error return time.")
                 print(e)
                 avg_time, wall_clock_time = error_return_time, error_return_time
 

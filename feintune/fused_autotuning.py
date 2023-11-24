@@ -579,28 +579,33 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
     indirection = len(get_indirection_arrays(sk)) > 0
 
     handled_pairs = set([(2, 1,), (3, 2,), (2, 2,), (2, 3)])
-    timeout = 240
+    timeout = 20*60
     platform_id = queue.device.platform.name  # Set to 1 to use Nvidia OpenCL on Monza. Need more robust way.
 
     if (len(est[0]), len(est[1]),) in handled_pairs and not indirection:
         if use_ytopt:
             # Won't work with charm. But the charm4py executor is broken anyway.
+            eval_str = "local_libensemble"
+            """
             if comm.Get_size() <= 1:
-                eval_str = "threadpool"
+                eval_str = "local_libensemble"
+                #eval_str = "threadpool"
                 #eval_str = "processpool" # Seems to be busted. "Exception: cannot pickle 'pyopencl._cl._ErrorRecord' object"
                 #eval_str = "subprocess" # Also errors out.
             elif comm.Get_size() >= 3: # Breaks on Lassen.
-                eval_str = "libensemble"
+                #eval_str = "local_libensemble"
+                eval_str = "mpi_libensemble"
             else:
                 eval_str = "mpi_comm_executor"
                 # eval_str = "mpi_pool_executor"
+            """
             input_space = createConfigSpace(queue, sk)
             print("TESTING YTOPT")
             ytopt_tuning(queue, sk, platform_id, input_space, program_id=program_id, normalized_program_id=normalized_program_id,
                          max_flop_rate=max_flop_rate,
                          device_memory_bandwidth=device_memory_bandwidth,
                          device_latency=device_latency, timeout=timeout, save_path=save_path,
-                         max_evals=200, required_new_evals=200, eval_str=eval_str)
+                         max_evals=300, required_new_evals=None, eval_str=eval_str)
         else:
             print("ONLY TESTING THE FIRST 20 transformations")
             from random import shuffle
@@ -820,7 +825,8 @@ def get_pickled_tunits(directory_or_files):
         _, filename = os.path.split(f)
         filename = str(filename)
 
-        if os.path.isfile(f) and (filename.endswith(".pickle") or filename.endswith(".pkl")):
+        # Just looking at rank zero kernels for now.
+        if os.path.isfile(f) and (filename.endswith("_0.pickle") or filename.endswith("_0.pkl")):
 
             if False:  # POSIX file reading
                 f = open(f, "rb")
@@ -1242,8 +1248,8 @@ def main(args):
             # ID changes based on whether python was run with -O
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
             from feintune.run_tests import get_knl_flops
-            sk_list = sorted(sk_list, key=lambda e: get_knl_flops(
-                e["sk"]), reverse=False)#[172:]#[112:]
+            sk_list = reversed(sorted(sk_list, key=lambda e: get_knl_flops(
+                e["sk"]), reverse=True)[:20])#[126:]#[112:]
             # sk_list = [tunit_dict[1]["tunit"] for tunit_dict in tunit_dicts]
             # """
             # sk_list = [sk for _, sk, _ in sk_list]
