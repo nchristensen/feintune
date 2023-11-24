@@ -585,22 +585,31 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
     if (len(est[0]), len(est[1]),) in handled_pairs and not indirection:
         if use_ytopt:
             # Won't work with charm. But the charm4py executor is broken anyway.
+            eval_str = "local_libensemble"
+            """
             if comm.Get_size() <= 1:
-                eval_str = "threadpool"
+                eval_str = "local_libensemble"
+                #eval_str = "threadpool"
                 #eval_str = "processpool" # Seems to be busted. "Exception: cannot pickle 'pyopencl._cl._ErrorRecord' object"
                 #eval_str = "subprocess" # Also errors out.
             elif comm.Get_size() >= 3: # Breaks on Lassen.
+                #eval_str = "local_libensemble"
                 eval_str = "mpi_libensemble"
             else:
                 eval_str = "mpi_comm_executor"
                 # eval_str = "mpi_pool_executor"
+            """
             input_space = createConfigSpace(queue, sk)
             print("TESTING YTOPT")
             ytopt_tuning(queue, sk, platform_id, input_space, program_id=program_id, normalized_program_id=normalized_program_id,
                          max_flop_rate=max_flop_rate,
                          device_memory_bandwidth=device_memory_bandwidth,
                          device_latency=device_latency, timeout=timeout, save_path=save_path,
+<<<<<<< HEAD
                          max_evals=300, required_new_evals=300, eval_str=eval_str)
+=======
+                         max_evals=300, required_new_evals=None, eval_str=eval_str)
+>>>>>>> e19602632eb2b1ad4506892a9f949a355563dbe5
         else:
             print("ONLY TESTING THE FIRST 20 transformations")
             from random import shuffle

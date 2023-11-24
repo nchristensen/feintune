@@ -932,6 +932,7 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp="ilp.un
     apply_last_list = []
     batch_size, kio, kii, iio, iii, ji = params
     neinsums = len(get_einsums(knl))
+    assert neinsums > 0
     nbatches = int(np.ceil(neinsums / batch_size))
     if batch_size == 0:
         batch_size = neinsums
@@ -1049,6 +1050,11 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp="ilp.un
             # This is equivalent to not doing anything
             #trans_list.append(("tag_inames", (((f"{j}", None,),),),))
             j_prefetch_str = f"{j},"
+        #else:
+        #    trans_list.append(("tag_inames", (((f"{j}", "unr_hint",),),),))
+        #    j_prefetch_str = f"{j},"
+           
+        #"""            
         elif ji == n_in:
             trans_list.append(("tag_inames", (((f"{j}", unr,),),),))
             j_prefetch_str = f"{j},"
@@ -1056,6 +1062,7 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp="ilp.un
             jo_slabs = (0,0)# if n_in % ji == 0 or nbatches > 1 else (0,1)
             trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag",unr,),("slabs", jo_slabs,),),))
             j_prefetch_str = f"{j}_outer,{j}_inner,"
+        #"""
         #"""
 
         # Reduction inames. Not a lot to do except "for" or "unr".

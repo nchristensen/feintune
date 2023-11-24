@@ -22,6 +22,9 @@ from feintune.utils import convert, load_hjson, dump_hjson
 from hashlib import md5
 from random import shuffle
 
+# No guarantee the value written to the csv file is the same
+# as this value.
+#max_double = np.finfo('f').max
 
 numeric_type = Union[np.number, float, int]
 
@@ -140,7 +143,7 @@ def test(args):
                                      timeout=args["timeout"],
                                      method=args["method"],#"subprocess",#"thread",  # "subprocess",#None
                                      run_single_batch=False,
-                                     error_return_time=args["timeout"] + 1)
+                                     error_return_time=args["error_return_time"])
         #"""
     else:
         result = {"data": {"avg_time_predicted": 0.0}}
@@ -158,6 +161,7 @@ class ObjectiveFunction(object):
     device_memory_bandwidth: numeric_type = np.inf
     device_latency: numeric_type = 0
     timeout: Optional[numeric_type] = None
+    error_return_time: Optional[numeric_type] = None
     exec_id: Optional[int] = None
     method: Optional[str] = None
 
@@ -183,7 +187,9 @@ class ObjectiveFunction(object):
         print("BEGINNING TEST")
         # args = (self.timeout, ((None, None,), (test_id, self.platform_id, self.knl, tlist,
         #        generic_test, self.max_flop_rate, self.device_latency, self.device_memory_bandwidth,),),self.eval_str,)
-        args = immutabledict({"timeout": self.timeout,
+        args = immutabledict({
+                           "timeout": self.timeout,
+                           "error_return_time": self.error_return_time,
                            "cur_test": None,
                            "total_tests": None,
                            "test_id": test_id,
@@ -216,7 +222,10 @@ class ObjectiveFunction(object):
             return 1
 
 # TODO: Change default max_evals
-def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, normalized_program_id=None, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, save_path=None, max_evals=10, required_new_evals=0, eval_str="threadpool"):
+def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, normalized_program_id=None, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, save_path=None, max_evals=100, required_new_evals=None, eval_str="threadpool"):
+
+    if required_new_evals is None:
+        required_new_evals = max_evals
 
     import mpi4py
     # Prevent mpi4py from automatically initializing.
@@ -254,7 +263,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
     # Note that using Popen (forking) with MPI often results in strange errors and unpredictable crashes. 
     # Only use subprocess with non-MPI executions
-    if True:
+    if False:
         wrapper_script = None
         method = "thread"#"subprocess"
     else:
@@ -272,14 +281,16 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
         import feintune
         dirname = os.path.dirname(feintune.__file__)
-        wrapper_script = str(os.path.join(dirname, "ytopt_autotuning.py"))
+        #wrapper_script = str(os.path.join(dirname, "run_objective_fn_sh_mem.py"))
+        wrapper_script = str(os.path.join(dirname, "run_objective_fn_disk.py"))
         method = None
 
     #method = None#"thread"#None if eval_str == "libensemble" else "thread"
-
+    
+    error_return_time = 999#np.inf is timeout is None else timeout+1
     obj_func = ObjectiveFunction(knl, eval_str=eval_str, platform_id=platform_id, max_flop_rate=max_flop_rate,
                                  device_memory_bandwidth=device_memory_bandwidth, device_latency=device_latency,
-                                 timeout=timeout, method=method)
+                                 timeout=timeout, method=method, error_return_time=error_return_time)
 
     # If want to time step (advance simulation) while tuning, need to use the actual kernel and data, so each node is
     # independent... but maybe the results can be unified after kernel execution? Each rank should have a different
@@ -359,22 +370,52 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
     max_evals = min(max_evals, pre_existing_evals + required_new_evals)
 
     # Note that the initial observations count toward max_evals.
-    if eval_str != "mpi_libensemble":
-        searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner,
-                    set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations)
-    else:
-        # use_workflow_dir is set in ytopt
-        libE_specs = {"disable_log_files": True,
-                      "save_H_and_persis_on_abort": False,
-                      #"nworkers": 2
-                      #"comms": "local"
-                     }
+    libE_specs = {"disable_log_files": True,
+                  "save_H_and_persis_on_abort": False,
+                  #"nworkers": 2
+                  #"comms": "local"
+                 }
 
+    if eval_str == "mpi_libensemble":
         assert comm.Get_size() >= 3
         searcher = LibEnsembleAMBS(problem=at_problem, output_file_base=output_file_base, learner=learner,
                     set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations,
+                    error_flag_val=error_return_time,
                     libE_specs=libE_specs)
+    elif eval_str == "local_libensemble":
 
+        from libensemble.resources.env_resources import EnvResources
+        #from libensemble.resources.resources import GlobalResources
+        #nodelist = GlobalResources.get_global_nodelist()
+
+        from libensemble.resources.node_resources import get_sub_node_resources
+        envR = EnvResources()
+        nodelist = envR.get_nodelist()
+        #print(envR.get_nodelist())
+
+        print(nodelist)
+
+        nnodes = max(1, len(nodelist))
+
+        sn_resources = get_sub_node_resources() # Assume all nodes are identical
+        if len(sn_resources) == 3:
+            gpus_per_node = sn_resources[-1]
+        else:
+            # Although on rocinante it should return 1 rather than 0
+            gpus_per_node = 0
+
+        assert gpus_per_node > 0
+
+        n_sim_workers = gpus_per_node*nnodes
+        nworkers = n_sim_workers + 1 # 1 Manager (not a worker), 1 worker for persistent generator, more workers for the gpus
+        print(f"Running with {nworkers} workers.")
+        searcher = LibEnsembleAMBS(problem=at_problem, output_file_base=output_file_base, learner=learner,
+                    set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations,
+                    error_flag_val=error_return_time,
+                    libE_specs=libE_specs | {"nworkers": nworkers, "comms": "local", "num_resource_sets": n_sim_workers})
+    else:
+        searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner, error_flag_val=error_return_time,
+                    set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations)
     #print("WAITING AT THIS BARRIER")
     #comm.Barrier()
     #exit()
@@ -535,54 +576,3 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
     print("======RETURNING FROM SEARCH========")
     # exit()
     return True
-
-
-def run_objective_fn_sh_mem(sh_mem_name):
-
-    from multiprocessing import shared_memory
-    from multiprocessing.resource_tracker import unregister
-    import sys
-    from pickle import loads, dumps
-
-    # Maybe should transfer a busid too?
-    sh_mem = shared_memory.SharedMemory(sh_mem_name)
-
-    obj_fn, params, worker_id = loads(sh_mem.buf)
-    obj_fn.exec_id = worker_id
-    #obj_fn.timeout = None
-    sh_mem.buf[:] = bytes(len(sh_mem.buf))
-    #result = 1.0
-    
-    result = obj_fn(params)
-
-    # in_file = open(filename, "rb")
-    # knl, test_fn, bus_id = load(in_file)
-    # in_file.close()
-
-    # knl = loads(base64.b85decode(pickled_knl.encode('ASCII')))
-    # test_fn = loads(base64.b85decode(pickled_test_fn.encode('ASCII')))
-    #queue = get_queue_from_bus_id(int(bus_id))
-    #result = run_single_param_set_v2(queue, knl_base, trans_list, test_fn, **kwargs)
-
-    # Save the result back to the shared memory.
-    pickled_data = dumps(result)
-    assert len(pickled_data) <= sh_mem.size
-    sh_mem.buf[:len(pickled_data)] = pickled_data[:]
-    sh_mem.close()
-
-    #sh_mem.unlink()
-
-    # Workaround for https://github.com/python/cpython/issues/82300
-    # Hopefully will be fixed in 3.13
-    if shared_memory._USE_POSIX and sys.version_info <= (3, 12):
-        unregister(sh_mem._name, "shared_memory")
-    
-    #print("|Average execution time|", avg_time,
-    #      "|Average execution latency|", measured_latency)
-    
-    return result#avg_time, measured_latency
-
-if __name__ == "__main__":
-    import sys
-
-    run_objective_fn_sh_mem(*sys.argv[1:])
