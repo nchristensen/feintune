@@ -932,6 +932,7 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp="ilp.un
     apply_last_list = []
     batch_size, kio, kii, iio, iii, ji = params
     neinsums = len(get_einsums(knl))
+    assert neinsums > 0
     nbatches = int(np.ceil(neinsums / batch_size))
     if batch_size == 0:
         batch_size = neinsums
