@@ -1190,6 +1190,11 @@ def main(args):
     for pnum, platform in enumerate(platforms):
         if platform.vendor == "The pocl project":#"NVIDIA Corporation":
             pnum_saved = pnum
+    for pnum, platform in enumerate(platforms):
+        if platform.vendor == "Advanced Micro Devices, Inc.":#"NVIDIA Corporation":
+            pnum_saved = pnum
+
+
 
     devices = platforms[pnum_saved].get_devices(device_type=cl.device_type.GPU)
     if comm is not None:
