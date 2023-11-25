@@ -394,7 +394,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         if num_random is None:
             num_random = min(2, 2*(comm.Get_size() - 2))
         searcher = LibEnsembleAMBS(problem=at_problem, output_file_base=output_file_base, learner=learner,
-                    set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations,
+                    set_seed=seed, max_evals=max_evals + num_random, set_NI=num_random, initial_observations=initial_observations,
                     error_flag_val=error_return_time, environment_failure_flag=environment_failure_flag,
                     libE_specs=libE_specs)
     elif eval_str == "local_libensemble":
@@ -421,16 +421,24 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
         assert gpus_per_node > 0
 
-        n_sim_workers = gpus_per_node*nnodes
+        # If the number of available resource sets exceeds half of the
+        # available threads, then switch to dedicated mode.
+        num_resource_sets = gpus_per_node*nnodes
+        if (num_resource_sets + 1) > sn_resources[1] // 2:
+            libE_specs["dedicated_mode"]=True
+            num_resource_sets -= gpus_per_node
+
+        overtasking_factor = 1
+        # Limit the numbers of workers per process (sn_resources[0]) or thread (sn_resources[1])
+        nworkers = min(num_resource_sets + 1, overtasking_factor*sn_resources[1]) # 1 Manager (not a worker), 1 worker for persistent generator, more workers for the gpus
         if num_random is None:
-            num_random = 2*n_sim_workers
-        nworkers = n_sim_workers + 1 # 1 Manager (not a worker), 1 worker for persistent generator, more workers for the gpus
-        #nworkers = n_sim_workers # See if this works better on polaris
+            num_random = 2*(nworkers - 1)
+
         print(f"Running with {nworkers} workers.")
         searcher = LibEnsembleAMBS(problem=at_problem, output_file_base=output_file_base, learner=learner,
-                    set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations,
+                    set_seed=seed, max_evals=max_evals + num_random, set_NI=num_random, initial_observations=initial_observations,
                     error_flag_val=error_return_time, environment_failure_flag=environment_failure_flag,
-                    libE_specs=libE_specs | {"nworkers": nworkers, "comms": "local", "num_resource_sets": n_sim_workers})
+                    libE_specs=libE_specs | {"nworkers": nworkers, "comms": "local", "num_resource_sets": num_resource_sets})
     else:
         if num_random is None:
             num_random = 2
