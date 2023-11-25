@@ -1158,7 +1158,7 @@ def main(args):
 
     # dump_subkernels_from_pickled(None)
     # directory = "./pickled_programs_prediction"
-    directories = ["./pickled_programs"
+    directories = [args.indir#"./pickled_programs"
                    # "./pickled_programs_y3_prediction_order_1_eager",
                    # "../pickled_programs_y3_prediction_order_2_lazy",
                    # "./pickled_programs_wave",
@@ -1220,7 +1220,7 @@ def main(args):
     actx = PrefusedFusionContractorArrayContext(queue)
 
     for directory in directories:
-        save_path = "./autotuning_files"  # directory + "/hjson3"
+        save_path = args.outdir#"./autotuning_files"  # directory + "/hjson3"
         # Really a tuple, not a dict
         tunit_dicts = get_pickled_tunits(directory)
 
