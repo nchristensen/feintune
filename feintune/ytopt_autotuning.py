@@ -430,7 +430,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
         overtasking_factor = 1
         # Limit the numbers of workers per process (sn_resources[0]) or thread (sn_resources[1])
-        nworkers = min(num_resource_sets + 1, overtasking_factor*sn_resources[1]) # 1 Manager (not a worker), 1 worker for persistent generator, more workers for the gpus
+        nworkers = min(num_resource_sets + 1, overtasking_factor*sn_resources[1] - 1) # 1 Manager (not a worker), 1 worker for persistent generator, more workers for the gpus
         if num_random is None:
             num_random = 2*(nworkers - 1)
 
