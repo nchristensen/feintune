@@ -529,15 +529,16 @@ def generic_test(queue, kern, backend="OPENCL", nruns=5, warmup_runs=2):
         start = time.time()
 
         # print("Setting measured execution latency to zero")
-        measured_latency = measure_execution_latency(
+        try:
+            measured_latency = measure_execution_latency(
                 queue, kern, arg_dict, nruns, warmup_runs)
-        #except Exception as e:
-        #    print("Unable to measure null kernel latency due to error.")
-        #    print(e)
-        #    measured_latency = None
+        except Exception as e:
+            print("Unable to measure null kernel latency due to error.")
+            print(e)
+            measured_latency = None
+
         avg_time = measure_execution_time(
-            queue, kern, arg_dict, nruns, warmup_runs)
-        
+                queue, kern, arg_dict, nruns, warmup_runs)
 
         end = time.time()
         print("FINISHING EXECUTION", end - start, "seconds")

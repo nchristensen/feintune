@@ -42,6 +42,8 @@ def set_queue(exec_id, platform_name):
         platforms = cl.get_platforms()
     else:
         platforms = [platform for platform in cl.get_platforms() if platform.name == platform_name]
+
+    #platforms = cl.get_platforms()
     #print(platforms)
     #print(platform_num)
     #print(exec_id)
@@ -52,6 +54,9 @@ def set_queue(exec_id, platform_name):
             device_type=cl.device_type.GPU)
         if len(gpu_devices) > 0:
             break
+
+    if len(gpu_devices) == 0:
+        raise OSError("No gpus detected")
 
     # Not sure if gpu_devices has a defined order, so sort it by bus id to prevent
     # oversubscription of a GPU.
@@ -96,7 +101,7 @@ def test(args):
             # ordered the same, needs to order the devices by some pci_id first
             # Also, are pids contiguous?
             if args["exec_id"] is None:
-                if eval_str in {"mpi_comm_executor", "mpi_pool_executor", "mpi_libensemble"}:
+                if eval_str in {"mpi_comm_executor", "mpi_pool_executor", "mpi_libensemble", "mpi_libensemble_subprocess"}:
                         import mpi4py
                         # Prevent mpi4py from automatically initializing.
                         mpi4py.rc.initialize = False
@@ -161,7 +166,8 @@ class ObjectiveFunction(object):
     device_memory_bandwidth: numeric_type = np.inf
     device_latency: numeric_type = 0
     timeout: Optional[numeric_type] = None
-    error_return_time: Optional[numeric_type] = None
+    error_return_time: Optional[numeric_type] = 999
+    environment_failure_flag: Optional[numeric_type] = 998
     exec_id: Optional[int] = None
     method: Optional[str] = None
 
@@ -209,8 +215,11 @@ class ObjectiveFunction(object):
         print(tlist)
 
         if True:
-
-            test_id, result = test(args)
+            try:
+                test_id, result = test(args)
+            except OSError as e:
+                print(e)
+                return self.environment_failure_flag
 
             print("ENDING TEST")
             #if result["data"]["avg_time_predicted"] > self.timeout:
@@ -290,10 +299,11 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
     #method = None#"thread"#None if eval_str == "libensemble" else "thread"
     
+    environment_failure_flag = 998
     error_return_time = 999#np.inf is timeout is None else timeout+1
     obj_func = ObjectiveFunction(knl, eval_str=eval_str, platform_id=platform_id, max_flop_rate=max_flop_rate,
                                  device_memory_bandwidth=device_memory_bandwidth, device_latency=device_latency,
-                                 timeout=timeout, method=method, error_return_time=error_return_time)
+                                 timeout=timeout, method=method, error_return_time=error_return_time, environment_failure_flag=environment_failure_flag)
 
     # If want to time step (advance simulation) while tuning, need to use the actual kernel and data, so each node is
     # independent... but maybe the results can be unified after kernel execution? Each rank should have a different
@@ -367,7 +377,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         num_random = 0
     else:
         print("No saved data found.")
-        num_random = 2
+        num_random = None
 
     pre_existing_evals = len(initial_observations)
     max_evals = min(max_evals, pre_existing_evals + required_new_evals)
@@ -381,9 +391,11 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
     if eval_str == "mpi_libensemble":
         assert comm.Get_size() >= 3
+        if num_random is None:
+            num_random = min(2, 2*(comm.Get_size() - 2))
         searcher = LibEnsembleAMBS(problem=at_problem, output_file_base=output_file_base, learner=learner,
                     set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations,
-                    error_flag_val=error_return_time,
+                    error_flag_val=error_return_time, environment_failure_flag=environment_failure_flag,
                     libE_specs=libE_specs)
     elif eval_str == "local_libensemble":
 
@@ -405,19 +417,25 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
             gpus_per_node = sn_resources[-1]
         else:
             # Although on rocinante it should return 1 rather than 0
-            gpus_per_node = 0
+            gpus_per_node = 1
 
         assert gpus_per_node > 0
 
         n_sim_workers = gpus_per_node*nnodes
+        if num_random is None:
+            num_random = 2*n_sim_workers
         nworkers = n_sim_workers + 1 # 1 Manager (not a worker), 1 worker for persistent generator, more workers for the gpus
+        #nworkers = n_sim_workers # See if this works better on polaris
         print(f"Running with {nworkers} workers.")
         searcher = LibEnsembleAMBS(problem=at_problem, output_file_base=output_file_base, learner=learner,
                     set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations,
-                    error_flag_val=error_return_time,
+                    error_flag_val=error_return_time, environment_failure_flag=environment_failure_flag,
                     libE_specs=libE_specs | {"nworkers": nworkers, "comms": "local", "num_resource_sets": n_sim_workers})
     else:
+        if num_random is None:
+            num_random = 2
         searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner, error_flag_val=error_return_time,
+                    environment_failure_flag=environment_failure_flag,
                     set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations)
     #print("WAITING AT THIS BARRIER")
     #comm.Barrier()
