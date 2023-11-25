@@ -1188,7 +1188,7 @@ def main(args):
     platforms = cl.get_platforms()
     pnum_saved = 0
     for pnum, platform in enumerate(platforms):
-        if platform.vendor == "NVIDIA Corporation":
+        if platform.vendor == "The pocl project":#"NVIDIA Corporation":
             pnum_saved = pnum
 
     devices = platforms[pnum_saved].get_devices(device_type=cl.device_type.GPU)
