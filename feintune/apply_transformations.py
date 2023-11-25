@@ -7,7 +7,7 @@ from meshmode.array_context import EinsumTag
 # decouple_domain can likely be removed.
 from feintune.decouple_domain import decouple_domain
 from feintune.utils import get_domain_list, get_iname_limits
-from frozendict import frozendict
+from immutabledict import immutabledict
 # import pyopencl as cl
 # import pyopencl.array
 # import pyopencl.clrandom
@@ -605,7 +605,7 @@ def get_batch_temporaries_by_size(tunit, nbatches, address_space):
                         else:
                             batch_dict[size] |= set([dep])
 
-        batch_dict_list.append(frozendict(batch_dict))
+        batch_dict_list.append(immutabledict(batch_dict))
 
     return tuple(batch_dict_list)
 
