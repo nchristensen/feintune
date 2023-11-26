@@ -28,6 +28,7 @@ else:
     mpi4py.rc.initialize = False
     import mpi4py.MPI as MPI
     # Check if run with an mpi runner, and initialize MPI if so.
+    # Currently need to set this to True to use mpi
     if False:#not MPI.Is_initialized():
         MPI.Init()
         comm = MPI.COMM_WORLD
