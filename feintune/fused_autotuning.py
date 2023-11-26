@@ -29,7 +29,7 @@ else:
     import mpi4py.MPI as MPI
     # Check if run with an mpi runner, and initialize MPI if so.
     # Currently need to set this to True to use mpi
-    if False:#not MPI.Is_initialized():
+    if not MPI.Is_initialized():
         MPI.Init()
         comm = MPI.COMM_WORLD
     from feintune.parallel_autotuning_mpi4py_v2 import parallel_autotune
@@ -608,11 +608,12 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
             """
             input_space = createConfigSpace(queue, sk)
             print("TESTING YTOPT")
+            max_evals = 30
             ytopt_tuning(queue, sk, platform_id, input_space, program_id=program_id, normalized_program_id=normalized_program_id,
                          max_flop_rate=max_flop_rate,
                          device_memory_bandwidth=device_memory_bandwidth,
                          device_latency=device_latency, timeout=timeout, save_path=save_path,
-                         max_evals=300, required_new_evals=300, eval_str=eval_str)
+                         max_evals=max_evals, required_new_evals=max_evals, eval_str=eval_str)
         else:
             print("ONLY TESTING THE FIRST 20 transformations")
             from random import shuffle
@@ -1261,7 +1262,7 @@ def main(args):
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
             from feintune.run_tests import get_knl_flops
             sk_list = sorted(sk_list, key=lambda e: get_knl_flops(
-                e["sk"]), reverse=False)#[112:]
+                e["sk"]), reverse=True)#[112:]
             # sk_list = [tunit_dict[1]["tunit"] for tunit_dict in tunit_dicts]
             # """
             # sk_list = [sk for _, sk, _ in sk_list]

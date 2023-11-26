@@ -447,10 +447,9 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         searcher = AMBS(problem=at_problem, evaluator=eval_str, output_file_base=output_file_base, learner=learner, error_flag_val=error_return_time,
                     environment_failure_flag=environment_failure_flag,
                     set_seed=seed, max_evals=max_evals, set_NI=num_random, initial_observations=initial_observations)
-    #print("WAITING AT THIS BARRIER")
-    #comm.Barrier()
-    #exit()
 
+
+    update_hjson = True
 
     if pre_existing_evals < max_evals:
         print("==========BEGINNING SEARCH=============")
@@ -460,14 +459,20 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         print("=======SKIPPING SEARCH: EXISTING EVALS >= MAX_EVALS")
         print(pre_existing_evals, max_evals)
 
-    #if "mpi" in eval_str:
-        #print("WAITING AT BARRIER")
-        #comm = MPI.COMM_WORLD
+        hjson_file_str = save_path + "/" + pid + "_full" + ".hjson"
+        if exists(hjson_file_str):
+            from feintune.utils import load_hjson
+            current_hjson = load_hjson(hjson_file_str)
+            cur_data = current_hjson["data"]
+            if "frac_roofline_flop_rate" in cur_data:
+                print("UPDATED HJSON FILE ALREADY EXISTS, SKIPPING GENERATION")
+                update_hjson = False
+
     if comm is not None:
         comm.Barrier()
 
     # Not sure if this works for ray
-    if (comm is not None and comm.Get_rank() == 0 and "mpi" in eval_str) or "mpi" not in eval_str:
+    if update_hjson and (comm is not None and comm.Get_rank() == 0 and "mpi" in eval_str) or "mpi" not in eval_str:
 
         # Write best result to hjson file
         with open(csv_file_str) as csvfile:
@@ -519,10 +524,10 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                 # since ytopt doesn't appear to have a way to return ancillary data.
                 # Could have each rank/process/thread write to a file and then recombine the
                 # results. Note, this writes to pid.hjson, not npid.hjson
-                hjson_file_str = save_path + "/" + pid + ".hjson"
+                #hjson_file_str = save_path + "/" + pid + ".hjson"
                 # Kernels that use too much memory still aren't prevented from running.
                 # In particular, if the timout time is None or infinity
-                update_hjson = True#prexisting_evals < max_evals#True
+                #update_hjson = True#prexisting_evals < max_evals#True
                 """ # Broken currently.
                 if exists(hjson_file_str):
                     from feintune.utils import load_hjson
@@ -538,44 +543,47 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                         # exit()
                 """
 
-                if update_hjson:
-                    tdict = run_single_param_set_v2(in_queue, knl, trans_list, generic_test,
-                                                    max_flop_rate=max_flop_rate,
-                                                    device_memory_bandwidth=device_memory_bandwidth,
-                                                    device_latency=device_latency,
-                                                    timeout=timeout,
-                                                    method=None,#"thread",  # "subprocess",
-                                                    run_single_batch=True,
-                                                    error_return_time=timeout + 1)
-                    if tdict["data"]["avg_time_predicted"] < timeout:
-                        from feintune.utils import dump_hjson
-                        dump_hjson(hjson_file_str, tdict)
+                #if update_hjson:
 
-                        # If the single batch kernel didn't time out
-                        # run the full kernel with those transformations.
-                        if True:  # See what the performance is with the full kernel.
+                hjson_file_str = save_path + "/" + pid + ".hjson"
+                tdict = run_single_param_set_v2(in_queue, knl, trans_list, generic_test,
+                                                max_flop_rate=max_flop_rate,
+                                                device_memory_bandwidth=device_memory_bandwidth,
+                                                device_latency=device_latency,
+                                                timeout=timeout,
+                                                method=None,#"thread",  # "subprocess",
+                                                run_single_batch=True,
+                                                error_return_time=timeout + 1)
+                if tdict["data"]["avg_time_predicted"] < timeout:
+                    from feintune.utils import dump_hjson
+                    dump_hjson(hjson_file_str, tdict)
+
+                    # If the single batch kernel didn't time out
+                    # run the full kernel with those transformations.
+                    if True:  # See what the performance is with the full kernel.
+                        # not exists(hjson_file_str) or pre_existing_evals < max_evals:
+                        if True:
+
                             hjson_file_str = save_path + "/" + pid + "_full" + ".hjson"
-                            # not exists(hjson_file_str) or pre_existing_evals < max_evals:
-                            if True:
+                            print("GENERATING AND EXECUTING FULL KERNEL")
+                            tdict = run_single_param_set_v2(in_queue, knl, trans_list, generic_test,
+                                                            max_flop_rate=max_flop_rate,
+                                                            device_memory_bandwidth=device_memory_bandwidth,
+                                                            device_latency=device_latency,
+                                                            timeout=None,
+                                                            method=None,#"thread",  # "subprocess",
+                                                            run_single_batch=False,
+                                                            error_return_time=timeout + 1)
+                            print("DONE GENERATING AND EXECUTING FULL KERNEL")
+                            if (timeout is None) or (tdict["data"]["avg_time_predicted"] < timeout):
+                                dump_hjson(hjson_file_str, tdict)
+                            else:
+                                print(
+                                    "Run return error return time. Not dumping to hjson.")
 
-                                print("GENERATING AND EXECUTING FULL KERNEL")
-                                tdict = run_single_param_set_v2(in_queue, knl, trans_list, generic_test,
-                                                                max_flop_rate=max_flop_rate,
-                                                                device_memory_bandwidth=device_memory_bandwidth,
-                                                                device_latency=device_latency,
-                                                                timeout=None,
-                                                                method=None,#"thread",  # "subprocess",
-                                                                run_single_batch=False,
-                                                                error_return_time=timeout + 1)
-                                print("DONE GENERATING AND EXECUTING FULL KERNEL")
-                                if tdict["data"]["avg_time_predicted"] < timeout:
-                                    dump_hjson(hjson_file_str, tdict)
-                                else:
-                                    print(
-                                        "Run return error return time. Not dumping to hjson.")
+                else:
+                    print("Run return error return time. Not dumping to hjson.")
 
-                    else:
-                        print("Run return error return time. Not dumping to hjson.")
 
                 hjson_file_str = save_path + "/" + pid + "_default" + ".hjson"
                 if not exists(hjson_file_str):
