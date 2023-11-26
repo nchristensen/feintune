@@ -612,7 +612,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
             """
             input_space = createConfigSpace(queue, sk)
             print("TESTING YTOPT")
-            max_evals = 30
+            max_evals = 300
             ytopt_tuning(queue, sk, platform_id, input_space, program_id=program_id, normalized_program_id=normalized_program_id,
                          max_flop_rate=max_flop_rate,
                          device_memory_bandwidth=device_memory_bandwidth,
