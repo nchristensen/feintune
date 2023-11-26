@@ -5,7 +5,7 @@ from loopy.symbolic import CombineMapper, DependencyMapper
 from typing import FrozenSet
 import numpy as np
 from pytools import memoize
-from frozendict import frozendict
+from immutabledict import immutabledict
 
 
 def mpi_read_all(filename):
@@ -131,7 +131,7 @@ def get_iname_limits(knl):
             if key.name in iname_limits:
                 assert iname_limits[key.name] == limits
             iname_limits[key.name] = (min_val, max_val,)
-    return frozendict(iname_limits)
+    return immutabledict(iname_limits)
 
 
 # Kaushik's indirection finder code

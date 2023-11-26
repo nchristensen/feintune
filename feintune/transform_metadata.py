@@ -39,7 +39,7 @@ THE SOFTWARE.
 """
 
 from pytools.tag import Tag, UniqueTag, tag_dataclass
-from frozendict import frozendict
+from immutabledict import immutabledict
 from typing import Any
 from pytools.tag import Tag, tag_dataclass, UniqueTag
 
@@ -104,7 +104,7 @@ class EinsumArgsTags(Tag):
     tags_map: object
 
     def __init__(self, tags_map):
-        object.__setattr__(self, "tags_map", frozendict(tags_map))
+        object.__setattr__(self, "tags_map", immutabledict(tags_map))
 
 
 class DiscretizationEntityAxisTag(UniqueTag):
