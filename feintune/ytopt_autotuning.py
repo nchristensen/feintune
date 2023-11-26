@@ -231,7 +231,7 @@ class ObjectiveFunction(object):
         else:
             return 1
 
-# TODO: Change default max_evals
+
 def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, normalized_program_id=None, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, save_path=None, max_evals=100, required_new_evals=None, eval_str="threadpool"):
 
     if required_new_evals is None:
@@ -241,10 +241,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
     # Prevent mpi4py from automatically initializing.
     mpi4py.rc.initialize = False
     import mpi4py.MPI as MPI
-    if not MPI.Is_initialized():
-        MPI.Init()
-
-    comm = MPI.COMM_WORLD
+    comm = None
 
     global exec_id
 
@@ -389,6 +386,11 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                  }
 
     if eval_str == "mpi_libensemble" or eval_str == "mpi_libensemble_subprocess":
+        if not MPI.Is_initialized():
+            MPI.Init()
+
+        comm = MPI.COMM_WORLD
+
         assert comm.Get_size() >= 3
         if num_random is None:
             num_random = min(2, 2*(comm.Get_size() - 2))
@@ -460,10 +462,11 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
     #if "mpi" in eval_str:
         #print("WAITING AT BARRIER")
         #comm = MPI.COMM_WORLD
-    comm.Barrier()
+    if comm is not None:
+        comm.Barrier()
 
     # Not sure if this works for ray
-    if (comm.Get_rank() == 0 and "mpi" in eval_str) or "mpi" not in eval_str:
+    if (comm is not None and comm.Get_rank() == 0 and "mpi" in eval_str) or "mpi" not in eval_str:
 
         # Write best result to hjson file
         with open(csv_file_str) as csvfile:
@@ -600,7 +603,8 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
     #if "mpi" in eval_str:
     #    print("WAITING AT BARRIER")
         #comm = MPI.COMM_WORLD
-    comm.Barrier()
+    if comm is not None:
+        comm.Barrier()
     print("======RETURNING FROM SEARCH========")
     # exit()
     return True

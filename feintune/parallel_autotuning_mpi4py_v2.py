@@ -8,8 +8,8 @@
 import mpi4py
 mpi4py.rc.initialize = False
 import mpi4py.MPI as MPI
-if not MPI.Is_initialized():
-    MPI.Init()
+#if not MPI.Is_initialized():
+#    MPI.Init()
 from mpi4py.futures import MPIPoolExecutor, MPICommExecutor
 
 import hjson

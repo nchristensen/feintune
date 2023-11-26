@@ -1,4 +1,3 @@
-# , einsum4to2_kernel_tlist_generator_v2
 from .apply_transformations import get_einsums, get_einsum_counts, get_einsum_types
 from feintune.generators import einsum3to2_kernel_tlist_generator_v2
 from feintune.run_tests import run_single_param_set_v2, generic_test
@@ -13,11 +12,10 @@ from os.path import exists
 from feintune.utils import unique_program_id, convert, load_hjson, dump_hjson, get_domain_list, get_indirection_arrays
 import hjson
 from feintune.generators import createConfigSpace
-from feintune.ytopt_autotuning import ytopt_tuning
 from time import time
 import logging
 
-logger = logging.getLogger(__name__)
+comm = None
 
 use_charm = False
 if use_charm:
@@ -26,12 +24,18 @@ if use_charm:
     from charm4py.charm import Charm, CharmRemote
     from feintune.parallel_autotuning_charm4py_v2 import parallel_autotune
 else:
-    from feintune.parallel_autotuning_mpi4py_v2 import parallel_autotune
+    import mpi4py
+    mpi4py.rc.initialize = False
     import mpi4py.MPI as MPI
-    if not MPI.Is_initialized():
+    # Check if run with an mpi runner, and initialize MPI if so.
+    if False:#not MPI.Is_initialized():
         MPI.Init()
-    comm = MPI.COMM_WORLD
+        comm = MPI.COMM_WORLD
+    from feintune.parallel_autotuning_mpi4py_v2 import parallel_autotune
 
+from feintune.ytopt_autotuning import ytopt_tuning
+
+logger = logging.getLogger(__name__)
 
 # Get the barriers to divide computation into phases
 def get_barriers(tunit):
@@ -586,11 +590,12 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
         if use_ytopt:
             # Won't work with charm. But the charm4py executor is broken anyway.
             eval_str = "local_libensemble"
-            #eval-str = "mpi_libensemble_subprocess"
+            #eval_str = "mpi_libensemble_subprocess" # Problematic for opencl on summit
+            #eval_str = "mpi_libensemble" # This is the only one that works on summit
             """
             if comm.Get_size() <= 1:
-                eval_str = "local_libensemble"
-                #eval_str = "threadpool"
+                #eval_str = "local_libensemble"
+                eval_str = "threadpool"
                 #eval_str = "processpool" # Seems to be busted. "Exception: cannot pickle 'pyopencl._cl._ErrorRecord' object"
                 #eval_str = "subprocess" # Also errors out.
             elif comm.Get_size() >= 3: # Breaks on Lassen.
@@ -829,7 +834,7 @@ def get_pickled_tunits(directory_or_files):
         # Just looking at rank zero kernels for now.
         if os.path.isfile(f) and (filename.endswith("_0.pickle") or filename.endswith("_0.pkl")):
 
-            if False:  # POSIX file reading
+            if comm is None:  # POSIX file reading
                 f = open(f, "rb")
                 fdict = pickle.load(f)
                 f.close()
@@ -1214,10 +1219,10 @@ def main(args):
     # Actually, communicating is probably the better way to do this. Just have the first
     # rank profile.
     if args.benchmark:
-        if comm.Get_rank() == 0:
+        if comm is not None and comm.Get_rank() == 0:
             device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(
                 queue)
-        comm.Barrier()
+
     if comm is not None:
         comm.Barrier()
 
