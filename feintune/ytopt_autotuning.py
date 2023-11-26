@@ -50,6 +50,7 @@ def set_queue(exec_id, platform_name):
     
     gpu_devices = []
     for platform in platforms:
+        #print(platform)
         gpu_devices = platform.get_devices(
             device_type=cl.device_type.GPU)
         if len(gpu_devices) > 0:
@@ -290,15 +291,13 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         # may or may not help to address this problem.
         # (On Crusher, it eliminates the segfaults but there are still MPICH errors
         # See https://docs.nersc.gov/development/languages/python/using-python-perlmutter/#known-issues
-
+        #wrapper_script = str(os.path.join(dirname, "run_objective_fn_disk.py"))
         wrapper_script = str(os.path.join(dirname, "run_objective_fn_sh_mem.py"))
         method = None
     else:
         wrapper_script = None
         method = "thread"#"subprocess"
 
-    #method = None#"thread"#None if eval_str == "libensemble" else "thread"
-    
     environment_failure_flag = 998
     error_return_time = 999#np.inf is timeout is None else timeout+1
     obj_func = ObjectiveFunction(knl, eval_str=eval_str, platform_id=platform_id, max_flop_rate=max_flop_rate,
@@ -389,7 +388,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                   #"comms": "local"
                  }
 
-    if eval_str == "mpi_libensemble":
+    if eval_str == "mpi_libensemble" or eval_str == "mpi_libensemble_subprocess":
         assert comm.Get_size() >= 3
         if num_random is None:
             num_random = min(2, 2*(comm.Get_size() - 2))
