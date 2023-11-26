@@ -388,7 +388,7 @@ def measure_execution_latency(queue, tunit, arg_dict, nruns, warmup_runs):
 # cache_arg_dict = {}
 # HIPBLAS seeems to perform fine after one warmup round. Could probably
 # set warmup_runs to 2.
-def generic_test(queue, kern, backend="OPENCL", nruns=5, warmup_runs=2):
+def generic_test(queue, kern, backend="OPENCL", nruns=5, warmup_runs=2, measure_latency=True):
 
     kern = lp.set_options(kern, "no_numpy")
     kern = lp.set_options(kern, "return_dict")
@@ -529,13 +529,14 @@ def generic_test(queue, kern, backend="OPENCL", nruns=5, warmup_runs=2):
         start = time.time()
 
         # print("Setting measured execution latency to zero")
-        try:
-            measured_latency = measure_execution_latency(
-                queue, kern, arg_dict, nruns, warmup_runs)
-        except Exception as e:
-            print("Unable to measure null kernel latency due to error.")
-            print(e)
-            measured_latency = None
+        measured_latency = None
+        if measure_latency:
+            try:
+                measured_latency = measure_execution_latency(
+                    queue, kern, arg_dict, nruns, warmup_runs)
+            except Exception as e:
+                print("Unable to measure null kernel latency due to error.")
+                print(e)
 
         avg_time = measure_execution_time(
                 queue, kern, arg_dict, nruns, warmup_runs)
@@ -1154,7 +1155,11 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=None, method="
 
 
 # , method="thread"):
-def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=None, device_memory_bandwidth=None, device_latency=None, timeout=None, method=None, run_single_batch=False, error_return_time=None):
+def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=None, device_memory_bandwidth=None, device_latency=None, timeout=None, method=None, run_single_batch=False, error_return_time=None, measure_latency=True):
+
+    if measure_latency == False and method is not None:
+        # Haven't yet passed this parameter
+        raise NotImplementedError
 
     # Should check how well single batch predicted times correllate with actual times
 
@@ -1276,7 +1281,8 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
         if method is None:
             print("Executing in existing process with no timeout")
             start = time.time()
-            _, avg_time, measured_latency = test_fn(queue, knl)
+            # Thread and subprocess don't currently accept the measure_latency parameter
+            _, avg_time, measured_latency = test_fn(queue, knl, measure_latency=measure_latency)
             end = time.time()
             wall_clock_time = end - start
         elif method == "subprocess":

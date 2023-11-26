@@ -149,7 +149,10 @@ def test(args):
                                      timeout=args["timeout"],
                                      method=args["method"],#"subprocess",#"thread",  # "subprocess",#None
                                      run_single_batch=False,
-                                     error_return_time=args["error_return_time"])
+                                     error_return_time=args["error_return_time"],
+                                     # Speed things up a bit by not measuring the latency. Only works
+                                     # for method=None for now.
+                                     measure_latency=False if args["method"] is None else True)
         #"""
     else:
         result = {"data": {"avg_time_predicted": 0.0}}
