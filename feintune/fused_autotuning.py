@@ -15,6 +15,10 @@ from feintune.generators import createConfigSpace
 from time import time
 import logging
 
+# Ignore some annoying warnings relating to pandas.concat
+import warnings
+warnings.filterwarnings("ignore")
+
 comm = None
 
 use_charm = False
@@ -1262,7 +1266,7 @@ def main(args):
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
             from feintune.run_tests import get_knl_flops
             sk_list = sorted(sk_list, key=lambda e: get_knl_flops(
-                e["sk"]), reverse=True)#[112:]
+                e["sk"]), reverse=False)#[112:]
             # sk_list = [tunit_dict[1]["tunit"] for tunit_dict in tunit_dicts]
             # """
             # sk_list = [sk for _, sk, _ in sk_list]

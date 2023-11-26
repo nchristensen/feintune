@@ -410,7 +410,10 @@ def createConfigSpace(queue, knl):
         kii = cs.OrdinalHyperparameter("kii", k_inner_inner_options())
         iii = cs.OrdinalHyperparameter("iii", i_inner_inner_options(
             n_out, max_work_group_size=max_work_group_size))
-        ji = cs.OrdinalHyperparameter("ji", j_inner_options(n_in))
+
+        #ji = cs.OrdinalHyperparameter("ji", j_inner_options(n_in))
+        # Tag j with unroll loop or don't 
+        ji = cs.OrdinalHyperparameter("ji", [0,1])
 
         a_s.add_hyperparameter(kii)
         a_s.add_hyperparameter(iii)
@@ -426,15 +429,6 @@ def createConfigSpace(queue, knl):
         # Will need to calculate kii*kio for the transformations
         kio = cs.OrdinalHyperparameter("kio", np.arange(1, 13))
         a_s.add_hyperparameter(kio)
-
-        if prefetch and "NVIDIA" in str(queue.device.vendor):
-            pass
-            # a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["kio"], 6))
-            # a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["kio"], 5))
-            # a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["kio"], 4))
-            # a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["kio"], 3))
-            # a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["kio"], 2))
-            # a_s.add_forbidden_clause(cs.ForbiddenEqualsClause(a_s["kii"], 32))
 
         def k_block_limit(kii, kio):
             return (kii*kio > n_elem) and (kio > 1)
@@ -503,10 +497,13 @@ def createConfigSpace(queue, knl):
         "prefetch", [0,1] if prefetch else [0], default_value=0)
     a_s.add_hyperparameter(prefetch_hyp)
 
-    # More esoteric hyperparameters
+    # More esoteric hyperparameters. These might increase the
+    # size of the search space to such an extent that finding
+    # a well performing kernel becomes impossible.
+
     group_idofs_hyp = cs.OrdinalHyperparameter(
         "group_idofs", [0,1], default_value=1)
-    a_s.add_hyperparameter(group_idofs_hyp)
+    #a_s.add_hyperparameter(group_idofs_hyp)
 
     #ilp_options = ["unr", "ilp.unr", "ilp.seq", "for"]
     ilp_options = [0,1,]#2,3] # libEnsemble doesn't support strings
@@ -515,16 +512,16 @@ def createConfigSpace(queue, knl):
     # "for" and "ilp.seq" tend to cause code generation errors
     iel_ilp_hyp = cs.OrdinalHyperparameter(
         "iel_ilp", ilp_options, default_value=None)
-    a_s.add_hyperparameter(iel_ilp_hyp)
+    #a_s.add_hyperparameter(iel_ilp_hyp)
 
     idof_ilp_hyp = cs.OrdinalHyperparameter(
         "idof_ilp", ilp_options, default_value=None)
-    a_s.add_hyperparameter(idof_ilp_hyp)
+    #a_s.add_hyperparameter(idof_ilp_hyp)
     
     # True can cause unfound static maximum error 
     swap_local_hyp = cs.OrdinalHyperparameter(
         "swap_local", [0], default_value=0)
-    a_s.add_hyperparameter(swap_local_hyp)
+    #a_s.add_hyperparameter(swap_local_hyp)
 
     # These can prevent loopy from raising an error. Currently just
     # handling the error and returning the error return time
@@ -541,8 +538,9 @@ def createConfigSpace(queue, knl):
     # Maybe this should be a NormalFloatHyperparameter and cast to an int so it doesn't need
     # to store 10^8 ints. Actually, doesn't it use NormalFloat Hyperparameter under the hood?
     # Breaks at the moment
-    num_elements = cs.NormalIntegerHyperparameter(
-        name="num_elements", mu=n_elem, sigma=0, lower=0, upper=1e8, default_value=n_elem)
+
+    #num_elements = cs.NormalIntegerHyperparameter(
+    #    name="num_elements", mu=n_elem, sigma=0, lower=0, upper=1e8, default_value=n_elem)
     # a_s.add_hyperparameter(num_elements)
 
     return a_s
@@ -919,7 +917,7 @@ def get_inames(knl):
 # Should prefetch just be added to params?
 
 
-def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp="ilp.unr", idof_ilp="ilp.unr", swap_local=False):
+def get_trans_list(knl, params, prefetch=True, group_idof=True, iel_ilp="ilp.unr", idof_ilp="ilp.unr", swap_local=False):
 
     # May be able to use knl.get_constant_iname_length to simplify the code a bit.
 
@@ -965,8 +963,8 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp="ilp.un
     g1 = "g.1" if group_idof else "unr"  #"g.1" 
     l0 = "l.1" if swap_local else "l.0" # Would have to swap order iel and idof transforms are applied to do this.
     l1 = "l.0" if swap_local else "l.1"
-    ilp0 = ilp_options[iel_ilp]#"ilp" if iel_ilp else "unr"
-    ilp1 = ilp_options[idof_ilp]#"ilp" if idof_ilp else "unr"
+    ilp0 = iel_ilp if isinstance(iel_ilp, str) else ilp_options[iel_ilp]#"ilp" if iel_ilp else "unr"
+    ilp1 = idof_ilp if isinstance(idof_ilp, str) else ilp_options[idof_ilp]#"ilp" if idof_ilp else "unr"
     unr = "unr"
     prefetch_tag = "l.auto"
     ilp = "ilp"
@@ -1050,25 +1048,31 @@ def get_trans_list(knl, params, prefetch=True, group_idof=False, iel_ilp="ilp.un
         # Could also use compiler hints instead. See https://documen.tician.de/loopy/ref_kernel.html#iname-tags
         # How good are the compilers about handling the hints?
         #"""
-        if n_in == 1:
-            j_prefetch_str = ""
-        elif ji == 1:
-            # This is equivalent to not doing anything
-            #trans_list.append(("tag_inames", (((f"{j}", None,),),),))
-            j_prefetch_str = f"{j},"
-        #else:
-        #    trans_list.append(("tag_inames", (((f"{j}", "unr_hint",),),),))
-        #    j_prefetch_str = f"{j},"
-           
-        #"""            
-        elif ji == n_in:
-            trans_list.append(("tag_inames", (((f"{j}", unr,),),),))
-            j_prefetch_str = f"{j},"
+        if True:
+            # Just hint to the compiler that this loop can be unrolled
+            if n_in == 1:
+                j_prefetch_str = ""
+            else:
+                j_prefetch_str = f"{j},"
+                if ji == 1:
+                    trans_list.append(("tag_inames", (((f"{j}", "unr_hint",),),),))
+
         else:
-            jo_slabs = (0,0)# if n_in % ji == 0 or nbatches > 1 else (0,1)
-            trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag",unr,),("slabs", jo_slabs,),),))
-            j_prefetch_str = f"{j}_outer,{j}_inner,"
-        #"""
+            # Manually unroll the loop
+            if n_in == 1:
+                j_prefetch_str = ""
+            elif ji == 1:
+                # This is equivalent to not doing anything
+                #trans_list.append(("tag_inames", (((f"{j}", None,),),),))
+                j_prefetch_str = f"{j},"
+               
+            elif ji == n_in:
+                trans_list.append(("tag_inames", (((f"{j}", unr,),),),))
+                j_prefetch_str = f"{j},"
+            else:
+                jo_slabs = (0,0)# if n_in % ji == 0 or nbatches > 1 else (0,1)
+                trans_list.append(("split_iname", (f"{j}", ji,), (("outer_tag","for",), ("inner_tag",unr,),("slabs", jo_slabs,),),))
+                j_prefetch_str = f"{j}_outer,{j}_inner,"
         #"""
 
         # Reduction inames. Not a lot to do except "for" or "unr".

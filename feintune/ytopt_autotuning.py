@@ -189,8 +189,16 @@ class ObjectiveFunction(object):
                   p["iii"],
                   p["ji"],)
 
-        tlist = get_trans_list(self.knl, params, prefetch=p["prefetch"], group_idof=p["group_idofs"],
-                                iel_ilp=p["iel_ilp"], idof_ilp=p["idof_ilp"], swap_local=p["swap_local"])
+        kwargs = {
+                    "prefetch": p["prefetch"],
+                    #"group_idof": p["group_idofs"],
+                    #"iel_ilp": p["iel_ilp"],
+                    #"idof_ilp": p["idof_ilp"],
+                    #"swap_local": p["swap_local"],
+                 }
+
+        tlist = get_trans_list(self.knl, params, **kwargs) 
+                                #group_idof=p["group_idofs"], iel_ilp=p["iel_ilp"], idof_ilp=p["idof_ilp"], swap_local=p["swap_local"])
 
         test_id = get_test_id(tlist)
 
@@ -468,7 +476,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
             current_hjson = load_hjson(hjson_file_str)
             cur_data = current_hjson["data"]
             if "frac_roofline_flop_rate" in cur_data:
-                print("UPDATED HJSON FILE ALREADY EXISTS, SKIPPING GENERATION")
+                print("UP TO DATE HJSON FILE ALREADY EXISTS, SKIPPING GENERATION")
                 update_hjson = False
 
     if comm is not None:
@@ -501,8 +509,15 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                           p["iii"],
                           p["ji"],)
 
-                trans_list = get_trans_list(knl, params, prefetch=p["prefetch"], group_idof=p["group_idofs"],
-                                iel_ilp=p["iel_ilp"], idof_ilp=p["idof_ilp"], swap_local=p["swap_local"])
+                kwargs = {
+                            "prefetch": p["prefetch"],
+                            #"group_idof": p["group_idofs"],
+                            #"iel_ilp": p["iel_ilp"],
+                            #"idof_ilp": p["idof_ilp"],
+                            #"swap_local": p["swap_local"],
+                         }
+
+                trans_list = get_trans_list(knl, params, **kwargs)
 
                 """
                 test_id = get_test_id(trans_list)
