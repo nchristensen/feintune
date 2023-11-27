@@ -295,18 +295,28 @@ def test_face_mass_merged(kern, backend="OPENCL", nruns=10, warmup=True):
     return (B_dev, A_dev, X_dev), avg_time
 
 
-def measure_execution_time(queue, tunit, arg_dict, nruns, warmup_runs):
+def measure_execution_time(queue, tunit, arg_dict, nruns, warmup_runs, pollute_buffers=(None, None,)):
+
+    in_pollute, out_pollute = pollute_buffers
+    pollute_caches = True if in_pollute is not None and out_pollute is not None else False
+
     print("Warming up")
     for i in range(warmup_runs):
         print("Warmup run", i)
+        if pollute_caches:
+            cl.enqueue_copy(queue, out_pollute, in_pollute)
         tunit(queue, **arg_dict)
+    print("Done warming up")
     # queue.finish()
+
 
     sum_time = 0.0
     events = []
     # Should the cache be polluted between runs?
     print("Executing")
     for i in range(nruns):
+        if pollute_caches:
+            cl.enqueue_copy(queue, out_pollute, in_pollute)
         evt, out = tunit(queue, **arg_dict)
         events.append(evt)
     queue.finish()
@@ -538,8 +548,19 @@ def generic_test(queue, kern, backend="OPENCL", nruns=5, warmup_runs=2, measure_
                 print("Unable to measure null kernel latency due to error.")
                 print(e)
 
+        pollute_size = (10*queue.device.global_mem_cache_size) // 4
+        if pollute_size == 0:
+            # Pocl CUDA doesn't currently report global memory cache information
+            # Presumably it isn't that much different from the local memory size, so
+            # use that instead.
+            pollute_size = (10*queue.device.local_mem_size) // 4
+        import sys
+        print("POLLUTE_SIZE", queue.device, queue.device.global_mem_cache_size, file=sys.stderr)
+        from feintune.empirical_roofline import get_buffers
+        d_in_buf, d_out_buf = get_buffers(queue, np.int32, pollute_size, dtype_out=np.int32, n_dtype_out=pollute_size, fill_on_device=True)
+
         avg_time = measure_execution_time(
-                queue, kern, arg_dict, nruns, warmup_runs)
+                queue, kern, arg_dict, nruns, warmup_runs, pollute_buffers=(d_in_buf, d_out_buf))
 
         end = time.time()
         print("FINISHING EXECUTION", end - start, "seconds")
