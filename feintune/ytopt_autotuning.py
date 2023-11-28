@@ -473,11 +473,16 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         full_hjson_file_str = save_path + "/" + pid + "_full" + ".hjson"
         default_hjson_file_str = save_path + "/" + pid + "_full" + ".hjson"
 
-        if exists(hjson_file_str) and exists(default_hjson_file_str):
+        if exists(full_hjson_file_str) and exists(default_hjson_file_str):
             from feintune.utils import load_hjson
-            current_hjson = load_hjson(hjson_file_str)
+
+            current_hjson = load_hjson(full_hjson_file_str)
             cur_data = current_hjson["data"]
-            if "frac_roofline_flop_rate" in cur_data:
+
+            current_default_hjson = load_hjson(default_hjson_file_str)
+            cur_default_data = current_hjson["data"]
+
+            if "frac_roofline_flop_rate" in cur_data and "frac_roofline_flop_rate" in cur_default_data:
                 print("UP TO DATE HJSON FILE ALREADY EXISTS, SKIPPING GENERATION")
                 update_hjson = False
 
