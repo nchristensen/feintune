@@ -461,6 +461,9 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
 
     update_hjson = True
+    hjson_file_str = save_path + "/" + pid + ".hjson"
+    full_hjson_file_str = save_path + "/" + pid + "_full" + ".hjson"
+    default_hjson_file_str = save_path + "/" + pid + "_default" + ".hjson"
 
     if pre_existing_evals < max_evals:
         print("==========BEGINNING SEARCH=============")
@@ -470,10 +473,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         print("=======SKIPPING SEARCH: EXISTING EVALS >= MAX_EVALS")
         print(pre_existing_evals, max_evals)
 
-        full_hjson_file_str = save_path + "/" + pid + "_full" + ".hjson"
-        default_hjson_file_str = save_path + "/" + pid + "_full" + ".hjson"
-
-        if exists(full_hjson_file_str) and exists(default_hjson_file_str):
+        if False:#exists(full_hjson_file_str) and exists(default_hjson_file_str):
             from feintune.utils import load_hjson
 
             current_hjson = load_hjson(full_hjson_file_str)
@@ -568,7 +568,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                         # exit()
                 """
 
-                hjson_file_str = save_path + "/" + pid + ".hjson"
+                #hjson_file_str = save_path + "/" + pid + ".hjson"
                 tdict = run_single_param_set_v2(in_queue, knl, trans_list, generic_test,
                                                 max_flop_rate=max_flop_rate,
                                                 device_memory_bandwidth=device_memory_bandwidth,
@@ -610,7 +610,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                 #hjson_file_str = save_path + "/" + pid + "_default" + ".hjson"
 
                 # This is kind of CEESD specific. Need to generalize the logic.
-                if not exists(hjson_file_str):
+                if not exists(default_hjson_file_str):
                     from meshmode.array_context import PrefusedFusionContractorArrayContext
                     actx = PrefusedFusionContractorArrayContext(in_queue)
                     knl_with_default_transformations = actx.transform_loopy_program(
