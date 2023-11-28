@@ -554,8 +554,7 @@ def generic_test(queue, kern, backend="OPENCL", nruns=5, warmup_runs=2, measure_
             # Presumably it isn't that much different from the local memory size, so
             # use that instead.
             pollute_size = (10*queue.device.local_mem_size) // 4
-        import sys
-        print("POLLUTE_SIZE", queue.device, queue.device.global_mem_cache_size, file=sys.stderr)
+
         from feintune.empirical_roofline import get_buffers
         d_in_buf, d_out_buf = get_buffers(queue, np.int32, pollute_size, dtype_out=np.int32, n_dtype_out=pollute_size, fill_on_device=True)
 
