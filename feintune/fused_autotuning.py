@@ -33,7 +33,7 @@ else:
     import mpi4py.MPI as MPI
     # Check if run with an mpi runner, and initialize MPI if so.
     # Currently need to set this to True to use mpi
-    if not MPI.Is_initialized():
+    if False:#not MPI.Is_initialized():
         MPI.Init()
         comm = MPI.COMM_WORLD
     from feintune.parallel_autotuning_mpi4py_v2 import parallel_autotune
@@ -1225,7 +1225,7 @@ def main(args):
     # Actually, communicating is probably the better way to do this. Just have the first
     # rank profile.
     if args.benchmark:
-        if comm is not None and comm.Get_rank() == 0:
+        if comm is None or (comm is not None and comm.Get_rank() == 0):
             device_latency, device_memory_bandwidth, clpeak_flop_rate = get_device_roofline_data(
                 queue)
 
