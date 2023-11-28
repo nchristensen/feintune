@@ -398,7 +398,7 @@ def measure_execution_latency(queue, tunit, arg_dict, nruns, warmup_runs):
 # cache_arg_dict = {}
 # HIPBLAS seeems to perform fine after one warmup round. Could probably
 # set warmup_runs to 2.
-def generic_test(queue, kern, backend="OPENCL", nruns=5, warmup_runs=2, measure_latency=True):
+def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup_runs=2, measure_latency=True):
 
     kern = lp.set_options(kern, "no_numpy")
     kern = lp.set_options(kern, "return_dict")
