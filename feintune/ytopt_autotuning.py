@@ -470,8 +470,10 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         print("=======SKIPPING SEARCH: EXISTING EVALS >= MAX_EVALS")
         print(pre_existing_evals, max_evals)
 
-        hjson_file_str = save_path + "/" + pid + "_full" + ".hjson"
-        if exists(hjson_file_str):
+        full_hjson_file_str = save_path + "/" + pid + "_full" + ".hjson"
+        default_hjson_file_str = save_path + "/" + pid + "_full" + ".hjson"
+
+        if exists(hjson_file_str) and exists(default_hjson_file_str):
             from feintune.utils import load_hjson
             current_hjson = load_hjson(hjson_file_str)
             cur_data = current_hjson["data"]
@@ -483,7 +485,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         comm.Barrier()
 
     # Not sure if this works for ray
-    if update_hjson and (comm is not None and comm.Get_rank() == 0 and "mpi" in eval_str) or "mpi" not in eval_str:
+    if update_hjson and ((comm is not None and comm.Get_rank() == 0 and "mpi" in eval_str) or "mpi" not in eval_str):
 
         # Write best result to hjson file
         with open(csv_file_str) as csvfile:
@@ -561,8 +563,6 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                         # exit()
                 """
 
-                #if update_hjson:
-
                 hjson_file_str = save_path + "/" + pid + ".hjson"
                 tdict = run_single_param_set_v2(in_queue, knl, trans_list, generic_test,
                                                 max_flop_rate=max_flop_rate,
@@ -582,7 +582,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                         # not exists(hjson_file_str) or pre_existing_evals < max_evals:
                         if True:
 
-                            hjson_file_str = save_path + "/" + pid + "_full" + ".hjson"
+                            #hjson_file_str = save_path + "/" + pid + "_full" + ".hjson"
                             print("GENERATING AND EXECUTING FULL KERNEL")
                             tdict = run_single_param_set_v2(in_queue, knl, trans_list, generic_test,
                                                             max_flop_rate=max_flop_rate,
@@ -594,7 +594,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                                                             error_return_time=timeout + 1)
                             print("DONE GENERATING AND EXECUTING FULL KERNEL")
                             if (timeout is None) or (tdict["data"]["avg_time_predicted"] < timeout):
-                                dump_hjson(hjson_file_str, tdict)
+                                dump_hjson(full_hjson_file_str, tdict)
                             else:
                                 print(
                                     "Run return error return time. Not dumping to hjson.")
@@ -602,8 +602,9 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                 else:
                     print("Run return error return time. Not dumping to hjson.")
 
+                #hjson_file_str = save_path + "/" + pid + "_default" + ".hjson"
 
-                hjson_file_str = save_path + "/" + pid + "_default" + ".hjson"
+                # This is kind of CEESD specific. Need to generalize the logic.
                 if not exists(hjson_file_str):
                     from meshmode.array_context import PrefusedFusionContractorArrayContext
                     actx = PrefusedFusionContractorArrayContext(in_queue)
@@ -623,7 +624,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
                     if tdict["data"]["avg_time_predicted"] < timeout:
                         from feintune.utils import dump_hjson
-                        dump_hjson(hjson_file_str, tdict)
+                        dump_hjson(default_hjson_file_str, tdict)
                     else:
                         print("Run return error return time. Not dumping to hjson.")
 
