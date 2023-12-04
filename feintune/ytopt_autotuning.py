@@ -611,6 +611,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                 # This is kind of CEESD specific. Need to generalize the logic.
                 run_default = True
                 if exists(default_hjson_file_str):
+                    from feintune.utils import load_hjson
                     default_data = load_hjson(default_hjson_file_str)
                     if "frac_roofline_flop_rate" in default_data:
                         run_default = False
