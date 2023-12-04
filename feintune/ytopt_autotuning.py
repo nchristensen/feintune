@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass
 from typing import Union, Optional
 from feintune.generators import get_trans_list
@@ -610,7 +609,13 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                 #hjson_file_str = save_path + "/" + pid + "_default" + ".hjson"
 
                 # This is kind of CEESD specific. Need to generalize the logic.
-                if not exists(default_hjson_file_str):
+                run_default = True
+                if exists(default_hjson_file_str):
+                    default_data = load_hjson(default_hjson_file_str)
+                    if "frac_roofline_flop_rate" in default_data:
+                        run_default = False
+
+                if run_default:
                     from meshmode.array_context import PrefusedFusionContractorArrayContext
                     actx = PrefusedFusionContractorArrayContext(in_queue)
                     knl_with_default_transformations = actx.transform_loopy_program(
