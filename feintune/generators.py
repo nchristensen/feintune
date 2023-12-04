@@ -974,7 +974,7 @@ def get_trans_list(knl, params, prefetch=True, group_idof=True, iel_ilp="ilp.unr
     # For some reason this isn't correctly seeing a j=0 case.
     # It probably isn't even worth tuning those kernels...
     # If there is a zero length dimension then don't transform
-    if not kio == 0 or iio == 0 or ji == 0 or iii == 0 or kii == 0:
+    if not kio == 0 or iio == 0 or iii == 0 or kii == 0:# or ji == 0:
 
         ko_slabs = (0,0) if n_elem % kio == 0 or nbatches > 1 else (0,1)
         kio_slabs = (0,0) if n_elem % kii == 0 or nbatches > 1 else (0,1)
