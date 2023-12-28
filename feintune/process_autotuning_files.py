@@ -147,9 +147,16 @@ speedup = default_avg_time / faster_avg_time_total
 
 tuning_potential = faster_df["weighted_avg_time"].to_numpy(
 )*(1 - faster_df["frac_roofline_flop_rate"])
-remaining_speedup = faster_avg_time_total / \
-    (faster_avg_time_total - np.sum(tuning_potential))
+#remaining_speedup = faster_avg_time_total / \
+#    (faster_avg_time_total - np.sum(tuning_potential))
 
+#remaining_speedup =  faster_avg_time_total / (np.sum(faster_df["weighted_avg_time"].to_numpy(
+#)*np.minimum(faster_df["frac_roofline_flop_rate"].to_numpy(),1)))
+
+# Only consider the kernels that have below roofline performance. The ones above the roofline
+# possibly have overestimated flop counts.
+faster_df_filt = faster_df[faster_df["frac_roofline_flop_rate"] < 1]
+remaining_speedup = np.sum(faster_df_filt["weighted_avg_time"]) / (np.sum(faster_df_filt["weighted_avg_time"].to_numpy()*faster_df_filt["frac_roofline_flop_rate"].to_numpy()))
 
 faster_df_only_tuned_better = faster_df_only_tuned_better.assign(
     weighted_avg_time=pd.Series(get_weighted_avg_time(faster_df_only_tuned_better)).values)
