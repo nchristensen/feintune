@@ -63,6 +63,8 @@ for ax_ind, (directory, filebase) in enumerate(zip(directories, filebases)):
     axes.flat[ax_ind].semilogy(range(0,8),data[:,0],label="Minimum")
     axes.flat[ax_ind].semilogy(range(0,8),data[:,1], label="Median")
     axes.flat[ax_ind].semilogy(range(0,8),data[:,2], label="Mean")
+    pn = ax_ind + 1
+    axes.flat[ax_ind].set_title(f"Polynomial order {pn}", fontsize=12)
     #plt.errorbar(range(1,9), data[:,2],yerr=data[:,4], capsize=10, color="k")
     #plt.plot(data[:,3])
 
@@ -114,6 +116,9 @@ for ax_ind, directory in enumerate(directories):
     axes.flat[ax_ind].set(xlabel=None,ylabel=None)
     handles, previous_labels = axes.flat[ax_ind].get_legend_handles_labels()
     #axes.flat[ax_ind].legend(labels=["Prefetching disabled", "Prefetching enabled"], handles=handles)
+    pn = ax_ind + 1
+    axes.flat[ax_ind].set_title(f"Polynomial order {pn}", fontsize=12)
+
     if ax_ind < 5:
         axes.flat[ax_ind].get_legend().remove()
 
@@ -168,6 +173,9 @@ for ax_ind, directory in enumerate(directories):
     axes.flat[ax_ind].set(xlabel=None,ylabel=None)
     handles, previous_labels = axes.flat[ax_ind].get_legend_handles_labels()
     #axes.flat[ax_ind].legend(labels=["Prefetching disabled", "Prefetching enabled"], handles=handles)
+    pn = ax_ind + 1
+    axes.flat[ax_ind].set_title(f"Polynomial order {pn}", fontsize=12)
+
     if ax_ind < 5:
         axes.flat[ax_ind].get_legend().remove()
 
