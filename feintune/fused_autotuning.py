@@ -33,7 +33,7 @@ else:
     import mpi4py.MPI as MPI
     # Check if run with an mpi runner, and initialize MPI if so.
     # Currently need to set this to True to use mpi
-    if False:#not MPI.Is_initialized():
+    if not MPI.Is_initialized():
         MPI.Init()
         comm = MPI.COMM_WORLD
     from feintune.parallel_autotuning_mpi4py_v2 import parallel_autotune
@@ -886,11 +886,37 @@ def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
     print("\nSubkernel information")
     pid_set = set()
     streaming_pid = set()
+
+    einsum_0_to_0_pid = set()
+    einsum_2_to_2_pid = set()
+    einsum_3_to_3_pid = set()
+    einsum_4_to_4_pid = set()
+    einsum_5_to_5_pid = set()
+    einsum_1_to_1_pid = set()
     einsum_3_to_2_pid = set()
     einsum_4_to_2_pid = set()
     einsum_5_to_3_pid = set()
     einsum_5_to_2_pid = set()
+    einsum_2_to_1_pid = set()
+    einsum_3_to_1_pid = set()
+    non_einsum_pid = set()
     other_einsum_pid = set()
+
+    einsum_0_to_0_batch_sizes = list()
+    einsum_2_to_2_batch_sizes = list()
+    einsum_3_to_3_batch_sizes = list()
+    einsum_4_to_4_batch_sizes = list()
+    einsum_5_to_5_batch_sizes = list()
+    einsum_1_to_1_batch_sizes = list()
+    einsum_3_to_2_batch_sizes = list()
+    einsum_4_to_2_batch_sizes = list()
+    einsum_5_to_3_batch_sizes = list()
+    einsum_5_to_2_batch_sizes = list()
+    einsum_2_to_1_batch_sizes = list()
+    einsum_3_to_1_batch_sizes = list()
+    other_einsum_batch_sizes = list()
+
+
 
     for filename, tunit_dict in tunit_dicts:
 
@@ -929,17 +955,51 @@ def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
                     # if total_axes == 5 and non_red_axes == 2:
                     #    print(sk)
                     #    exit()
-                    if red_axes == 0:
+                    if total_axes == 2 and non_red_axes == 2:
+                        einsum_2_to_2_pid |= {pid}
+                        einsum_2_to_2_batch_sizes.append(count)
+                    elif total_axes == 3 and non_red_axes == 3:
+                        einsum_3_to_3_pid |= {pid}
+                        einsum_3_to_3_batch_sizes.append(count)
+                    elif total_axes == 1 and non_red_axes == 1:
+                        einsum_1_to_1_pid |= {pid}
+                        einsum_1_to_1_batch_sizes.append(count)
+                    elif total_axes == 4 and non_red_axes == 4:
+                        einsum_4_to_4_pid |= {pid}
+                        einsum_4_to_4_batch_sizes.append(count)
+                    elif total_axes == 5 and non_red_axes == 5:
+                        einsum_5_to_5_pid |= {pid}
+                        einsum_5_to_5_batch_sizes.append(count)
+                    elif total_axes == 0 and non_red_axes == 0:
+                        einsum_0_to_0_pid |= {pid}
+                        einsum_0_to_0_batch_sizes.append(count)
+                    elif red_axes == 0:
+                        print("Unclassified streaming:", total_axes, non_red_axes)
                         streaming_pid |= {pid}
                     elif total_axes == 3 and non_red_axes == 2:
                         einsum_3_to_2_pid |= {pid}
+                        einsum_3_to_2_batch_sizes.append(count)
                     elif total_axes == 4 and non_red_axes == 2:
                         einsum_4_to_2_pid |= {pid}
+                        einsum_4_to_2_batch_sizes.append(count)
                     elif total_axes == 5 and non_red_axes == 2:
                         einsum_5_to_2_pid |= {pid}
+                        einsum_5_to_2_batch_sizes.append(count)
                     elif total_axes == 5 and non_red_axes == 3:
                         einsum_5_to_3_pid |= {pid}
+                        einsum_5_to_3_batch_sizes.append(count)
+                    elif total_axes == 2 and non_red_axes == 1:
+                        einsum_2_to_1_pid |= {pid}
+                        einsum_2_to_1_batch_sizes.append(count)
+                        #print(sk)
+                        #exit()
+                    elif total_axes == 3 and non_red_axes == 1:
+                        einsum_3_to_1_pid |= {pid}
+                        einsum_3_to_1_batch_sizes.append(count)
+                        #print(sk)
+                        #exit()
                     else:
+                        print("Unclassified: ", total_axes, non_red_axes, red_axes)
                         other_einsum_pid |= {pid}
 
                     """
@@ -960,6 +1020,8 @@ def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
                     else:
                         subkernel_counts[key] = [
                             1, set([sk.default_entrypoint.name])]
+                else:
+                    non_einsum_pid |= {pid}
 
     print("Rank zero info")
 
@@ -967,14 +1029,79 @@ def get_lazy_einsum_info(tunit_dicts, hjson_dir=None):
     for key, val in subkernel_counts.items():
         print(key, val)
 
+    
     print("Number of distinct subkernels", len(pid_set))
-    print("Number of distinct streaming subkernels", len(streaming_pid))
+    print("Number of distinct other streaming subkernels", len(streaming_pid))
+    print("Non-einsum kernels", len(non_einsum_pid))
+
+    labels = [
+        "Number of distinct 0 to 0 einsums",
+        "Number of distinct 1 to 1 einsums",
+        "Number of distinct 2 to 2 einsums",
+        "Number of distinct 3 to 3 einsums",
+        "Number of distinct 4 to 4 einsums",
+        "Number of distinct 5 to 5 einsums",
+        "Number of distinct 2 to 1 einsums",
+        "Number of distinct 3 to 1 einsums",
+        "Number of distinct 3 to 2 einsums",
+        "Number of distinct 4 to 2 einsums",
+        "Number of distinct 5 to 2 einsums",
+        "Number of distinct 5 to 3 einsums",
+        "Number of distinct other einsums",
+    ]
+
+    pid_lens = [
+        len(einsum_0_to_0_pid),
+        len(einsum_1_to_1_pid),
+        len(einsum_2_to_2_pid),
+        len(einsum_3_to_3_pid),
+        len(einsum_4_to_4_pid),
+        len(einsum_5_to_5_pid),
+        len(einsum_2_to_1_pid),
+        len(einsum_3_to_1_pid),
+        len(einsum_3_to_2_pid),
+        len(einsum_4_to_2_pid),
+        len(einsum_5_to_2_pid),
+        len(einsum_5_to_3_pid),
+        len(other_einsum_pid),
+    ]
+
+    batch_size_counts = [
+        einsum_0_to_0_batch_sizes,
+        einsum_1_to_1_batch_sizes,
+        einsum_2_to_2_batch_sizes,
+        einsum_3_to_3_batch_sizes,
+        einsum_4_to_4_batch_sizes,
+        einsum_5_to_5_batch_sizes,
+        einsum_2_to_1_batch_sizes,
+        einsum_3_to_1_batch_sizes,
+        einsum_3_to_2_batch_sizes,
+        einsum_4_to_2_batch_sizes,
+        einsum_5_to_2_batch_sizes,
+        einsum_5_to_3_batch_sizes,
+        other_einsum_batch_sizes,
+    ]
+
+    from scipy.stats import mode
+    for label, pid_len, batch_size_list in zip(labels, pid_lens, batch_size_counts):
+        try:
+            print(label, pid_len, np.min(batch_size_list), np.max(batch_size_list), np.median(batch_size_list), np.mean(batch_size_list), mode(batch_size_list))
+        except Exception:
+            print(label, pid_len)
+    """
+    print("Number of distinct 1 to 1 einsums", len(einsum_1_to_1_pid))
+    print("Number of distinct 2 to 2 einsums", len(einsum_2_to_2_pid))
+    print("Number of distinct 3 to 3 einsums", len(einsum_3_to_3_pid))
+    print("Number of distinct 4 to 4 einsums", len(einsum_4_to_4_pid))
+    print("Number of distinct 5 to 5 einsums", len(einsum_5_to_5_pid))
+    print("Number of distinct 2 to 1 einsums", len(einsum_2_to_1_pid))
+    print("Number of distinct 3 to 1 einsums", len(einsum_3_to_1_pid))
     print("Number of distinct 3 to 2 einsums", len(einsum_3_to_2_pid))
     print("Number of distinct 4 to 2 einsums", len(einsum_4_to_2_pid))
     print("Number of distinct 5 to 2 einsums", len(einsum_5_to_2_pid))
     print("Number of distinct 5 to 3 einsums", len(einsum_5_to_3_pid))
     print("Number of distinct other einsums", len(other_einsum_pid))
-
+    """
 
 def get_device_roofline_data(queue):
     import feintune.empirical_roofline as er
@@ -1266,7 +1393,7 @@ def main(args):
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
             from feintune.run_tests import get_knl_flops
             sk_list = sorted(sk_list, key=lambda e: get_knl_flops(
-                e["sk"]), reverse=False)#[112:]
+                e["sk"]), reverse=True)#[20:21]#[112:]
             # sk_list = [tunit_dict[1]["tunit"] for tunit_dict in tunit_dicts]
             # """
             # sk_list = [sk for _, sk, _ in sk_list]
@@ -1294,10 +1421,10 @@ def main(args):
             exit()
             """
             print("Done collecting subkernels")
-            # get_lazy_einsum_info(tunit_dicts, hjson_dir=save_path)
-            # exit()
+            #get_lazy_einsum_info(tunit_dicts, hjson_dir=save_path)
+            #exit()
 
-            # test_default_transforms(sk_list, save_path=directory + "/default_transforms_hjson")
+            #test_default_transforms(sk_list, save_path=directory + "/default_transforms_hjson")
 
             autotune_standalone_subkernels(queue, sk_list, save_path=save_path, 
                                            device_latency=device_latency,
