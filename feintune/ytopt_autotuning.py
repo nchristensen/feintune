@@ -461,9 +461,9 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
 
     update_hjson = True
-    hjson_file_str = save_path + "/" + pid + ".hjson"
-    full_hjson_file_str = save_path + "/" + pid + "_full" + ".hjson"
-    default_hjson_file_str = save_path + "/" + pid + "_default" + ".hjson"
+    hjson_file_str = save_path + "/" + npid + ".hjson"
+    full_hjson_file_str = save_path + "/" + npid + "_full" + ".hjson"
+    default_hjson_file_str = save_path + "/" + npid + "_default" + ".hjson"
 
     if pre_existing_evals < max_evals:
         print("==========BEGINNING SEARCH=============")
