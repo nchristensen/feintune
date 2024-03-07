@@ -1404,7 +1404,7 @@ def main(args):
             print("Done collecting tunits")
             # ID changes based on whether python was run with -O
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
-            #from feintune.run_tests import get_knl_flops
+            from feintune.run_tests import get_knl_flops
             sk_list = sorted(sk_list, key=lambda e: get_knl_flops(
                 e["sk"]), reverse=True)#[20:21]#[112:]
             #"""
