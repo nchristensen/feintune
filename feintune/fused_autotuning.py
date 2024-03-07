@@ -1405,10 +1405,10 @@ def main(args):
             # ID changes based on whether python was run with -O
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
             #from feintune.run_tests import get_knl_flops
-            #sk_list = sorted(sk_list, key=lambda e: get_knl_flops(
-            #    e["sk"]), reverse=True)#[20:21]#[112:]
+            sk_list = sorted(sk_list, key=lambda e: get_knl_flops(
+                e["sk"]), reverse=True)#[20:21]#[112:]
             #"""
-            sk_list = sorted(sk_list, key=lambda e: e["sk"].default_entrypoint.name)
+            #sk_list = sorted(sk_list, key=lambda e: e["sk"].default_entrypoint.name)
             for item in sk_list:
                 print(item["sk"].default_entrypoint.name)
 
@@ -1432,7 +1432,7 @@ def main(args):
                 #except AttributeError as e:
                     # What is this aggregate attribute?
                 #    print("ATTRIBUTE ERROR")
-                #print(unique_program_id(sk)) 
+                print(unique_program_id(sk)) 
                 #exit()
             #"""
             #exit()
