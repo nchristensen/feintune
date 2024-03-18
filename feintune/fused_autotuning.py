@@ -1,6 +1,6 @@
 from .apply_transformations import get_einsums, get_einsum_counts, get_einsum_types
 from feintune.generators import einsum3to2_kernel_tlist_generator_v2
-from feintune.run_tests import run_single_param_set_v2, generic_test
+from feintune.run_tests import run_single_param_set_v2, generic_test, get_knl_flops
 import numpy as np
 import pickle
 import loopy as lp
@@ -615,7 +615,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
             """
             input_space = createConfigSpace(queue, sk)
             print("TESTING YTOPT")
-            max_evals = 5#50
+            max_evals = 500#5#50
             ytopt_tuning(queue, sk, platform_id, input_space, program_id=program_id, normalized_program_id=normalized_program_id,
                          max_flop_rate=max_flop_rate,
                          device_memory_bandwidth=device_memory_bandwidth,
@@ -1370,6 +1370,14 @@ def main(args):
         save_path = args.outdir#"./autotuning_files"  # directory + "/hjson3"
         # Really a tuple, not a dict
         tunit_dicts = get_pickled_tunits(directory)
+        tunit_dicts = sorted(tunit_dicts, key=lambda entry: get_knl_flops(entry[1]["tunit"]), reverse=True)
+        tunit_dicts = tunit_dicts[:50]
+
+        #print(tunit_dicts[0][1]["tunit"])
+        #exit()
+        #for entry in tunit_dicts:
+        #    print(get_knl_flops(entry[1]["tunit"]))
+        #exit()
 
         if False:  # Tune a single macrokernel at a time.
 
@@ -1404,38 +1412,44 @@ def main(args):
             print("Done collecting tunits")
             # ID changes based on whether python was run with -O
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
-            from feintune.run_tests import get_knl_flops
             sk_list = sorted(sk_list, key=lambda e: get_knl_flops(
                 e["sk"]), reverse=True)#[20:21]#[112:]
             #"""
             #sk_list = sorted(sk_list, key=lambda e: e["sk"].default_entrypoint.name)
-            for item in sk_list:
-                print(item["sk"].default_entrypoint.name)
+            #for item in sk_list:
+            #    print(item["sk"].default_entrypoint.name)
 
-            for item in sk_list[:]:
-                sk = item["sk"]
-                print(sk)
-                print(item["pid"], item["npid"])
-                try:
-                    if len(get_indirection_arrays(sk)) == 0:
-                        einsum = tunit_to_einsum(sk)
-                        print(einsum)
-                except NotImplementedError as e:
-                    print(e)
-                #except RuntimeError as e:
-                #    print("RUNTIME ERROR")
-                #    print(sk)
-                #    print(e)
-                except ValueError as e:
-                    print("VALUE ERROR")
-                    #print(e)
-                #except AttributeError as e:
-                    # What is this aggregate attribute?
-                #    print("ATTRIBUTE ERROR")
-                print(unique_program_id(sk)) 
+            if False:
+                for item in sk_list[:]:
+                    sk = item["sk"]
+                    print(sk)
+                    print(item["pid"], item["npid"])
+                    try:
+                        if len(get_indirection_arrays(sk)) == 0:
+                            einsum = tunit_to_einsum(sk)
+                            print(einsum)
+                    except NotImplementedError as e:
+                        print(e)
+                    #except RuntimeError as e:
+                    #    print("RUNTIME ERROR")
+                    #    print(sk)
+                    #    print(e)
+                    except ValueError as e:
+                        print("VALUE ERROR")
+                        #print(e)
+                    #except AttributeError as e:
+                        # What is this aggregate attribute?
+                    #    print("ATTRIBUTE ERROR")
+                    #print(unique_program_id(sk))
+                    #if unique_program_id(sk) in {"2a82b7f82159384d828d2b94704327f0fcf46209ad6a43bcc9842b43beeb56c2",
+                    #                             "9701d4c523fff28c6a3d78b294f1cfc8f5766aca1380780e340bdba4d4a3a863",
+                    #                             "d5ef78e056a3aa17951ef94b683f8a3a683ddc7eda0d9cb8ea20c754a6533e9d",
+                    #                             "f3dbebb372a1f5e2e7002640108747dd3274fab9d9f89f50ae1581fe482871fb"}:
+                    #    einsum = tunit_to_einsum(sk)
+                    #    exit()
                 #exit()
-            #"""
-            #exit()
+                #"""
+                #exit()
             # sk_list = [tunit_dict[1]["tunit"] for tunit_dict in tunit_dicts]
             # """
             # sk_list = [sk for _, sk, _ in sk_list]
