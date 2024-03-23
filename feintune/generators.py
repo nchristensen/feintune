@@ -1008,7 +1008,6 @@ def get_trans_list(knl, params, prefetch=True, group_idof=True, iel_ilp="ilp.unr
             if not swap_local: 
                 trans_list.append(("split_iname", (f"{e}_inner", kii,),
                                (("outer_tag", ilp0,), ("inner_tag", l0,), ("slabs", kio_slabs,),),))
-
             else:
                 trans_list.append(("split_iname", (f"{e}_inner", kii,),
                                (("outer_tag", ilp0,), ("inner_tag", None,), ("slabs", kio_slabs,),),))

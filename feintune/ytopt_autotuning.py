@@ -441,6 +441,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
         overtasking_factor = 1
         # Limit the numbers of workers per process (sn_resources[0]) or thread (sn_resources[1])
+        #nworkers = 2
         nworkers = min(num_resource_sets + 1, overtasking_factor*sn_resources[1] - 1) # 1 Manager (not a worker), 1 worker for persistent generator, more workers for the gpus
         n_sim_workers = nworkers - 1
         if num_random is None:
@@ -460,9 +461,9 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
 
 
     update_hjson = True
-    hjson_file_str = save_path + "/" + pid + ".hjson"
-    full_hjson_file_str = save_path + "/" + pid + "_full" + ".hjson"
-    default_hjson_file_str = save_path + "/" + pid + "_default" + ".hjson"
+    hjson_file_str = save_path + "/" + npid + ".hjson"
+    full_hjson_file_str = save_path + "/" + npid + "_full" + ".hjson"
+    default_hjson_file_str = save_path + "/" + npid + "_default" + ".hjson"
 
     if pre_existing_evals < max_evals:
         print("==========BEGINNING SEARCH=============")

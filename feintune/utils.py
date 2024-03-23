@@ -48,6 +48,103 @@ def dump_hjson(filename, out_dict):
     hjson.dump(out_dict, out_file, default=convert)
     out_file.close()
 
+# Copied from meshmode
+def tunit_to_einsum(t_unit):
+        from arraycontext.impl.pytato.compile import FromArrayContextCompile
+        from functools import reduce
+
+        #if t_unit.default_entrypoint.tags_of_type(FromArrayContextCompile):
+        # FIXME: Enable this branch, WIP for now and hence disabled it.
+        from loopy.match import ObjTagged
+        import feinsum as fnsm
+        from meshmode.array_context import _get_elementwise_einsum, EinsumTag
+        #from meshmode.feinsum_transformations import FEINSUM_TO_TRANSFORMS
+
+        einsum_tags = reduce(
+            frozenset.union,
+            (insn.tags_of_type(EinsumTag)
+             for insn in t_unit.default_entrypoint.instructions),
+            frozenset())
+
+        if len(einsum_tags) > 0 and all(insn.tags_of_type(EinsumTag)
+                   for insn in t_unit.default_entrypoint.instructions
+                   if isinstance(insn, lp.MultiAssignmentBase)
+                   ) and len(get_indirection_arrays(t_unit)) == 0:# and not " if " in str(t_unit):
+
+            #print(t_unit)
+            #tunit_str = str(t_unit)
+            #if ("tan" in tunit_str or "pow" in tunit_str or "sin" in tunit_str) and not ("subst_0" in tunit_str):
+            #    exit()
+            #for insn in t_unit.default_entrypoint.instructions:
+            #    for tag in insn.tags:
+            #        print(type(tag))
+            #assert all(insn.tags_of_type(EinsumTag)
+            #           for insn in t_unit.default_entrypoint.instructions
+            #           if isinstance(insn, lp.MultiAssignmentBase)
+            #           )
+
+            #print(len(einsum_tags))
+            #if len(einsum_tags) == 0:
+            #    exit()
+            #assert len(einsum_tags) <= 1
+            #print("Indirection arrays:", get_indirection_arrays(t_unit))
+            #norm_fused_einsum = None
+
+            for ensm_tag in sorted(einsum_tags,
+                                   key=lambda x: sorted(x.orig_loop_nest)):
+                if reduce(frozenset.union,
+                          (insn.reduction_inames()
+                           for insn in (t_unit.default_entrypoint.instructions)
+                           if ensm_tag in insn.tags),
+                          frozenset()):
+                    #try:
+                    fused_einsum = fnsm.match_einsum(t_unit, ObjTagged(ensm_tag))
+                    #except ValueError:
+                        #print("Could not match einsum")
+                        #print(t_unit)
+                        #return
+
+                    # New version, appears to be broken.
+                    #fused_einsum, subst_map = fnsm.get_a_matched_einsum(t_unit, insn_match=ObjTagged(ensm_tag))
+                    #print("MATCHED THE EINSUMS")
+                else:
+                    # elementwise loop
+                    fused_einsum = _get_elementwise_einsum(t_unit, ensm_tag)
+                #print("canonicalizing")
+                #print(fused_einsum)
+                norm_fused_einsum = fnsm.normalize_einsum(fused_einsum)
+                #norm_fused_einsum = fnsm.canonicalize_einsum(fused_einsum)
+                #print("printing")
+                import hashlib
+                print(str(norm_fused_einsum))
+                h = hashlib.md5(str(norm_fused_einsum).encode('utf-8')).hexdigest()
+                print(h)
+                print(t_unit)
+                #exit()
+
+            return norm_fused_einsum
+
+            """
+            try:
+                fnsm_transform = FEINSUM_TO_TRANSFORMS[
+                    fnsm.normalize_einsum(fused_einsum)]
+            except KeyError:
+                fnsm.query(fused_einsum,
+                           self.queue.context,
+                           err_if_no_results=True)
+                1/0
+
+            t_unit = fnsm_transform(t_unit,
+                                    insn_match=ObjTagged(ensm_tag))
+            """
+
+            #else:
+            #    print(t_unit)
+            #    raise RuntimeError
+        else:
+            raise NotImplementedError
+            #print("No einsum tags found")
+
 
 def unique_program_id(tunit, attempt_normalization=True):
     from loopy.tools import LoopyKeyBuilder
@@ -63,23 +160,41 @@ def unique_program_id(tunit, attempt_normalization=True):
     # Kernel may not necessarily be an einsum, but for now assume it is
     # (the tuner also doesn't care if there are einsums with different loop
     # dimensions in the same kernel
-    if attempt_normalization:
+    from feintune.apply_transformations import get_einsum_types
+    et = list(get_einsum_types(tunit))
+    neinsums = len(et)
+    if neinsums > 0:
+        nreduction = len(et[0][1])
+
+
+    if attempt_normalization and neinsums > 0:# and nreduction > 0:
         import feinsum as f
         try:
             # Not every einsum can currently be normalized, for instance
             # if it has a non-reduction RHS or if it has indirection
-            canonical_einsum = f.canonicalize_einsum(
-                f.get_a_matched_einsum(tunit))
-            key = kb(canonical_einsum)
+            #print(tunit)
+            #print("nreduction", nreduction)
+            #print("Substitutions:", tunit.default_entrypoint.substitutions)
+            #if nreduction > 0:
+            #arg_subs = None#frozenset([arg.name for arg in tunit.default_entrypoint.args])
+            #print("arg_subs", arg_subs)
+            #matched_einsum = f.get_a_matched_einsum(tunit, argument_substitutions=arg_subs)
+            #canonical_einsum = f.canonicalize_einsum(matched_einsum)
+            normalized_einsum = tunit_to_einsum(tunit)
+            import hashlib
+            #print(str(norm_fused_einsum))
+            key = hashlib.md5(str(normalized_einsum).encode('utf-8')).hexdigest()
+            #print(key)
+            #exit() 
+            #key = kb(canonical_einsum)
             # print("Successfully normalized einsum")
             # print(canonical_einsum)
         except Exception:
-            # print("Failed to normalize tunit, using non-normalized program_id.")
+            print("Failed to normalize tunit, using non-normalized program_id.")
             key = kb(tunit.default_entrypoint.copy(name="loopy_kernel"))
     else:
         key = kb(tunit.default_entrypoint.copy(name="loopy_kernel"))
 
-    key = kb(tunit.default_entrypoint.copy(name="loopy_kernel"))
 
     return key
 

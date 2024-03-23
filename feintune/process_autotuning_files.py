@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # directory = ("./autotuning_files/")
-directory = ("./autotuning_files_order_1/")
+directory = ("./autotuning_files_order_4/")
 files = os.listdir(directory)
 files = [file for file in files if str(file).endswith(".hjson")]
 pids = [file[:-6] for file in files if not (str(file).endswith(

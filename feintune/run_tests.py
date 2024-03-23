@@ -447,7 +447,7 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup_runs=2, measure
 
         # Fill arrays with random data
         # Could probably just read the strides from the kernel to get ordering
-        for arg in kern.default_entrypoint.args:
+        for arg in [filt_arg for filt_arg in  kern.default_entrypoint.args if isinstance(filt_arg, lp.ArrayArg)]:
             if True:  # str(arg) not in cache_arg_dict:
                 # print(arg)
                 fp_bytes = arg.dtype.numpy_dtype.itemsize
@@ -518,7 +518,12 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup_runs=2, measure
 
                 if not arg.is_output:
                     if isinstance(array, cl.array.Array):
-                        cl.clrandom.fill_rand(array, queue=queue)
+                        if array.dtype == np.int8:
+                            # Could generalize this for all unhandled dtypes
+                            npa = np.random.randint(-128, high=127, size=array.shape, dtype=array.dtype)
+                            array.set(npa, queue=queue)
+                        else:
+                            cl.clrandom.fill_rand(array, queue=queue)
                     elif isinstance(array[0], cl.array.Array):
                         for entry in array:
                             cl.clrandom.fill_rand(entry, queue=queue)
@@ -588,7 +593,7 @@ def get_knl_device_memory_bytes(knl):
 
     nbytes = 0
     for arg in args_and_temps:
-        if arg.address_space == lp.AddressSpace.GLOBAL:
+        if isinstance(arg, lp.ArrayArg) and  arg.address_space == lp.AddressSpace.GLOBAL:
             if arg.name in read_deps:
                 nbytes += np.prod((arg.shape))*arg.dtype.dtype.itemsize
             if arg.name in write_deps:
