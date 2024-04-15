@@ -2102,8 +2102,9 @@ def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
                 # print(prefetch)
                 before_inames = set(subkernel.default_entrypoint.inames.keys())
                 # If the prefetch inames aren't mergable, then this will
+                mykwargs = dict(prefetch[2]) | {"temporary_address_space": lp.AddressSpace.LOCAL}
                 subkernel = lp.add_prefetch(
-                    subkernel, *prefetch[1], **dict(prefetch[2]))
+                    subkernel, *prefetch[1], **mykwargs)
                 after_inames = set(subkernel.default_entrypoint.inames.keys())
                 added_inames = after_inames - before_inames
                 all_added_inames |= added_inames
@@ -2186,7 +2187,7 @@ def decompose_and_prefetch(tunit, prefetches, batch_size=0, **kwargs):
 
     return recomposed, single_batch_knl
 
-
+# Should probably be refactored to use functions and dicts as arguments.
 def apply_transformation_list(tunit, transformations):
     # Could just construct a string for the function handle and retrieve the function from that
     function_mapping = {"split_iname": lp.split_iname,

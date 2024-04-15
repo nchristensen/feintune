@@ -1117,7 +1117,9 @@ def get_trans_list(knl, params, prefetch=True, group_idof=True, iel_ilp="ilp.unr
                     # prefetch_str = f"{j}_outer,{j}_inner,{e}_inner"
 
                 trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
-                                   (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
+                                   (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,)
+                                    #,("temporary_address_space", lp.AddressSpace.LOCAL,)
+                                    ,),))
                 # Should be c,c by default. Maybe try to re-add this capability later
                 # trans_list.append(("tag_array_axes", (f"{arg}_f", order_str,),))
                 # print(prefetch_str)
@@ -1136,7 +1138,8 @@ def get_trans_list(knl, params, prefetch=True, group_idof=True, iel_ilp="ilp.unr
                 prefetch_str = f"{f}," + j_prefetch_str + e_prefetch_str
 
                 trans_list.append(("add_prefetch", (f"{arg}", prefetch_str,),
-                                   (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,),),))
+                                   (("temporary_name", f"{arg}_f",), ("default_tag", prefetch_tag,), 
+                                    ("temporary_address_space", lp.AddressSpace.LOCAL,),),))
                 # print(prefetch_str)
 
         # Just doing this automatically now

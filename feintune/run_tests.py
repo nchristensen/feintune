@@ -15,6 +15,7 @@ import pyopencl.array
 import pyopencl.clrandom
 
 import loopy as lp
+from feintune.utils import get_barriers
 from loopy.version import LOOPY_USE_LANGUAGE_VERSION_2018_2
 from pyopencl.tools import ImmediateAllocator, MemoryPool
 from immutabledict import immutabledict
@@ -334,11 +335,25 @@ def measure_execution_time(queue, tunit, arg_dict, nruns, warmup_runs, pollute_b
 def measure_execution_latency(queue, tunit, arg_dict, nruns, warmup_runs):
     print("Starting measuring latency")
     args = arg_dict.items()
-    arg_names = [entry[0] for entry in args]
-    arg_vals = [entry[1].data for entry in args]
-
+   
+    # Pyopencl or loopy seems to order the offsets last
+    arg_names = [entry[0] for entry in args if "offset" not in entry[0]]
+    arg_vals = [entry[1].data for entry in args if "offset" not in entry[0]]
+    arg_names = arg_names + [entry[0] for entry in args if "offset" in entry[0]]
+    arg_vals = arg_vals + [entry[1] for entry in args if "offset" in entry[0]]
+   
     otunit = lp.set_argument_order(tunit, arg_names)
     code = lp.generate_code_v2(otunit).device_code()
+    print(otunit)
+    print(lp.generate_code_v2(otunit).host_code())
+    print(code)
+    #try:
+    #    print("DEFAULT ENTRYPOINT")
+    #    print(lp.generate_code_v2(otunit.default_entrypoint).device_code())
+    #except Exception as e:
+    #    print(e)
+
+    #print(arg_names)
     from feintune.matching_brackets import matching_brackets_dict
     fn_brackets = sorted(matching_brackets_dict(
         code, opening_bracket="{", closing_bracket="}").items(), key=lambda l: l[1], reverse=True)[0]
@@ -358,11 +373,14 @@ def measure_execution_latency(queue, tunit, arg_dict, nruns, warmup_runs):
 
     program = cl.Program(queue.context, null_kernel_code).build()
     cl_knl = program.all_kernels()[0]
-    # nargs = cl_knl.num_args
-    # name_to_ind = {cl_knl.get_arg_info(ind, cl.kernel_arg_info.NAME): ind for ind in range(nargs)}
-
+    #print(arg_vals)
     cl_knl.set_args(*arg_vals)
-    # for key, val in arg_dict.items():
+
+    # Loopy appear to place the ValueArgs after the ArrayArgs, so lp.set_argument_order
+    # doesn't exactly do what we want.
+    #nargs = cl_knl.num_args
+    #name_to_ind = {cl_knl.get_arg_info(ind, cl.kernel_arg_info.NAME): ind for ind in range(nargs)}
+    #for key, val in arg_dict.items():
     #    ind = name_to_ind[key]
     #    cl_knl.set_arg(ind, val)
 
@@ -438,15 +456,20 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup_runs=2, measure
         print("STARTING ALLOCATION")
         start = time.time()
         allocator = ImmediateAllocator(queue)
-        #mem_pool = MemoryPool(allocator)
-        mem_pool = get_reasonable_memory_pool(queue)
-        # print("USING MEMORY POOL OF TYPE", type(mem_pool))
-        # exit()
+        mem_pool = MemoryPool(allocator)
+        #mem_pool = get_reasonable_memory_pool(queue)
+        #print("USING MEMORY POOL OF TYPE", type(mem_pool))
+        #exit()
 
         arg_dict = {}
 
         # Fill arrays with random data
         # Could probably just read the strides from the kernel to get ordering
+        for arg in [filt_arg for filt_arg in kern.default_entrypoint.args if isinstance(filt_arg, lp.ValueArg)]:
+            if "offset" in arg.name:
+                #kern = lp.fix_parameters(kern, **{arg.name: 0})
+                arg_dict[arg.name] = np.int32(0)
+
         for arg in [filt_arg for filt_arg in  kern.default_entrypoint.args if isinstance(filt_arg, lp.ArrayArg)]:
             if True:  # str(arg) not in cache_arg_dict:
                 # print(arg)
@@ -515,10 +538,9 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup_runs=2, measure
                     print(arg.name, "No tags recognized. Assuming default data layout")
                     # Assume default layout
                     # array = cl.clrandom.rand(queue, arg.shape, dtype=arg.dtype)
-
                 if not arg.is_output:
                     if isinstance(array, cl.array.Array):
-                        if array.dtype == np.int8:
+                        if array.dtype == np.int8: # Aren't integer arrays often for indexing
                             # Could generalize this for all unhandled dtypes
                             npa = np.random.randint(-128, high=127, size=array.shape, dtype=array.dtype)
                             array.set(npa, queue=queue)
@@ -546,6 +568,14 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup_runs=2, measure
         # print("Setting measured execution latency to zero")
         measured_latency = None
         if measure_latency:
+            print(kern)
+            for arg in kern.default_entrypoint.args:
+                print(arg.name, type(arg))
+                if hasattr(arg, "offset"):
+                    print(arg.offset, type(arg.offset))
+
+            measured_latency = measure_execution_latency(
+                queue, kern, arg_dict, nruns, warmup_runs)
             try:
                 measured_latency = measure_execution_latency(
                     queue, kern, arg_dict, nruns, warmup_runs)
@@ -637,6 +667,7 @@ def get_knl_flops(tunit):
     try:
         op_map = lp.get_op_map(
             tunit, count_within_subscripts=False, subgroup_size=1)
+        #print(op_map)
     except AssertionError:
         # For some kernels, lp.get_op_map fails
         return -1
@@ -648,8 +679,11 @@ def get_knl_flops(tunit):
 
 
 # Avg time in seconds, max_flop_rate in flops per second
-def analyze_flop_rate(knl, avg_time, max_flop_rate=None, latency=None):
-    map_flops = get_knl_flops(knl)
+def analyze_flop_rate(knl, avg_time, max_flop_rate=None, latency=None, flops=None):
+    if flops is None:
+        map_flops = get_knl_flops(knl)
+    else:
+        map_flops = flops
     flop_rate = map_flops / avg_time
     if latency is None:
         latency = 0
@@ -1182,7 +1216,10 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=None, method="
 
 
 # , method="thread"):
-def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=None, device_memory_bandwidth=None, device_latency=None, timeout=None, method=None, run_single_batch=False, error_return_time=None, measure_latency=True, ignore_local_memory_usage=False):
+def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=None, device_memory_bandwidth=None, device_latency=None, timeout=None, method=None, run_single_batch=False, error_return_time=None, measure_latency=True, ignore_local_memory_usage=False, flops=None):
+
+    if len(get_barriers(knl_base)) > 0:
+        measure_latency = False
 
     if measure_latency == False and method is not None:
         # Haven't yet passed this parameter
@@ -1208,6 +1245,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
 
     try:
         if timeout is None:
+            #print("Transformation list:", trans_list)
             knl, sb_knl = apply_transformation_list(knl_base, trans_list)
             knl = lp.preprocess_kernel(knl)
             insn_ids = tuple(
@@ -1398,13 +1436,14 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
                      "device_memory_bandwidth": device_memory_bandwidth})
 
     try:
+        # The latency is already accounted for in the bandwidth.
         if timeout is None:
             # Need to use knl rather than knl_base because knl may be a subkernel.
             flop_rate_dict = analyze_flop_rate(
-                knl, avg_time, max_flop_rate=max_flop_rate, latency=None)
+                knl, avg_time, max_flop_rate=max_flop_rate, latency=None, flops=flops)
         else:
             flop_rate_dict = func_timeout(
-                timeout, analyze_flop_rate, args=(knl, avg_time, max_flop_rate,))
+                timeout, analyze_flop_rate, args=(knl, avg_time, max_flop_rate,None,flops))
 
         flop_rate = flop_rate_dict["observed_flop_rate"]
         data.update(flop_rate_dict.items())
