@@ -336,6 +336,15 @@ def get_indirection_arrays(tunit):
     # print("Indirection arrays:", indirection_arrays)
     return indirection_arrays
 
+def get_indirection_args(tunit):
+    indir_arrays = get_indirection_arrays(tunit)
+    args = {arg.name for arg in tunit.default_entrypoint.args}
+    return args & indir_arrays
+
+def get_barriers(tunit):
+    return [None] + [instr.id for instr in tunit.default_entrypoint.instructions if isinstance(instr, lp.BarrierInstruction) and instr.synchronization_kind == "global"]
+
+
 
 # Doesn't work
 """

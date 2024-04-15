@@ -9,7 +9,7 @@ from meshmode.array_context import EinsumTag
 import pyopencl as cl
 import os
 from os.path import exists
-from feintune.utils import unique_program_id, convert, load_hjson, dump_hjson, get_domain_list, get_indirection_arrays
+from feintune.utils import unique_program_id, convert, load_hjson, dump_hjson, get_domain_list, get_indirection_arrays, get_barriers
 import hjson
 from feintune.generators import createConfigSpace
 from time import time
@@ -41,15 +41,6 @@ else:
 from feintune.ytopt_autotuning import ytopt_tuning
 
 logger = logging.getLogger(__name__)
-
-# Get the barriers to divide computation into phases
-def get_barriers(tunit):
-    barriers = [None]
-    for instr in tunit.default_entrypoint.instructions:
-        if isinstance(instr, lp.BarrierInstruction) and instr.synchronization_kind == "global":
-            barriers.append(instr.id)
-    # print("Number of global barriers", len(barriers))
-    return barriers
 
 
 # Get the barriers to divide computation into phases
@@ -248,7 +239,7 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, devic
 
     transformed_subkernels = []
     for sk_dict in sk_list:
-        pid = sk_dict["pid"]
+        pid = sk_dict["npid"]
         sk = sk_dict["sk"]
 
         # TODO If the transformation selected is one that timed out, should
@@ -268,6 +259,7 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, devic
                 print("Found", hjson_file_str)
                 hjson = load_hjson(hjson_file_str)
                 print("HJSON", hjson_file_str, hjson)
+                print("Applying to", sk.default_entrypoint.name)
                 from .apply_transformations import apply_transformation_list
                 tsk = apply_transformation_list(
                     sk, hjson["transformations"])[0]
@@ -287,7 +279,7 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, devic
 
             # transformed_subkernels.append(transformed_subkernel)
 
-        # exit()
+        #exit()
 
         # print("PRE-TRANSFORMATION")
     # print(tunit_dict[1]["tunit"])
@@ -615,7 +607,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
             """
             input_space = createConfigSpace(queue, sk)
             print("TESTING YTOPT")
-            max_evals = 500#5#50
+            max_evals = 500#20#500#5#50
             ytopt_tuning(queue, sk, platform_id, input_space, program_id=program_id, normalized_program_id=normalized_program_id,
                          max_flop_rate=max_flop_rate,
                          device_memory_bandwidth=device_memory_bandwidth,
@@ -1363,6 +1355,8 @@ def main(args):
     if comm is not None:
         comm.Barrier()
 
+    from feintune.run_tests import get_knl_flops
+    from feintune.utils import get_indirection_args
     from meshmode.array_context import PrefusedFusionContractorArrayContext
     actx = PrefusedFusionContractorArrayContext(queue)
 
@@ -1371,17 +1365,20 @@ def main(args):
         # Really a tuple, not a dict
         tunit_dicts = get_pickled_tunits(directory)
         tunit_dicts = sorted(tunit_dicts, key=lambda entry: get_knl_flops(entry[1]["tunit"]), reverse=True)
-        tunit_dicts = tunit_dicts[:50]
+        #tunit_dicts = tunit_dicts[:1]
 
         #print(tunit_dicts[0][1]["tunit"])
         #exit()
+        tunit_dicts = [entry for entry in tunit_dicts if len(get_indirection_args(entry[1]["tunit"])) == 0][:1]
         #for entry in tunit_dicts:
-        #    print(get_knl_flops(entry[1]["tunit"]))
+        #    print(get_knl_flops(entry[1]["tunit"]), len(get_indirection_args(entry[1]["tunit"])))
         #exit()
 
         if False:  # Tune a single macrokernel at a time.
 
-            for tunit_dict in tunit_dicts:
+            for num, tunit_dict in enumerate(tunit_dicts):
+                print(f"!!!!!!!!!!!!Tunit {num}!!!!!!!!!!!!!!!!!!")
+
 
                 transformed_tunit, transformed_subkernels = transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False,
                                                                                   device_latency=device_latency, 
@@ -1392,33 +1389,51 @@ def main(args):
 
                 # test_kernels(transformed_subkernels_default, queue, save_path=None, device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, peak_flop_rate=clpeak_flop_rate)
 
-                # Would need to save the indirection arrays with the kernel
-                if False:#len(get_indirection_arrays(transformed_tunit)) == 0: #any([arg.dtype.dtype == np.int8 for arg in transformed_tunit.default_entrypoint.args]):
+                # Apparently transformations can affect the flop count. Just calculate the base flops and use that.
+                base_flops = get_knl_flops(tunit_dict[1]["tunit"])
+                #print("KERNEL FLOPS:", get_knl_flops(tunit_dict[1]["tunit"]), get_knl_flops(transformed_tunit),
+                #        get_knl_flops(transformed_tunit_default))
+
+                # Would need to save the indirection arrays with the kernel to test the transformations
+                # with indirection kernels
+                if len(get_indirection_args(transformed_tunit)) == 0:
+                    print(transformed_tunit_default)
+                    
+                    ret_dict2 = run_single_param_set_v2(queue, transformed_tunit_default, [], generic_test,
+                                max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
+                                device_latency=device_latency, flops=base_flops)
+
+                    print(transformed_tunit)
+                    #"""
                     ret_dict1 = run_single_param_set_v2(queue, transformed_tunit, [], generic_test,
                                 max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
-                                device_latency=device_latency)
+                                device_latency=device_latency, flops=base_flops)
                     #print(ret_dict)
                     #print("Combined - Transformed time:", ret_dict1["data"]["avg_time"]) 
 
-                    #print(transformed_tunit_default)
-                    ret_dict2 = run_single_param_set_v2(queue, transformed_tunit_default, [], generic_test,
-                                max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
-                                device_latency=device_latency)
                     print("Combined - Default time:", ret_dict2["data"]["avg_time"], "Combined - Transformed time:", ret_dict1["data"]["avg_time"])
                     #exit()
+                    #"""
+                else:
+                    print("SKIPPING TEST DUE TO INDIRECTION")
 
         if True:  # Tune all of the subkernels
             from feintune.utils import tunit_to_einsum
             print("Done collecting tunits")
             # ID changes based on whether python was run with -O
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
-            sk_list = sorted(sk_list, key=lambda e: get_knl_flops(
-                e["sk"]), reverse=True)#[20:21]#[112:]
+            sk_list = sorted(sk_list, key=lambda e: get_knl_flops(e["sk"]), reverse=False)#[20:21]#[112:]
             #"""
             #sk_list = sorted(sk_list, key=lambda e: e["sk"].default_entrypoint.name)
-            #for item in sk_list:
-            #    print(item["sk"].default_entrypoint.name)
-
+            """
+            for item in sk_list:
+                #print(item["sk"].default_entrypoint.name)
+                if len(get_indirection_arrays(item["sk"])) == 0:
+                    ret_dict2 = run_single_param_set_v2(queue, item["sk"], [], generic_test,
+                                    max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
+                                    device_latency=device_latency)
+            exit()
+            """
             if False:
                 for item in sk_list[:]:
                     sk = item["sk"]
