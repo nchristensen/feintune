@@ -438,8 +438,8 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup_runs=2, measure
         print("STARTING ALLOCATION")
         start = time.time()
         allocator = ImmediateAllocator(queue)
-        mem_pool = MemoryPool(allocator)
-        # mem_pool = get_reasonable_memory_pool(queue)
+        #mem_pool = MemoryPool(allocator)
+        mem_pool = get_reasonable_memory_pool(queue)
         # print("USING MEMORY POOL OF TYPE", type(mem_pool))
         # exit()
 
@@ -704,12 +704,14 @@ def analyze_flop_rate(knl, avg_time, max_flop_rate=None, latency=None):
 
 def get_knl_device_memory_roofline(knl, max_flop_rate, device_latency, device_memory_bandwidth):
     device_memory_bytes = get_knl_device_memory_bytes(knl)
-    flops_per_byte = get_knl_flops(knl) / device_memory_bytes
-    effective_bandwidth = device_memory_bytes / \
-        (device_latency + device_memory_bytes / device_memory_bandwidth)
-    roofline_flop_rate = min(flops_per_byte*effective_bandwidth, max_flop_rate)
-    return roofline_flop_rate
-
+    if device_memory_bytes > 0:
+        flops_per_byte = get_knl_flops(knl) / device_memory_bytes
+        effective_bandwidth = device_memory_bytes / \
+            (device_latency + device_memory_bytes / device_memory_bandwidth)
+        roofline_flop_rate = min(flops_per_byte*effective_bandwidth, max_flop_rate)
+        return roofline_flop_rate
+    else:
+        return 0
 
 def verifyResult(B_dev1, B_dev2, B_dev3, A_dev1, A_dev2, A_dev3, X_dev):
     A_host1 = A_dev1.get()
@@ -1180,7 +1182,7 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=None, method="
 
 
 # , method="thread"):
-def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=None, device_memory_bandwidth=None, device_latency=None, timeout=None, method=None, run_single_batch=False, error_return_time=None, measure_latency=True):
+def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=None, device_memory_bandwidth=None, device_latency=None, timeout=None, method=None, run_single_batch=False, error_return_time=None, measure_latency=True, ignore_local_memory_usage=False):
 
     if measure_latency == False and method is not None:
         # Haven't yet passed this parameter
@@ -1300,7 +1302,7 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
 
     measured_latency = None
     # Don't allow complete filling of local memory
-    if transformed and local_memory_used <= queue.device.local_mem_size and workitems <= max_work_group_size:
+    if transformed and (local_memory_used <= queue.device.local_mem_size or ignore_local_memory_usage) and workitems <= max_work_group_size:
 
         # Should check what the performance difference is between None, subprocess, and thread
         if method is None:
@@ -1427,7 +1429,10 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
         if max_flop_rate is not None and device_memory_bandwidth is not None:
             roofline_flop_rate = get_knl_device_memory_roofline(knl, max_flop_rate,
                                                                 measured_latency, device_memory_bandwidth)
-            frac_roofline_flop_rate = flop_rate / roofline_flop_rate
+            if roofline_flop_rate > 0:
+                frac_roofline_flop_rate = flop_rate / roofline_flop_rate
+            else:
+                frac_roofline_flop_rate = None
 
             print("Roofline GFLOP/s:", roofline_flop_rate*1e-9)
             print()
