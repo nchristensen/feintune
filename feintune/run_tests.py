@@ -310,6 +310,14 @@ def measure_execution_time(queue, tunit, arg_dict, nruns, warmup_runs, pollute_b
     print("Done warming up")
     # queue.finish()
 
+    #code = lp.generate_code_v2(tunit).device_code()
+    #print(otunit)
+    # Apparently only the final event object is returned
+    # in the case of global barriers.
+    # Would it make sense to define a Loopy event object
+    # that can hold all of the events?
+    #print(lp.generate_code_v2(tunit).host_code())
+    #exit()
 
     sum_time = 0.0
     events = []
@@ -344,9 +352,10 @@ def measure_execution_latency(queue, tunit, arg_dict, nruns, warmup_runs):
    
     otunit = lp.set_argument_order(tunit, arg_names)
     code = lp.generate_code_v2(otunit).device_code()
-    print(otunit)
-    print(lp.generate_code_v2(otunit).host_code())
-    print(code)
+    #print(otunit)
+    #print(lp.generate_code_v2(otunit).host_code())
+    #print(code)
+    #exit()
     #try:
     #    print("DEFAULT ENTRYPOINT")
     #    print(lp.generate_code_v2(otunit.default_entrypoint).device_code())

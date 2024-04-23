@@ -234,6 +234,8 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, devic
     queue = cl.CommandQueue(cl_ctx,
                             properties=cl.command_queue_properties.PROFILING_ENABLE)
 
+    from .apply_transformations import apply_transformation_list
+    from feintune.ytopt_autotuning import csv_to_trans_list
     from meshmode.array_context import PrefusedFusionContractorArrayContext
     actx = PrefusedFusionContractorArrayContext(queue)
 
@@ -253,14 +255,28 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, devic
             # pid = unique_program_id(sk)
             # Tune the subkernel
             hjson_file_str = save_path + "/" + pid + ".hjson"
-            if exists(hjson_file_str) and  \
+            csv_file_str = save_path + "/" + pid + ".csv"
+            if exists(csv_file_str):
+
+                print("Found", csv_file_str)
+                trans_list = csv_to_trans_list(sk, csv_file_str)
+                print(trans_list)
+                #exit()
+                tsk = apply_transformation_list(sk, trans_list)[0]
+                transformed_subkernels.append((pid,tsk,))
+
+                #print("Applying to", sk.default_entrypoint.name)
+                #tsk = apply_transformation_list(
+                #    sk, hjson["transformations"])[0]
+                #transformed_subkernels.append((pid, tsk,))
+
+            elif exists(hjson_file_str) and  \
                tunit_dict[1]["tunit"].default_entrypoint.name not in tunit_to_avoid:
                # sk.default_entrypoint.name not in sk_to_avoid and \
                 print("Found", hjson_file_str)
                 hjson = load_hjson(hjson_file_str)
                 print("HJSON", hjson_file_str, hjson)
                 print("Applying to", sk.default_entrypoint.name)
-                from .apply_transformations import apply_transformation_list
                 tsk = apply_transformation_list(
                     sk, hjson["transformations"])[0]
                 transformed_subkernels.append((pid, tsk,))
@@ -1424,7 +1440,7 @@ def main(args):
             print("Done collecting tunits")
             # ID changes based on whether python was run with -O
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
-            sk_list = sorted(sk_list, key=lambda e: get_knl_flops(e["sk"]), reverse=False)#[20:21]#[112:]
+            sk_list = sorted(sk_list, key=lambda e: get_knl_flops(e["sk"]), reverse=True)#[20:21]#[112:]
             #"""
             #sk_list = sorted(sk_list, key=lambda e: e["sk"].default_entrypoint.name)
             """

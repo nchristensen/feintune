@@ -242,6 +242,38 @@ class ObjectiveFunction(object):
             return 1
 
 
+def csv_to_trans_list(knl, csv_file_str, timeout=None):
+    from pandas import read_csv
+    df = read_csv(csv_file_str)
+    minrow = df[df['RUNTIME'] == df['RUNTIME'].min()]
+
+    p = df.to_dict(orient='records')[0]
+
+    if timeout is not None and p['RUNTIME'] > timeout:
+        raise ValueError("There is not a valid entry in the csv file.")
+
+    params = (p["batch_size"],
+              p["kio"]*p["kii"],
+              p["kii"],
+              p["iio"]*p["iii"],
+              p["iii"],
+              p["ji"],)
+
+    kwargs = {
+                "prefetch": p["prefetch"],
+                #"group_idof": p["group_idofs"],
+                #"iel_ilp": p["iel_ilp"],
+                #"idof_ilp": p["idof_ilp"],
+                #"swap_local": p["swap_local"],
+             }
+
+    #from feintune.utils import tunit_to_einsum
+    #from feinsum.codegen.loopy import generate_loopy
+
+    trans_list = get_trans_list(knl, params, **kwargs)
+    return trans_list
+
+
 def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, normalized_program_id=None, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, save_path=None, max_evals=100, required_new_evals=None, eval_str="threadpool"):
 
     if required_new_evals is None:
@@ -490,14 +522,17 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
     if comm is not None:
         comm.Barrier()
 
+   
+
     # Not sure if this works for ray
     if update_hjson and ((comm is not None and comm.Get_rank() == 0 and "mpi" in eval_str) or "mpi" not in eval_str):
 
         # Write best result to hjson file
-        with open(csv_file_str) as csvfile:
+        #with open(csv_file_str) as csvfile:
 
             # The results in the csv file aren't directly transformation
             # parameters. The kio and iio need to be changed.
+            '''
             row_list = list(csv.reader(csvfile))
             column_names = row_list[0]
             # rows = [row for row in list(row_list)[1:] if int(row[-4]) == nelem]
@@ -524,6 +559,9 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                             #"idof_ilp": p["idof_ilp"],
                             #"swap_local": p["swap_local"],
                          }
+        
+                #from feintune.utils import tunit_to_einsum
+                #from feinsum.codegen.loopy import generate_loopy
 
                 trans_list = get_trans_list(knl, params, **kwargs)
 
@@ -568,6 +606,9 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                         print("Setting hjson update to false")
                         # exit()
                 """
+                '''
+            try:
+                trans_list = csv_to_trans_list(knl, csv_file_str, timeout=timeout)
 
                 #hjson_file_str = save_path + "/" + pid + ".hjson"
                 tdict = run_single_param_set_v2(in_queue, knl, trans_list, generic_test,
@@ -640,7 +681,8 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                         dump_hjson(default_hjson_file_str, tdict)
                     else:
                         print("Run return error return time. Not dumping to hjson.")
-
+            except ValueError:
+                print("VALUE ERROR RAISED, COULD NOT RUN TEST")
     #if "mpi" in eval_str:
     #    print("WAITING AT BARRIER")
         #comm = MPI.COMM_WORLD
