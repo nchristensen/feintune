@@ -122,7 +122,7 @@ def tunit_to_einsum(t_unit):
                 #print(t_unit)
                 #exit()
 
-            return norm_fused_einsum
+            return fused_einsum
 
             """
             try:
