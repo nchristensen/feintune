@@ -1379,13 +1379,15 @@ def main(args):
     for directory in directories:
         save_path = args.outdir#"./autotuning_files"  # directory + "/hjson3"
         # Really a tuple, not a dict
+        print("Getting pickled tunits")
         tunit_dicts = get_pickled_tunits(directory)
         tunit_dicts = sorted(tunit_dicts, key=lambda entry: get_knl_flops(entry[1]["tunit"]), reverse=True)
         #tunit_dicts = tunit_dicts[:1]
 
         #print(tunit_dicts[0][1]["tunit"])
         #exit()
-        tunit_dicts = [entry for entry in tunit_dicts if len(get_indirection_args(entry[1]["tunit"])) == 0]#[:1]
+        print("Assessing macrokernels")
+        tunit_dicts = [entry for entry in tunit_dicts if len(get_indirection_args(entry[1]["tunit"])) == 0]
         #for entry in tunit_dicts:
         #    print(get_knl_flops(entry[1]["tunit"]), len(get_indirection_args(entry[1]["tunit"])))
         #exit()
@@ -1423,7 +1425,7 @@ def main(args):
                     #"""
                     ret_dict1 = run_single_param_set_v2(queue, transformed_tunit, [], generic_test,
                                 max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
-                                device_latency=device_latency, flops=base_flops)
+                                device_latency=device_latency, flops=base_flops, ignore_local_memory_usage=True)
                     #print(ret_dict)
                     #print("Combined - Transformed time:", ret_dict1["data"]["avg_time"]) 
 
