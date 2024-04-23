@@ -112,14 +112,14 @@ def tunit_to_einsum(t_unit):
                     fused_einsum = _get_elementwise_einsum(t_unit, ensm_tag)
                 #print("canonicalizing")
                 #print(fused_einsum)
-                norm_fused_einsum = fnsm.normalize_einsum(fused_einsum)
+                fused_einsum = fnsm.normalize_einsum(fused_einsum)
                 #norm_fused_einsum = fnsm.canonicalize_einsum(fused_einsum)
                 #print("printing")
-                import hashlib
-                print(str(norm_fused_einsum))
-                h = hashlib.md5(str(norm_fused_einsum).encode('utf-8')).hexdigest()
-                print(h)
-                print(t_unit)
+                #import hashlib
+                #print(str(norm_fused_einsum))
+                #h = hashlib.md5(str(norm_fused_einsum).encode('utf-8')).hexdigest()
+                #print(h)
+                #print(t_unit)
                 #exit()
 
             return norm_fused_einsum
