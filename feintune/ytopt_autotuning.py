@@ -386,7 +386,8 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
         num_random = None
 
     pre_existing_evals = len(initial_observations)
-    max_evals = min(max_evals, pre_existing_evals + required_new_evals)
+    max_evals = min(max_evals - pre_existing_evals, required_new_evals)
+    #max_evals = max(max_evals - pre_existing_evals, 0)
 
     # Note that the initial observations count toward max_evals.
     libE_specs = {"disable_log_files": True,
