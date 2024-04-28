@@ -168,7 +168,7 @@ def unique_program_id(tunit, attempt_normalization=True):
 
 
     if attempt_normalization and neinsums > 0:# and nreduction > 0:
-        import feinsum as f
+        #import feinsum as f
         try:
             # Not every einsum can currently be normalized, for instance
             # if it has a non-reduction RHS or if it has indirection
@@ -187,10 +187,11 @@ def unique_program_id(tunit, attempt_normalization=True):
             #print(key)
             #exit() 
             #key = kb(canonical_einsum)
-            # print("Successfully normalized einsum")
+            print("Successfully normalized einsum")
             # print(canonical_einsum)
-        except Exception:
+        except Exception as err:
             print("Failed to normalize tunit, using non-normalized program_id.")
+            print(err)
             key = kb(tunit.default_entrypoint.copy(name="loopy_kernel"))
     else:
         key = kb(tunit.default_entrypoint.copy(name="loopy_kernel"))

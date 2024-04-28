@@ -38,6 +38,7 @@ setup(name='Feintune',
           # 'grudge',
           'meshmode',
           # 'mirgecom',
-          'loopy'
+          'loopy',
+          'matchpy', # For feinsum
       ]
       )

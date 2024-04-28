@@ -302,13 +302,13 @@ def measure_execution_time(queue, tunit, arg_dict, nruns, warmup_runs, pollute_b
     pollute_caches = True if in_pollute is not None and out_pollute is not None else False
 
     #codegen = lp.generate_code_v2(tunit) 
-    code = lp.generate_code_v2(tunit).device_code()
+    #code = lp.generate_code_v2(tunit).device_code()
     #print(otunit)
     # Apparently only the final event object is returned
     # in the case of global barriers.
     # Would it make sense to define a Loopy event object
     # that can hold all of the events?
-    print(lp.generate_code_v2(tunit).host_code())
+    #print(lp.generate_code_v2(tunit).host_code())
     #exit()
 
     print("Warming up")

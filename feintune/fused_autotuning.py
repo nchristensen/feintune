@@ -1387,13 +1387,14 @@ def main(args):
         #print(tunit_dicts[0][1]["tunit"])
         #exit()
         print("Assessing macrokernels")
-        tunit_dicts = [entry for entry in tunit_dicts if len(get_indirection_args(entry[1]["tunit"])) == 0]
         #for entry in tunit_dicts:
         #    print(get_knl_flops(entry[1]["tunit"]), len(get_indirection_args(entry[1]["tunit"])))
         #exit()
 
-        if False:  # Tune a single macrokernel at a time.
+        if True:  # Tune a single macrokernel at a time.
 
+            tunit_dicts = [entry for entry in tunit_dicts if len(get_indirection_args(entry[1]["tunit"])) == 0]
+            macrokernel_times = []
             for num, tunit_dict in enumerate(tunit_dicts):
                 print(f"!!!!!!!!!!!!Tunit {num}!!!!!!!!!!!!!!!!!!")
 
@@ -1421,26 +1422,41 @@ def main(args):
                                 max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
                                 device_latency=device_latency, flops=base_flops)
 
-                    print(transformed_tunit)
+                    #print(transformed_tunit)
                     #"""
                     ret_dict1 = run_single_param_set_v2(queue, transformed_tunit, [], generic_test,
                                 max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
                                 device_latency=device_latency, flops=base_flops, ignore_local_memory_usage=True)
                     #print(ret_dict)
                     #print("Combined - Transformed time:", ret_dict1["data"]["avg_time"]) 
-
-                    print("Combined - Default time:", ret_dict2["data"]["avg_time"], "Combined - Transformed time:", ret_dict1["data"]["avg_time"])
+                    print("TIMING RESULT")
+                    print("Combined - Default time:", ret_dict2["data"]["wall_clock_time"], "Combined - Transformed time:", ret_dict1["data"]["wall_clock_time"])
+                    macrokernel_times.append((transformed_tunit.default_entrypoint.name, ret_dict2["data"]["wall_clock_time"], ret_dict1["data"]["wall_clock_time"],base_flops,))
                     #exit()
                     #"""
                 else:
                     print("SKIPPING TEST DUE TO INDIRECTION")
+                for name, default, tuned, base_flops in macrokernel_times:
+                    print(name, default, tuned, base_flops,)
 
-        if True:  # Tune all of the subkernels
+        if False:  # Tune all of the subkernels
             from feintune.utils import tunit_to_einsum
             print("Done collecting tunits")
             # ID changes based on whether python was run with -O
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
             sk_list = sorted(sk_list, key=lambda e: get_knl_flops(e["sk"]), reverse=True)#[20:21]#[112:]
+            """
+            for e in sk_list:
+                ests = list(get_einsum_types(e["sk"]))
+                tup = None
+                count = 0
+                if len(ests) > 0:
+                    est = ests[0]
+                    tup = (len(est[0]), len(est[1]))
+                    et, count = list(get_einsum_counts(e["sk"]).items())[0]
+                print(e["sk"].default_entrypoint.name, count, tup)
+            exit()
+            """
             #"""
             #sk_list = sorted(sk_list, key=lambda e: e["sk"].default_entrypoint.name)
             """
