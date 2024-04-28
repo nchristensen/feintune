@@ -1075,10 +1075,14 @@ def get_trans_list(knl, params, prefetch=True, group_idof=True, iel_ilp="ilp.unr
         #"""
 
         # Reduction inames. Not a lot to do except "for" or "unr".
+        
+        xtag = None#unr
+        rtag = None#unr
+        ftag = None#unr
         if r is not None:
-            trans_list.append(("tag_inames", (((f"{r}", unr,),),),))
+            trans_list.append(("tag_inames", (((f"{r}", rtag,),),),))
         if f is not None:
-            trans_list.append(("tag_inames", (((f"{f}", unr,),),),))
+            trans_list.append(("tag_inames", (((f"{f}", ftag,),),),))
         # Non reduction iname. Could potentially split into inner and outer and
         # or use ilp or unr. Should see how much of the execution time this takes.
         if x is not None:
@@ -1086,7 +1090,7 @@ def get_trans_list(knl, params, prefetch=True, group_idof=True, iel_ilp="ilp.unr
                 # Breaks with einsum batching (should probably check this again)
                 trans_list.append(("tag_inames", (((f"{x}", ilp,),),),))
             else:
-                trans_list.append(("tag_inames", (((f"{x}", unr,),),),))
+                trans_list.append(("tag_inames", (((f"{x}", xtag,),),),))
 
 
         if prefetch:  # Turn off prefetching until can assign a batch number
