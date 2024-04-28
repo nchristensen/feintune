@@ -301,6 +301,16 @@ def measure_execution_time(queue, tunit, arg_dict, nruns, warmup_runs, pollute_b
     in_pollute, out_pollute = pollute_buffers
     pollute_caches = True if in_pollute is not None and out_pollute is not None else False
 
+    #codegen = lp.generate_code_v2(tunit) 
+    code = lp.generate_code_v2(tunit).device_code()
+    #print(otunit)
+    # Apparently only the final event object is returned
+    # in the case of global barriers.
+    # Would it make sense to define a Loopy event object
+    # that can hold all of the events?
+    print(lp.generate_code_v2(tunit).host_code())
+    #exit()
+
     print("Warming up")
     for i in range(warmup_runs):
         print("Warmup run", i)
@@ -308,33 +318,32 @@ def measure_execution_time(queue, tunit, arg_dict, nruns, warmup_runs, pollute_b
             cl.enqueue_copy(queue, out_pollute, in_pollute)
         tunit(queue, **arg_dict)
     print("Done warming up")
-    # queue.finish()
+    queue.finish()
 
-    #code = lp.generate_code_v2(tunit).device_code()
-    #print(otunit)
-    # Apparently only the final event object is returned
-    # in the case of global barriers.
-    # Would it make sense to define a Loopy event object
-    # that can hold all of the events?
-    #print(lp.generate_code_v2(tunit).host_code())
-    #exit()
 
-    sum_time = 0.0
+    sum_cache_pollute_time = 0
+    sum_time = 0
     events = []
     # Should the cache be polluted between runs?
     print("Executing")
+    start = time.time()
     for i in range(nruns):
         if pollute_caches:
+            start_pollute = time.time()
             cl.enqueue_copy(queue, out_pollute, in_pollute)
+            end_pollute = time.time()
+            sum_cache_pollute_time += end_pollute - start_pollute
         evt, out = tunit(queue, **arg_dict)
         events.append(evt)
     queue.finish()
     cl.wait_for_events(events)
+    end = time.time()
+    sum_wall_time = (end - start) - sum_cache_pollute_time
     for evt in events:
         sum_time += evt.profile.end - evt.profile.start
 
     avg_time = sum_time / 1e9 / nruns
-    return avg_time
+    return avg_time, sum_wall_time / nruns
 
 
 # Strips out instructions and executes kernel to see how long the
@@ -602,7 +611,7 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup_runs=2, measure
         from feintune.empirical_roofline import get_buffers
         d_in_buf, d_out_buf = get_buffers(queue, np.int32, pollute_size, dtype_out=np.int32, n_dtype_out=pollute_size, fill_on_device=True)
 
-        avg_time = measure_execution_time(
+        avg_time, avg_wall_time = measure_execution_time(
                 queue, kern, arg_dict, nruns, warmup_runs, pollute_buffers=(d_in_buf, d_out_buf))
 
         end = time.time()
@@ -611,7 +620,7 @@ def generic_test(queue, kern, backend="OPENCL", nruns=10, warmup_runs=2, measure
         # queue.finish()
     # sum_time = 1.0
 
-    return arg_dict, avg_time, measured_latency
+    return arg_dict, avg_time, avg_wall_time, measured_latency
 
 
 def get_knl_device_memory_bytes(knl):
@@ -1069,7 +1078,7 @@ def run_subprocess_with_timeout(queue, knl, test_fn, timeout=max_double, error_r
             raise CalledProcessError(proc.returncode, proc.args, output=output)
         split_output = output.split("|")
         end = time.time()
-        retval = float(split_output[-3]), float(split_output[-1]), end - start
+        retval = float(split_output[-5]), float(split_output[-1]), float(split_output[-3])
     except TimeoutExpired:
         print("Subprocess timed out")
         proc.kill()
@@ -1137,10 +1146,11 @@ def unpickle_and_run_test(sh_mem_name):
     # knl = loads(base64.b85decode(pickled_knl.encode('ASCII')))
     # test_fn = loads(base64.b85decode(pickled_test_fn.encode('ASCII')))
     queue = get_queue_from_bus_id(int(bus_id), platform_name=platform_name)
-    dev_arrays, avg_time, measured_latency = test_fn(queue, knl)
+    dev_arrays, avg_time, avg_wall_time, measured_latency = test_fn(queue, knl)
 
     # Alternatively, could write this back to the shared memory.
     print("|Average execution time|", avg_time,
+          "|Average wall clock time|", avg_wall_time,
           "|Average execution latency|", measured_latency)
 
     return avg_time, measured_latency
@@ -1199,7 +1209,7 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=None, method="
 
     start = time.time()
     try:
-        avg_time, measured_latency = future.result(timeout=timeout)
+        avg_time, wall_clock_time, measured_latency = future.result(timeout=timeout)
     except TimeoutError as error:
         print("Test function timed out. Time limit %f seconds. Returning null result" %
               float(error.args[1]))
@@ -1219,7 +1229,7 @@ def run_concurrent_test_with_timeout(queue, knl, test_fn, timeout=None, method="
     if executor is not None:
         executor.shutdown(wait=True, cancel_futures=True)
 
-    wall_clock_time = end - start if avg_time != max_double else max_double
+    #wall_clock_time = end - start if avg_time != max_double else max_double
 
     return avg_time, measured_latency, wall_clock_time
 
@@ -1354,11 +1364,11 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
         # Should check what the performance difference is between None, subprocess, and thread
         if method is None:
             print("Executing in existing process with no timeout")
-            start = time.time()
+            #start = time.time()
             # Thread and subprocess don't currently accept the measure_latency parameter
-            _, avg_time, measured_latency = test_fn(queue, knl, measure_latency=measure_latency)
-            end = time.time()
-            wall_clock_time = end - start
+            _, avg_time, wall_clock_time, measured_latency = test_fn(queue, knl, measure_latency=measure_latency)
+            #end = time.time()
+            #wall_clock_time = end - start
         elif method == "subprocess":
             print("Executing test subprocess with timeout of", timeout, "seconds")
             avg_time, measured_latency, wall_clock_time = run_subprocess_with_timeout(queue, knl, test_fn,
@@ -1367,11 +1377,10 @@ def run_single_param_set_v2(queue, knl_base, trans_list, test_fn, max_flop_rate=
             # Concurrent futures with threads should do the same thing
             try:
                 print("Executing test thread with timeout of", timeout, "seconds")
-                start = time.time()
-                _, avg_time, measured_latency = func_timeout(
-                    timeout, test_fn, args=(queue, knl,))
-                end = time.time()
-                wall_clock_time = end - start
+                #start = time.time()
+                _, avg_time, wall_clock_time, measured_latency = func_timeout(timeout, test_fn, args=(queue, knl,))
+                #end = time.time()
+                #wall_clock_time = end - start
             except Exception as e:
                 print(e)
                 print("Run failed and threw and exception. Returning error return time.")
