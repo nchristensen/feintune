@@ -9,7 +9,7 @@ from meshmode.array_context import EinsumTag
 import pyopencl as cl
 import os
 from os.path import exists
-from feintune.utils import unique_program_id, convert, load_hjson, dump_hjson, get_domain_list, get_indirection_arrays, get_barriers
+from feintune.utils import unique_program_id, convert, load_hjson, dump_hjson, get_domain_list, get_indirection_arrays
 import hjson
 from feintune.generators import createConfigSpace
 from time import time
@@ -42,29 +42,32 @@ from feintune.ytopt_autotuning import ytopt_tuning
 
 logger = logging.getLogger(__name__)
 
+# Get the barriers to divide computation into phases
+def get_barriers(tunit):
+    barriers = [None]
+    for instr in tunit.default_entrypoint.instructions:
+        if isinstance(instr, lp.BarrierInstruction) and instr.synchronization_kind == "global":
+            barriers.append(instr.id)
+    # print("Number of global barriers", len(barriers))
+    return barriers
+
 
 # Get the barriers to divide computation into phases
 def get_phases(tunit, barriers):
 
     # Should a phase be an object?
-    # Set up the data structures to save the phase data
     phase_lists = [{"domains": frozenset(), "within_inames": frozenset(
     ), "instructions": [], "args": frozenset()} for i in range(len(barriers) + 1)]
     phases = dict(zip(barriers, phase_lists))
-
-    # Iterate over instructions and find what phase (barrier) it belongs to.
-    #print(barriers)
     for instr in tunit.default_entrypoint.instructions:
-        if instr.id not in barriers[1:]:
-            dbarrier = None
-            for entry in instr.depends_on:
-                if entry in barriers:
-                    dbarrier = entry
-                    break
-           
-            #print(type(instr)) 
-            phases[dbarrier]["instructions"].append(instr)
-            phases[dbarrier]["within_inames"] = instr.within_inames | phases[dbarrier]["within_inames"]
+        dbarrier = None
+        for entry in instr.depends_on:
+            if entry in barriers:
+                dbarrier = entry
+                break
+
+        phases[dbarrier]["instructions"].append(instr)
+        phases[dbarrier]["within_inames"] = instr.within_inames | phases[dbarrier]["within_inames"]
 
     # Replace the text domain names with the actual domain objects
     domain_list = get_domain_list(tunit)
@@ -79,10 +82,12 @@ def get_phases(tunit, barriers):
                 phases[dbarrier]["domains"].append(domain)
 
         # print(len(phases[dbarrier]["domains"]))
-    #exit()
+
     return phases
 
 # Strip off the dependencies on global barriers and other phases
+
+
 def strip_unused_dependencies(instructions):
     phase_instruction_ids = [instruction.id for instruction in instructions]
 
@@ -111,12 +116,6 @@ def strip_unused_dependencies(instructions):
     for instruction in new_instructions:
         if not (isinstance(instruction, lp.BarrierInstruction) and barrier_dep_count[instruction.id] == 0):
             new_new_instructions.append(instruction)
-
-    #print("INSTRUCTION TYPES")
-    #for entry in new_new_instructions:
-    #    print(type(entry), entry.depends_on)
-    #    if isinstance(entry, lp.BarrierInstruction):
-    #        print(entry.synchronization_kind)
 
     return new_new_instructions
 
@@ -208,24 +207,14 @@ def assemble_transformed_macrokernel(macrokernel, subkernels):
 # otherwise uses the transformations of PrefusedFusionContractorArrayContext.
 # Can optionally perform tuning.
 
-def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, device_latency=None, device_memory_bandwidth=None, peak_flop_rate=None):
+#i#ef transform_macrokernel_actx(tunit_dict, actx):
+#    tunit_dict[1]["tunit"]
 
-    from .apply_transformations import apply_transformation_list
-    from feintune.ytopt_autotuning import csv_to_trans_list
-    from meshmode.array_context import PrefusedFusionContractorArrayContext
-    
+def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, device_latency=None, device_memory_bandwidth=None, peak_flop_rate=None):
 
     logger.info("Transforming macrokernel")
     # macrokernels_to_tune = ["rhs"]
-
-    # Collect the untransformed subkernels to tune
     sk_list, pid_counts = collect_subkernels([tunit_dict])
-    # Collect the default transformed subkernels. For some reason, the default
-    # transformations on a single subkernel aren't necessarily the same as the default transformations
-    # on an entire macrokernel
-
-
-
     # macrokernels_to_tune = ["frozen_result"]
     # if in_actx is None:# and tunit_dict[1]["tunit"].default_entrypoint.name in macrokernels_to_tune:
     if tune:
@@ -254,15 +243,13 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, devic
     queue = cl.CommandQueue(cl_ctx,
                             properties=cl.command_queue_properties.PROFILING_ENABLE)
 
+    from meshmode.array_context import PrefusedFusionContractorArrayContext
     actx = PrefusedFusionContractorArrayContext(queue)
-    dtunit = actx.transform_loopy_program(tunit_dict[1]["tunit"])
-    #dsk_list, d_pid_counts = collect_subkernels([(None, {"tunit": dtunit, "args": None})])
 
     transformed_subkernels = []
-    for sk_dict in sk_list:#, dsk_dict in zip(sk_list):#, sk_list):#dsk_list):
+    for sk_dict in sk_list:
         pid = sk_dict["npid"]
         sk = sk_dict["sk"]
-        #dsk = dsk_dict["sk"]
 
         # TODO If the transformation selected is one that timed out, should
         # use the default transformations instead.
@@ -274,70 +261,33 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, devic
 
             # pid = unique_program_id(sk)
             # Tune the subkernel
-            print("SUBKERNEL", sk.default_entrypoint.name, pid)
             hjson_file_str = save_path + "/" + pid + ".hjson"
-            csv_file_str = save_path + "/" + pid + ".csv"
-
-            if exists(csv_file_str):
-
-                print("Found", csv_file_str)
-                trans_list = csv_to_trans_list(sk, csv_file_str)
-                print(trans_list)
-                #exit()
-                tsk = apply_transformation_list(sk, trans_list)[0]
-                transformed_subkernels.append((pid,tsk,))
-
-                #print("Applying to", sk.default_entrypoint.name)
-                #tsk = apply_transformation_list(
-                #    sk, hjson["transformations"])[0]
-                #transformed_subkernels.append((pid, tsk,))
-
-            elif exists(hjson_file_str) and  \
+            if exists(hjson_file_str) and  \
                tunit_dict[1]["tunit"].default_entrypoint.name not in tunit_to_avoid:
                # sk.default_entrypoint.name not in sk_to_avoid and \
                 print("Found", hjson_file_str)
                 hjson = load_hjson(hjson_file_str)
-                print("HJSON", hjson_file_str, hjson)
-                print("Applying to", sk.default_entrypoint.name)
+                #print("HJSON", hjson_file_str, hjson)
+                from .apply_transformations import apply_transformation_list
                 tsk = apply_transformation_list(
                     sk, hjson["transformations"])[0]
                 transformed_subkernels.append((pid, tsk,))
-            #else:
-            #    print("Can't find", hjson_file_str)
-            #    transformed_subkernels.append((pid, dsk,))
-            #"""
+
             else:
                 print("Can't find", hjson_file_str)
                 # Should probably apply the default transformations
                 # Currently fails
 
-                #if sk.default_entrypoint.name == "_create_fluid_state_2":
-                #  prina("HERE")
-                #  exit()
-
                 logger.info("ACTX TRANSFORMING")
                 tsk = actx.transform_loopy_program(sk)
                 transformed_subkernels.append((pid, tsk,))
                 logger.info("ACTX DONE TRANSFORMING")
-                #if pid == "b7b28d85f4bf310037abc45010bebab246a809d6c5c794bfff98fbe072b2a955":
-                #    print("Before transformation")
-                #    print(lp.generate_code_v2(sk).device_code())
-                #    print("After transformation")
-                #    print(lp.generate_code_v2(tsk).device_code())
-     
-                    #exit()
-                #    print("
-                #    print(sk)
-                #    print("After transformation")
-                #    print(tsk)
-                #    exit()
-
                 # transformed_subkernels.append(sk)
             # Transform ...
 
             # transformed_subkernels.append(transformed_subkernel)
-            #"""
-        #exit()
+
+        # exit()
 
         # print("PRE-TRANSFORMATION")
     # print(tunit_dict[1]["tunit"])
@@ -367,32 +317,14 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, devic
     #    transformed_subkernels_2.append((pid,tsk,))
     # transformed_subkernels = transformed_subkernels_2
 
-    #print("ORIGINAL TUNIT CODE")
-    #print(lp.generate_code_v2(tunit_dict[1]["tunit"]).device_code())
-
-    #print("DEFAULT TRANSFORMED TUNIT")
-    #print(lp.generate_code_v2(dtunit).device_code())
-    # transformed_tunit = lp.preprocess_program(transformed_tunit)
-    print("NEW TUNIT")
-    # print(transformed_tunit)
-
-    #transformed_tunit = assemble_transformed_macrokernel(
-    #    dtunit, [tsk[1] for tsk in transformed_subkernels])
-
-
-    # Somehow the default transformations are different if the entire macrokernel is transformed
-    # Compared to if the only a single subkernel is transformed.
-    #for tsk in transformed_subkernels:
-    #  print ("===============TRANSFORMED SUBKERNEL====================")
-    #  for instr in tsk[1].default_entrypoint.instructions:
-    #    print(instr.id, instr.depends_on)
-    #  print(lp.generate_code_v2(tsk[1]).device_code())
-
     transformed_tunit = assemble_transformed_macrokernel(
         tunit_dict[1]["tunit"], [tsk[1] for tsk in transformed_subkernels])
     # assert lp.has_schedulable_iname_nesting(tunit_dict[1]["tunit"])
     assert lp.has_schedulable_iname_nesting(transformed_tunit)
 
+    # transformed_tunit = lp.preprocess_program(transformed_tunit)
+    print("NEW TUNIT")
+    # print(transformed_tunit)
 
     # transformed_tunit = lp.linearize(transformed_tunit)
     # transformed_tunit = lp.save_and_reload_temporaries(transformed_tunit)
@@ -408,14 +340,6 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, devic
     # if transformed_tunit.default_entrypoint.name == "rhs":
     #    run_single_param_set_v2(actx.queue, transformed_tunit, [], generic_test)
     #    exit()
-
-    #print("=====================TUNIT FILE===================")
-    #print(tunit_dict[0])
-
-    print("TRANSFORMED TUNIT")
-    #print(lp.generate_code_v2(transformed_tunit).device_code())
-    #exit()
-
     return transformed_tunit, transformed_subkernels
 
 
@@ -691,7 +615,7 @@ def autotune_standalone_subkernel(sk, queue, program_id=None, normalized_program
             """
             input_space = createConfigSpace(queue, sk)
             print("TESTING YTOPT")
-            max_evals = 500#20#500#5#50
+            max_evals = 500#5#50
             ytopt_tuning(queue, sk, platform_id, input_space, program_id=program_id, normalized_program_id=normalized_program_id,
                          max_flop_rate=max_flop_rate,
                          device_memory_bandwidth=device_memory_bandwidth,
@@ -1439,136 +1363,35 @@ def main(args):
     if comm is not None:
         comm.Barrier()
 
-    from feintune.run_tests import get_knl_flops
-    from feintune.utils import get_indirection_args
     from meshmode.array_context import PrefusedFusionContractorArrayContext
     actx = PrefusedFusionContractorArrayContext(queue)
 
     for directory in directories:
         save_path = args.outdir#"./autotuning_files"  # directory + "/hjson3"
         # Really a tuple, not a dict
-        print("Getting pickled tunits")
         tunit_dicts = get_pickled_tunits(directory)
         tunit_dicts = sorted(tunit_dicts, key=lambda entry: get_knl_flops(entry[1]["tunit"]), reverse=True)
-        #tunit_dicts = tunit_dicts[:1]
+        tunit_dicts = tunit_dicts[0:]
 
         #print(tunit_dicts[0][1]["tunit"])
         #exit()
-        print("Assessing macrokernels")
         #for entry in tunit_dicts:
-        #    print(get_knl_flops(entry[1]["tunit"]), len(get_indirection_args(entry[1]["tunit"])))
+        #    print(get_knl_flops(entry[1]["tunit"]))
         #exit()
 
-        if False:  # Tune a single macrokernel at a time.
+        for tunit_dict in tunit_dicts:
 
-            tunit_dicts = [entry for entry in tunit_dicts if len(get_indirection_args(entry[1]["tunit"])) == 0]
-            macrokernel_times = []
-            for num, tunit_dict in enumerate(tunit_dicts):
-                print(f"!!!!!!!!!!!!Tunit {num}!!!!!!!!!!!!!!!!!!")
-
-
-                transformed_tunit, transformed_subkernels = transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False,
-                                                                                  device_latency=device_latency, 
-                                                                                  device_memory_bandwidth=device_memory_bandwidth, 
-                                                                                  peak_flop_rate=clpeak_flop_rate)
-                #transformed_tunit_default = actx.transform_loopy_program(tunit_dict[1]["tunit"])
-                transformed_tunit_default, transformed_subkernels_default = transform_macrokernel(tunit_dict, save_path + "_default", in_actx=actx, tune=False)
-
-                # test_kernels(transformed_subkernels_default, queue, save_path=None, device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, peak_flop_rate=clpeak_flop_rate)
-
-                # Apparently transformations can affect the flop count. Just calculate the base flops and use that.
-                base_flops = get_knl_flops(tunit_dict[1]["tunit"])
-                #print("KERNEL FLOPS:", get_knl_flops(tunit_dict[1]["tunit"]), get_knl_flops(transformed_tunit),
-                #        get_knl_flops(transformed_tunit_default))
-
-                # Would need to save the indirection arrays with the kernel to test the transformations
-                # with indirection kernels
-                if len(get_indirection_args(transformed_tunit)) == 0:
-                    print(transformed_tunit_default)
-                    
-                    ret_dict2 = run_single_param_set_v2(queue, transformed_tunit_default, [], generic_test,
-                                max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
-                                device_latency=device_latency, flops=base_flops)
-
-                    #print(transformed_tunit)
-                    #"""
-                    ret_dict1 = run_single_param_set_v2(queue, transformed_tunit, [], generic_test,
-                                max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
-                                device_latency=device_latency, flops=base_flops, ignore_local_memory_usage=True)
-                    #print(ret_dict)
-                    #print("Combined - Transformed time:", ret_dict1["data"]["avg_time"]) 
-                    print("TIMING RESULT")
-                    print("Combined - Default time:", ret_dict2["data"]["wall_clock_time"], "Combined - Transformed time:", ret_dict1["data"]["wall_clock_time"])
-                    macrokernel_times.append((transformed_tunit.default_entrypoint.name, ret_dict2["data"]["wall_clock_time"], ret_dict1["data"]["wall_clock_time"],base_flops,))
-                    #exit()
-                    #"""
-                else:
-                    print("SKIPPING TEST DUE TO INDIRECTION")
-                for name, default, tuned, base_flops in macrokernel_times:
-                    print(name, default, tuned, base_flops,)
-
-        if True:  # Tune all of the subkernels
             from feintune.utils import tunit_to_einsum
             print("Done collecting tunits")
             # ID changes based on whether python was run with -O
-            print("ONLY TUNING TUNITS WITHOUT INDIRECTION")
-            #tunit_dicts = [entry for entry in tunit_dicts if len(get_indirection_args(entry[1]["tunit"])) == 0]
-            sk_list, pid_dict = collect_subkernels(tunit_dicts)
-            sk_list = sorted(sk_list, key=lambda e: get_knl_flops(e["sk"]), reverse=True)#[20:21]#[112:]
-            """
-            for e in sk_list:
-                ests = list(get_einsum_types(e["sk"]))
-                tup = None
-                count = 0
-                if len(ests) > 0:
-                    est = ests[0]
-                    tup = (len(est[0]), len(est[1]))
-                    et, count = list(get_einsum_counts(e["sk"]).items())[0]
-                print(e["sk"].default_entrypoint.name, count, tup)
-            exit()
-            """
+            sk_list, pid_dict = collect_subkernels([tunit_dict])
+            #sk_list = sorted(sk_list, key=lambda e: get_knl_flops(e["sk"]), reverse=True)#[20:21]#[112:]
+
             #"""
             #sk_list = sorted(sk_list, key=lambda e: e["sk"].default_entrypoint.name)
-            """
-            for item in sk_list:
-                #print(item["sk"].default_entrypoint.name)
-                if len(get_indirection_arrays(item["sk"])) == 0:
-                    ret_dict2 = run_single_param_set_v2(queue, item["sk"], [], generic_test,
-                                    max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
-                                    device_latency=device_latency)
-            exit()
-            """
-            if False:
-                for item in sk_list[:]:
-                    sk = item["sk"]
-                    print(sk)
-                    print(item["pid"], item["npid"])
-                    try:
-                        if len(get_indirection_arrays(sk)) == 0:
-                            einsum = tunit_to_einsum(sk)
-                            print(einsum)
-                    except NotImplementedError as e:
-                        print(e)
-                    #except RuntimeError as e:
-                    #    print("RUNTIME ERROR")
-                    #    print(sk)
-                    #    print(e)
-                    except ValueError as e:
-                        print("VALUE ERROR")
-                        #print(e)
-                    #except AttributeError as e:
-                        # What is this aggregate attribute?
-                    #    print("ATTRIBUTE ERROR")
-                    #print(unique_program_id(sk))
-                    #if unique_program_id(sk) in {"2a82b7f82159384d828d2b94704327f0fcf46209ad6a43bcc9842b43beeb56c2",
-                    #                             "9701d4c523fff28c6a3d78b294f1cfc8f5766aca1380780e340bdba4d4a3a863",
-                    #                             "d5ef78e056a3aa17951ef94b683f8a3a683ddc7eda0d9cb8ea20c754a6533e9d",
-                    #                             "f3dbebb372a1f5e2e7002640108747dd3274fab9d9f89f50ae1581fe482871fb"}:
-                    #    einsum = tunit_to_einsum(sk)
-                    #    exit()
-                #exit()
-                #"""
-                #exit()
+            #for item in sk_list:
+            #    print(item["sk"].default_entrypoint.name)
+
             # sk_list = [tunit_dict[1]["tunit"] for tunit_dict in tunit_dicts]
             # """
             # sk_list = [sk for _, sk, _ in sk_list]
@@ -1605,8 +1428,41 @@ def main(args):
                                            device_memory_bandwidth=device_memory_bandwidth, peak_flop_rate=clpeak_flop_rate)
             # compare_weighted_avg_frac_rooflines(directory, pid_dict)
 
-    exit()
 
+
+
+
+            transformed_tunit, transformed_subkernels = transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, peak_flop_rate=clpeak_flop_rate)
+            #transformed_tunit_default, transformed_subkernels_default = transform_macrokernel(tunit_dict, save_path + "_default", in_actx=actx, tune=False, device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, peak_flop_rate=clpeak_flop_rate)
+
+            #print("============INPUT TUNIT===============")
+            #print(tunit_dict[1]["tunit"])
+
+            #print("=============DEFAULT TRANSFORMED (INDIRECT)===================")
+            #print(transformed_tunit_default)
+
+            #print("=================DEFAULT TRANFORMED (DIRECT)==================")
+            transformed_tunit_default = actx.transform_loopy_program(tunit_dict[1]["tunit"])
+            #print(transformed_tunit_default)
+            #exit()
+
+            # test_kernels(transformed_subkernels_default, queue, save_path=None, device_latency=device_latency, device_memory_bandwidth=device_memory_bandwidth, peak_flop_rate=clpeak_flop_rate)
+
+            # Would need to save the indirection arrays with the kernel
+            if True:#len(get_indirection_arrays(transformed_tunit)) == 0: #any([arg.dtype.dtype == np.int8 for arg in transformed_tunit.default_entrypoint.args]):
+                ret_dict1 = run_single_param_set_v2(queue, transformed_tunit, [], generic_test,
+                            max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
+                            device_latency=device_latency, ignore_local_memory_usage=True)
+                print(ret_dict)
+                print("Combined: Transformed time:", ret_dict1["data"]["avg_time"]) 
+
+                #print(transformed_tunit_default)
+                #ret_dict2 = run_single_param_set_v2(queue, transformed_tunit_default, [], generic_test,
+                #            max_flop_rate=clpeak_flop_rate, device_memory_bandwidth=device_memory_bandwidth,
+                #            device_latency=device_latency, ignore_local_memory_usage=True)
+                #print("Combined - Default time:", ret_dict2["data"]["avg_time"], "Combined - Transformed time:", ret_dict1["data"]["avg_time"])
+                exit()
+    exit()
 
 if __name__ == "__main__":
     if use_charm:

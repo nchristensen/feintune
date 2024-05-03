@@ -147,6 +147,7 @@ def tunit_to_einsum(t_unit):
 
 
 def unique_program_id(tunit, attempt_normalization=True):
+    #attempt_normalization = False
     from loopy.tools import LoopyKeyBuilder
     kb = LoopyKeyBuilder()
 

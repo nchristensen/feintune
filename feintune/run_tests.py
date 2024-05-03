@@ -303,6 +303,7 @@ def measure_execution_time(queue, tunit, arg_dict, nruns, warmup_runs, pollute_b
 
     #codegen = lp.generate_code_v2(tunit) 
     #code = lp.generate_code_v2(tunit).device_code()
+    #print(code)
     #print(otunit)
     # Apparently only the final event object is returned
     # in the case of global barriers.

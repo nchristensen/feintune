@@ -245,7 +245,8 @@ class ObjectiveFunction(object):
 def csv_to_trans_list(knl, csv_file_str, timeout=None):
     from pandas import read_csv
     df = read_csv(csv_file_str)
-    minrow = df[df['RUNTIME'] == df['RUNTIME'].min()]
+    #df = df[df["prefetch"] == 0]
+    df = df[df['RUNTIME'] == df['RUNTIME'].min()]
 
     p = df.to_dict(orient='records')[0]
 
