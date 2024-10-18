@@ -272,7 +272,7 @@ def csv_to_trans_list(knl, csv_file_str, timeout=None):
     #from feinsum.codegen.loopy import generate_loopy
 
     trans_list = get_trans_list(knl, params, **kwargs)
-    return trans_list
+    return p["RUNTIME"], trans_list
 
 
 def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, normalized_program_id=None, max_flop_rate=np.inf, device_memory_bandwidth=np.inf, device_latency=0, timeout=None, save_path=None, max_evals=100, required_new_evals=None, eval_str="threadpool"):
@@ -609,7 +609,7 @@ def ytopt_tuning(in_queue, knl, platform_id, input_space, program_id=None, norma
                 """
                 '''
             try:
-                trans_list = csv_to_trans_list(knl, csv_file_str, timeout=timeout)
+                rt, trans_list = csv_to_trans_list(knl, csv_file_str, timeout=timeout)
 
                 #hjson_file_str = save_path + "/" + pid + ".hjson"
                 tdict = run_single_param_set_v2(in_queue, knl, trans_list, generic_test,

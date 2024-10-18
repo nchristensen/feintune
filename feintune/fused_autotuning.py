@@ -259,6 +259,7 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, devic
     #dsk_list, d_pid_counts = collect_subkernels([(None, {"tunit": dtunit, "args": None})])
 
     transformed_subkernels = []
+    pids = []
     for sk_dict in sk_list:#, dsk_dict in zip(sk_list):#, sk_list):#dsk_list):
         pid = sk_dict["npid"]
         sk = sk_dict["sk"]
@@ -276,15 +277,25 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, devic
             # Tune the subkernel
             print("SUBKERNEL", sk.default_entrypoint.name, pid)
             hjson_file_str = save_path + "/" + pid + ".hjson"
+            hjson_file_str_default = save_path + "/" + pid + "_default.hjson"
             csv_file_str = save_path + "/" + pid + ".csv"
+
+            if exists(hjson_file_str_default):
+                default_time = load_hjson(hjson_file_str_default)["data"]["avg_time"]
+            else:
+                default_time = np.inf
 
             if exists(csv_file_str):
 
+                pids.append(pid)
                 print("Found", csv_file_str)
-                trans_list = csv_to_trans_list(sk, csv_file_str)
+                trans_rt, trans_list = csv_to_trans_list(sk, csv_file_str)
                 print(trans_list)
                 #exit()
-                tsk = apply_transformation_list(sk, trans_list)[0]
+                if trans_rt < default_time:
+                    tsk = apply_transformation_list(sk, trans_list)[0]
+                else:
+                    tsk = actx.transform_loopy_program(sk)
                 transformed_subkernels.append((pid,tsk,))
 
                 #print("Applying to", sk.default_entrypoint.name)
@@ -297,10 +308,14 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, devic
                # sk.default_entrypoint.name not in sk_to_avoid and \
                 print("Found", hjson_file_str)
                 hjson = load_hjson(hjson_file_str)
+                trans_rt = hjson["data"]["avg_time"]
                 print("HJSON", hjson_file_str, hjson)
                 print("Applying to", sk.default_entrypoint.name)
-                tsk = apply_transformation_list(
-                    sk, hjson["transformations"])[0]
+                if trans_rt < default_time:
+                    tsk = apply_transformation_list(
+                        sk, hjson["transformations"])[0]
+                else:
+                    tsk = actx.transform_loopy_program(sk)
                 transformed_subkernels.append((pid, tsk,))
             #else:
             #    print("Can't find", hjson_file_str)
@@ -373,7 +388,7 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, devic
     #print("DEFAULT TRANSFORMED TUNIT")
     #print(lp.generate_code_v2(dtunit).device_code())
     # transformed_tunit = lp.preprocess_program(transformed_tunit)
-    print("NEW TUNIT")
+    #print("NEW TUNIT")
     # print(transformed_tunit)
 
     #transformed_tunit = assemble_transformed_macrokernel(
@@ -413,9 +428,11 @@ def transform_macrokernel(tunit_dict, save_path, in_actx=None, tune=False, devic
     #print(tunit_dict[0])
 
     print("TRANSFORMED TUNIT")
+    #print(pid)
+    #for pid in pids:
+    #    print(pid)
     #print(lp.generate_code_v2(transformed_tunit).device_code())
     #exit()
-
     return transformed_tunit, transformed_subkernels
 
 
@@ -1257,6 +1274,9 @@ def autotune_standalone_subkernels(queue, sk_list, save_path=None, device_latenc
                 if len(einsum_counts) > 0:
 
                     if len(einsum_counts) > 1:
+                        print(sk)
+                        print(lp.generate_code_v2(sk).device_code())
+                        print(einsum_counts)
                         raise ValueError("Subkernel has multiple einsum types")
 
                     einsum_type, einsum_count = einsum_counts[0]
@@ -1514,7 +1534,7 @@ def main(args):
             print("ONLY TUNING TUNITS WITHOUT INDIRECTION")
             #tunit_dicts = [entry for entry in tunit_dicts if len(get_indirection_args(entry[1]["tunit"])) == 0]
             sk_list, pid_dict = collect_subkernels(tunit_dicts)
-            sk_list = sorted(sk_list, key=lambda e: get_knl_flops(e["sk"]), reverse=True)#[20:21]#[112:]
+            sk_list = sorted(sk_list, key=lambda e: get_knl_flops(e["sk"]), reverse=False)#[20:21]#[112:]
             """
             for e in sk_list:
                 ests = list(get_einsum_types(e["sk"]))
