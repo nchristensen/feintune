@@ -14,6 +14,7 @@ import hjson
 from feintune.generators import createConfigSpace
 from time import time
 import logging
+from immutabledict import immutabledict
 
 # Ignore some annoying warnings relating to pandas.concat
 import warnings
@@ -103,7 +104,12 @@ def strip_unused_dependencies(instructions):
                 barrier_dep_count[dependency] += 1
 
         new_instruction = instruction.copy()
-        new_instruction.depends_on = frozenset(new_dependencies)
+        if new_instruction.depends_on != frozenset(new_dependencies):
+            #print(instruction.id, instruction.depends_on, instruction.happens_after)
+            #print(new_dependencies)
+            #new_instruction.depends_on = frozenset(new_dependencies)
+            new_instruction.happens_after = immutabledict({entry: lp.HappensAfter(variable_name=None, instances_rel=None) for entry in new_dependencies})
+
         new_instructions.append(new_instruction)
 
     # Strip off unused barrier instructions
