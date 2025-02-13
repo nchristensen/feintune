@@ -2285,5 +2285,6 @@ def apply_transformation_list(tunit, transformations):
         print("Codegen time:", end-start)
         # exit()
 
+    tunit = lp.allocate_temporaries_for_base_storage(tunit)
     print("RETURNING FROM APPLYING TRANSFORMATIONS")
     return tunit, sb_tunit
